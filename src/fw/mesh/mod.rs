@@ -335,6 +335,25 @@ pub struct TxBinaryReq {
     pub req_data: heapless::Vec<u8, MAX_BINARY_REQ_PARAMS>,
 }
 
+/// Maximum body carried in a `CMD_SEND_ANON_REQ`.
+///
+/// Capped by `meshcore::payload::anon_req::MAX_PASSWORD_LEN` — the ANON_REQ
+/// plaintext is `[tag:4][body...]` inside a fixed 32-byte block, and `encrypt`
+/// rejects anything longer. A REGIONS request is 1–2 bytes, so this is ample.
+pub const MAX_ANON_REQ_DATA: usize = ::meshcore::payload::anon_req::MAX_PASSWORD_LEN;
+
+/// Unauthenticated `PAYLOAD_TYPE_ANON_REQ` with an opaque
+/// `[anon_req_type:1][params...]` body — the app's **Discover Regions**
+/// (`ANON_REQ_TYPE_REGIONS = 0x01`) transport.
+///
+/// Unlike [`TxBinaryReq`] this needs no prior login: the repeater derives the
+/// shared secret from the sender identity carried in the packet itself.
+pub struct TxAnonReq {
+    pub pub_key: [u8; ::meshcore::PUB_KEY_SIZE],
+    pub tag: u32,
+    pub data: heapless::Vec<u8, MAX_ANON_REQ_DATA>,
+}
+
 pub struct TxTelemReq {
     pub pub_key: [u8; 32],
     pub tag: u32,
@@ -360,6 +379,7 @@ pub enum TxRequest {
     Login(TxLogin),
     AdminStatusReq(TxAdminStatusReq),
     BinaryReq(TxBinaryReq),
+    AnonReq(TxAnonReq),
     TelemReq(TxTelemReq),
     DiscoveryReq(TxDiscoveryReq),
     ControlData(TxControlData),
