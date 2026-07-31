@@ -419,11 +419,18 @@ pub async fn set_boost_rx(enabled: bool) -> Result<(), kv::KvError> {
 // The companion `SET_FLOOD_SCOPE` (0x36) command lets ops re-key or clear
 // the scope at runtime, and the change is persisted so it survives reboots.
 
-/// First-boot default flood-scope key: SHA-256-truncated from `"dk-bornhack"`.
+/// First-boot default flood-scope key for the `dk-bornhack` region.
 /// Derived on demand — no flash write at first boot.  Used only when neither
 /// the MeshCore-1.15 `def_scope` slot nor a phone-set scope is present.
+///
+/// Uses [`meshcore::packet::region_key`], i.e. `SHA-256("#dk-bornhack")[0..16]`.
+/// This previously called `channel::key_from_hashtag("dk-bornhack")`, which
+/// hashes the bare name (and lowercases it) — a different key, so every
+/// region-scoped flood packet carried a transport code no reference node could
+/// match, and every inbound one was dropped as a region mismatch. Region keys
+/// and channel keys are separate derivations; do not swap them back.
 pub fn dk_bornhack_default_scope() -> [u8; 16] {
-    meshcore::channel::key_from_hashtag("dk-bornhack")
+    meshcore::packet::region_key("dk-bornhack")
 }
 
 // ---------------------------------------------------------------------------
