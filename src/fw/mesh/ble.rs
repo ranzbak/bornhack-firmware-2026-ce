@@ -1335,6 +1335,23 @@ async fn nus_peripheral_loop<C>(
                                                 companion::ErrorCode::UnsupportedCmd,
                                             )
                                         }
+                                        // composeMsgPacket / sendCommandData refuse
+                                        // text over MAX_TEXT_LEN (158 with the
+                                        // extended attempt tail); sendMessage then
+                                        // fails and upstream answers TABLE_FULL.
+                                        Some(_)
+                                            if text.len() > txt_msg::MAX_TEXT_LEN
+                                                || (attempt > 3
+                                                    && text.len() > txt_msg::MAX_TEXT_LEN - 2) =>
+                                        {
+                                            defmt::warn!(
+                                                "companion: SEND_TXT_MSG text too long ({=usize}B)",
+                                                text.len()
+                                            );
+                                            companion::Response::Error(
+                                                companion::ErrorCode::TableFull,
+                                            )
+                                        }
                                         Some(c) => {
                                             let mut v: heapless::Vec<u8, { msg_queue::MAX_TEXT }> =
                                                 heapless::Vec::new();
