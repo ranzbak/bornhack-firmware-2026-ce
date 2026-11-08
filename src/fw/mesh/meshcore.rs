@@ -1304,7 +1304,10 @@ async fn try_handle_txt_msg(
     // 4-byte author prefix) into msg_queue; the BLE task splits it back out
     // into `ContactMsg.signature` when forwarding to the companion app.
     let is_plain = dec.txt_type() == txt_msg::TXT_TYPE_PLAIN;
-    let is_cli = dec.txt_type() == txt_msg::TXT_TYPE_CLI_DATA;
+    // CLI_COMMAND (1.18): a remote node runs a CLI command on us. Like the
+    // reference companion without remote-CLI permission, hand it to the app.
+    let is_cli = dec.txt_type() == txt_msg::TXT_TYPE_CLI_DATA
+        || dec.txt_type() == txt_msg::TXT_TYPE_CLI_COMMAND;
     let is_signed = dec.txt_type() == txt_msg::TXT_TYPE_SIGNED;
 
     if is_signed && dec.text.len() < 4 {

@@ -1286,17 +1286,35 @@ async fn nus_peripheral_loop<C>(
                                     text,
                                 }) => {
                                     // Look up the full pub_key by prefix scan.
+                                    use meshcore::payload::txt_msg;
                                     let recipient = contacts::ContactStore::new()
                                         .find_by_prefix(&pub_key_prefix)
                                         .await;
+                                    // CLI types (reference MyMesh.cpp CMD_SEND_TXT_MSG): stamped
+                                    // with our own unique clock so the receiver's replay check
+                                    // never trips, and never ACKed (expected_ack = 0).
+                                    let is_cli = txt_type == txt_msg::TXT_TYPE_CLI_DATA
+                                        || txt_type == txt_msg::TXT_TYPE_CLI_COMMAND;
+                                    let timestamp = if is_cli {
+                                        crate::unix_now_unique().unwrap_or(timestamp)
+                                    } else {
+                                        timestamp
+                                    };
                                     match recipient {
                                         None => {
                                             defmt::warn!(
                                                 "companion: SEND_TXT_MSG recipient not found for prefix {=[u8]:02x}",
                                                 pub_key_prefix
                                             );
+                                            // Reference ERR_CODE_NOT_FOUND (2).
                                             companion::Response::Error(
                                                 companion::ErrorCode::InvalidParameter,
+                                            )
+                                        }
+                                        Some(_) if !is_cli && txt_type != txt_msg::TXT_TYPE_PLAIN => {
+                                            // Reference ERR_CODE_UNSUPPORTED_CMD (1).
+                                            companion::Response::Error(
+                                                companion::ErrorCode::InvalidCommand,
                                             )
                                         }
                                         Some(c) => {
@@ -1310,8 +1328,10 @@ async fn nus_peripheral_loop<C>(
                                             // Mirror phone-originated PMs into the
                                             // on-device inbox so the user can see
                                             // their own messages alongside replies.
-                                            if let Ok(s) = core::str::from_utf8(&v) {
-                                                super::pm_inbox::note_outgoing(&c.pub_key, s);
+                                            if !is_cli {
+                                                if let Ok(s) = core::str::from_utf8(&v) {
+                                                    super::pm_inbox::note_outgoing(&c.pub_key, s);
+                                                }
                                             }
                                             match crate::tx_send(crate::TxRequest::PrivateMsg(
                                                 crate::TxPrivateMsg {
@@ -1334,10 +1354,14 @@ async fn nus_peripheral_loop<C>(
                                                     pfx[4] = flags;
                                                     pfx[5..5 + text_len]
                                                         .copy_from_slice(&text[..text_len]);
-                                                    let expected_ack = meshcore::payload::txt_msg::compute_ack_hash(
-                                                        &pfx[..5 + text_len],
-                                                        &ctx.pub_key,
-                                                    );
+                                                    let expected_ack = if is_cli {
+                                                        0
+                                                    } else {
+                                                        txt_msg::compute_ack_hash(
+                                                            &pfx[..5 + text_len],
+                                                            &ctx.pub_key,
+                                                        )
+                                                    };
                                                     let est_timeout_ms = if is_flood {
                                                         30_000u32
                                                     } else {

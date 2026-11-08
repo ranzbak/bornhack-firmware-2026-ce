@@ -490,6 +490,21 @@ pub fn unix_now() -> Option<u32> {
     })
 }
 
+/// Like [`unix_now`], but strictly increasing across calls (the reference's
+/// `getCurrentTimeUnique`), so back-to-back CLI commands never reuse a
+/// timestamp and trip the receiver's replay protection.
+#[cfg(feature = "embassy-core")]
+pub fn unix_now_unique() -> Option<u32> {
+    static LAST_UNIQUE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+    let now = unix_now()?;
+    let prev = LAST_UNIQUE
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |last| {
+            Some(if now <= last { last + 1 } else { now })
+        })
+        .unwrap_or(0);
+    Some(if now <= prev { prev + 1 } else { now })
+}
+
 /// MeshCore node name cached from KV for synchronous access by the display
 /// renderer. Populated by the BLE task at startup (after reading from flash)
 /// and on every SET_ADVERT_NAME update.  Empty until the BLE task has
