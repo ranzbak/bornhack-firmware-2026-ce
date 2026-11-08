@@ -1672,8 +1672,9 @@ async fn nus_peripheral_loop<C>(
                                     cr,
                                     client_repeat,
                                 }) => {
-                                    // Validate ranges per MeshCore reference firmware.
-                                    if (300_000..=2_500_000).contains(&freq_khz)
+                                    // Validate ranges per MeshCore reference firmware
+                                    // (MyMesh.cpp CMD_SET_RADIO_PARAMS: freq 150000..=2500000 kHz).
+                                    if (150_000..=2_500_000).contains(&freq_khz)
                                         && (7_000..=500_000).contains(&bw_hz)
                                         && (5..=12).contains(&sf)
                                         && (5..=8).contains(&cr)
