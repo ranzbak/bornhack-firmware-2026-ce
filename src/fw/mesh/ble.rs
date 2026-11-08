@@ -1427,6 +1427,16 @@ async fn nus_peripheral_loop<C>(
                                     }
                                 }
 
+                                // Upstream answers ERR_CODE_NOT_FOUND when getChannel()
+                                // fails (index >= MAX_GROUP_CHANNELS).
+                                // EXCEPTION: upstream still sends on an empty slot
+                                // (all-zero key); the badge refuses it as NOT_FOUND.
+                                Ok(companion::cmd::Command::SendChannelMessage { channel, .. })
+                                    if channels::get(channel).await.is_none() =>
+                                {
+                                    defmt::warn!("companion: SEND_CHANNEL_MSG ch={=u8} not found", channel);
+                                    companion::Response::Error(companion::ErrorCode::NotFound)
+                                }
                                 Ok(companion::cmd::Command::SendChannelMessage {
                                     channel,
                                     timestamp,
@@ -1496,6 +1506,17 @@ async fn nus_peripheral_loop<C>(
                                     companion::Response::Ok
                                 }
 
+                                // Upstream order: getChannel() fails → NOT_FOUND,
+                                // then reserved type / oversize → ILLEGAL_ARG.
+                                // (Short frames and bad path_len are Rejected by
+                                // the parser.) EXCEPTION: upstream sends on an
+                                // empty slot (all-zero key); we answer NOT_FOUND.
+                                Ok(companion::cmd::Command::SendChannelData { channel_idx, .. })
+                                    if channels::get(channel_idx).await.is_none() =>
+                                {
+                                    defmt::warn!("companion: SEND_CHANNEL_DATA ch={=u8} not found", channel_idx);
+                                    companion::Response::Error(companion::ErrorCode::NotFound)
+                                }
                                 Ok(companion::cmd::Command::SendChannelData {
                                     data_type,
                                     channel_idx,
