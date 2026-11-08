@@ -364,6 +364,12 @@ pub static FORCE_FLUSH_PENDING: AtomicBool = AtomicBool::new(false);
 /// When true, #blinkme channel LED commands are ignored.
 pub static IGNORE_BLINK: AtomicBool = AtomicBool::new(false);
 
+/// When true, incoming region-scoped (TransportFlood) packets whose transport
+/// code does not match our flood-scope key are dropped.  When false (default)
+/// they are still shown, but never relayed by client-repeat.  Toggled from the
+/// MeshCore → Region filter menu entry.
+pub static REGION_FILTER: AtomicBool = AtomicBool::new(false);
+
 /// When true, the pet severity-change buzzer alert is suppressed.
 /// Toggled from the Bornagotchi → Mute menu entry.
 pub static GAME_MUTE: AtomicBool = AtomicBool::new(false);

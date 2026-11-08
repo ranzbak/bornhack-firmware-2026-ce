@@ -374,10 +374,17 @@ pub async fn run_meshcore_listener<'a>(
                             msg.payload.len(),
                         );
 
-                        // Region filter: if we have a flood-scope key and this is a
+                        // Region check: if we have a flood-scope key and this is a
                         // TransportFlood packet, verify the transport code.  A mismatch
-                        // means the packet belongs to a different region — drop it silently.
-                        if matches!(msg.route, RouteType::TransportFlood) {
+                        // means the packet belongs to a different region.  With the
+                        // (opt-in) region filter on it is dropped; otherwise it is
+                        // still handled locally but never relayed, so client-repeat
+                        // doesn't carry foreign-region floods into ours.
+                        // Transport code 0 is unscoped (MeshCore 1.18, #3568): the
+                        // reference `calc_transport_code` never yields 0, so it can only
+                        // mean "no region" and is accepted like a plain flood.
+                        let mut foreign_region = false;
+                        if matches!(msg.route, RouteType::TransportFlood) && msg.transport_code != 0 {
                             let key = crate::FLOOD_SCOPE_KEY.lock(|c| c.get());
                             defmt::debug!(
                                 "TransportFlood pkt: type={=u8} tc={=u16:#06x} key_set={=bool}",
@@ -397,21 +404,29 @@ pub async fn run_meshcore_listener<'a>(
                                     expected,
                                 );
                                 if msg.transport_code != expected {
+                                    let drop = crate::REGION_FILTER
+                                        .load(core::sync::atomic::Ordering::Relaxed);
                                     defmt::info!(
-                                        "TransportFlood region mismatch (got {=u16:#06x}, expected {=u16:#06x}) — dropped",
+                                        "TransportFlood region mismatch (got {=u16:#06x}, expected {=u16:#06x}) — {=str}",
                                         msg.transport_code,
-                                        expected
+                                        expected,
+                                        if drop { "dropped" } else { "accepted, not relayed" },
                                     );
-                                    continue;
+                                    if drop {
+                                        continue;
+                                    }
+                                    foreign_region = true;
                                 }
                             }
                             // No key set → wildcard: accept all TransportFlood
                             // packets.
                         }
 
-                        // Client-repeat relay (if enabled).
-                        if let Some(relay_req) = super::repeater::try_relay(&msg, identity) {
-                            let _ = crate::tx_send(relay_req);
+                        // Client-repeat relay (if enabled) — own region / unscoped only.
+                        if !foreign_region {
+                            if let Some(relay_req) = super::repeater::try_relay(&msg, identity) {
+                                let _ = crate::tx_send(relay_req);
+                            }
                         }
 
                         // Mirror the original firmware: flood routes carry the wire-encoded

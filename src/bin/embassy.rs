@@ -493,6 +493,7 @@ async fn main(spawner: Spawner) {
             bornhack_aegg::ADVERT_INTERVAL_HOURS.store(adv.interval_hours, Relaxed);
 
             bornhack_aegg::IGNORE_BLINK.store(settings::get_ignore_blink().await, Relaxed);
+            bornhack_aegg::REGION_FILTER.store(settings::get_region_filter().await, Relaxed);
             bornhack_aegg::LORA_DISABLED.store(!settings::get_lora_enabled().await, Relaxed);
             bornhack_aegg::BLE_DISABLED.store(!settings::get_ble_enabled().await, Relaxed);
         }

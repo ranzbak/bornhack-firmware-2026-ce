@@ -1217,6 +1217,22 @@ fn action_ignore_blink() {
     crate::OTHER_PARAMS_CHANGED_SIGNAL.signal(());
 }
 
+fn label_region_filter() -> &'static str {
+    if crate::REGION_FILTER.load(Ordering::Relaxed) {
+        "Region filter: ON"
+    } else {
+        "Region filter: OFF"
+    }
+}
+
+fn action_region_filter() {
+    let cur = crate::REGION_FILTER.load(Ordering::Relaxed);
+    crate::REGION_FILTER.store(!cur, Ordering::Relaxed);
+    // Persisted alongside ignore_blink by the OtherParams persister arm.
+    #[cfg(all(feature = "mesh", feature = "embassy-core"))]
+    crate::OTHER_PARAMS_CHANGED_SIGNAL.signal(());
+}
+
 fn action_telemetry_toggle() {
     // Cycle: No (0) → Contacts (1) → Yes (2) → No.
     let cur = crate::TELEMETRY_MODE_BASE.load(Ordering::Relaxed);
@@ -1766,7 +1782,7 @@ static LORA_MENU_ITEMS: [MenuItem; 5] = [
     },
 ];
 
-static MESHCORE_MENU_ITEMS: [MenuItem; 12] = [
+static MESHCORE_MENU_ITEMS: [MenuItem; 13] = [
     MenuItem {
         label: || "< Back",
         kind: MenuItemKind::Back,
@@ -1812,6 +1828,10 @@ static MESHCORE_MENU_ITEMS: [MenuItem; 12] = [
     MenuItem {
         label: label_ignore_blink,
         kind: MenuItemKind::Action(action_ignore_blink),
+    },
+    MenuItem {
+        label: label_region_filter,
+        kind: MenuItemKind::Action(action_region_filter),
     },
     MenuItem {
         label: || "",

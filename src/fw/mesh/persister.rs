@@ -203,6 +203,11 @@ async fn dispatch(which: Which) {
                 Ok(()) => defmt::debug!("settings: ignore_blink={=bool} persisted", ignore),
                 Err(e) => defmt::warn!("settings: ignore_blink persist failed: {:?}", e),
             }
+            let region_filter = crate::REGION_FILTER.load(Relaxed);
+            match settings::set_region_filter(region_filter).await {
+                Ok(()) => defmt::debug!("settings: region_filter={=bool} persisted", region_filter),
+                Err(e) => defmt::warn!("settings: region_filter persist failed: {:?}", e),
+            }
         }
         Which::Advert => {
             let cfg = settings::AdvertConfig {

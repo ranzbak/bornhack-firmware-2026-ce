@@ -207,6 +207,25 @@ pub async fn set_ignore_blink(ignore: bool) -> Result<(), kv::KvError> {
 }
 
 // ---------------------------------------------------------------------------
+// Region filter  (menu only — not part of the companion protocol)
+// ---------------------------------------------------------------------------
+
+/// Read the persisted incoming region-filter flag.  Returns `false`
+/// (accept other regions) if not stored.
+pub async fn get_region_filter() -> bool {
+    let mut b = [0u8; 1];
+    match ns().get("rgn_filt", &mut b).await {
+        Ok(1) => b[0] != 0,
+        _ => false,
+    }
+}
+
+/// Persist the incoming region-filter flag to flash.
+pub async fn set_region_filter(on: bool) -> Result<(), kv::KvError> {
+    ns().set("rgn_filt", &[on as u8], true).await
+}
+
+// ---------------------------------------------------------------------------
 // LoRa enabled  (menu only — not part of the companion protocol)
 // ---------------------------------------------------------------------------
 

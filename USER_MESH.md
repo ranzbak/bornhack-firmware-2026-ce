@@ -14,6 +14,14 @@ Three things must match across all badges in the local mesh:
 
 If you can't see anyone else's adverts after a minute, double-check the preset.
 
+### Region filter
+
+Messages can be scoped to a MeshCore **region** (the badge ships scoped to
+`dk-bornhack`). By default the badge shows messages from **every** region.
+Turn on **Config → MeshCore → Region filter** to hide messages that were sent
+to a different region; only messages for your own region (and unscoped ones)
+are shown then. The setting is remembered across reboots.
+
 ## Adverts (Advert screen)
 
 Whenever a badge / phone / repeater is alive on the mesh it periodically broadcasts an **advert** — its public name, identity hash and capabilities. Your badge logs these as they arrive.
