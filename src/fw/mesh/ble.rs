@@ -1761,6 +1761,54 @@ async fn nus_peripheral_loop<C>(
                                     sent_resp
                                 }
 
+                                // SEND_ANON_REQ (0x39) — the app's "Discover
+                                // Regions" transport. No login needed; the
+                                // repeater answers ANON_REQ_TYPE_REGIONS only on
+                                // a DIRECT route, so a target with no known path
+                                // will get silence (send_anon_request logs it).
+                                Ok(companion::cmd::Command::SendAnonReq { pub_key, data }) => {
+                                    let tag = crate::unix_now().unwrap_or(0);
+                                    let mut d: heapless::Vec<u8, { crate::MAX_ANON_REQ_DATA }> =
+                                        heapless::Vec::new();
+                                    let copy = data.len().min(crate::MAX_ANON_REQ_DATA);
+                                    let _ = d.extend_from_slice(&data[..copy]);
+                                    if copy < data.len() {
+                                        defmt::warn!(
+                                            "companion: SEND_ANON_REQ body truncated {=usize}B → {=usize}B",
+                                            data.len(),
+                                            copy,
+                                        );
+                                    }
+                                    let contact =
+                                        contacts::ContactStore::new().find_by_key(pub_key).await;
+                                    let is_flood = contact
+                                        .as_ref()
+                                        .map(|c| c.out_path_len == contacts::OUT_PATH_UNKNOWN)
+                                        .unwrap_or(true);
+                                    let est_timeout_ms =
+                                        if is_flood { 30_000u32 } else { 15_000u32 };
+                                    defmt::info!(
+                                        "companion: SEND_ANON_REQ key={=[u8]:02x} tag={=u32:#010x} anon_type={=u8:#04x} ({=usize}B) flood={=bool}",
+                                        &pub_key[..6],
+                                        tag,
+                                        d.first().copied().unwrap_or(0),
+                                        d.len(),
+                                        is_flood,
+                                    );
+                                    let _ = crate::tx_send(crate::TxRequest::AnonReq(
+                                        crate::TxAnonReq {
+                                            pub_key: *pub_key,
+                                            tag,
+                                            data: d,
+                                        },
+                                    ));
+                                    companion::Response::SentWithTag {
+                                        is_flood,
+                                        tag,
+                                        est_timeout_ms,
+                                    }
+                                }
+
                                 Ok(companion::cmd::Command::SendBinaryReq {
                                     pub_key,
                                     req_data,
