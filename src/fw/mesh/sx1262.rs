@@ -6,13 +6,17 @@ use defmt_rtt as _;
 use embassy_nrf::gpio::{AnyPin, Input, Level, Output, OutputDrive, Pull};
 use embassy_nrf::spim::{self, Frequency, InterruptHandler, Spim};
 use embassy_nrf::{Peri, bind_interrupts, peripherals};
-use embassy_time::{Delay, Timer};
+use embassy_time::{Delay, Duration, Instant, Timer, with_deadline, with_timeout};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use panic_probe as _;
 use sx126x::SX126x;
 use sx126x::conf::Config as LoRaConfig;
 use sx126x::op::PacketType::LoRa;
-use sx126x::op::irq::IrqMaskBit::{CrcErr, PreambleDetected, RxDone, Timeout, TxDone};
+use sx126x::op::irq::IrqMaskBit::{
+    CadDetected, CadDone, CrcErr, HeaderError, HeaderValid, PreambleDetected, RxDone,
+    SyncwordValid, Timeout, TxDone,
+};
+use sx126x::op::irq::IrqStatus;
 use sx126x::op::rxtx::DeviceSel::SX1262;
 use sx126x::op::status::ChipMode;
 use sx126x::op::tcxo::{TcxoDelay, TcxoVoltage};
@@ -127,6 +131,15 @@ impl MeshCoreConfig {
 
 const F_XTAL: u32 = 32_000_000; // 32 MHz crystal
 
+/// The concrete SX126x driver type wired up on the badge.
+type Radio<'a> = SX126x<
+    ExclusiveDevice<Spim<'a>, Output<'a>, Delay>,
+    Output<'a>,
+    Input<'a>,
+    Output<'a>,
+    AlwaysHigh,
+>;
+
 // Extension trait that adds RF-switch helpers directly to the SX126x type used
 // in this module, so callers don't need to remember which set_ant_enabled()
 // value means RX vs TX.
@@ -135,15 +148,7 @@ trait RfSwitch {
     fn rf_switch_tx(&mut self);
 }
 
-impl<'a> RfSwitch
-    for SX126x<
-        ExclusiveDevice<Spim<'a>, Output<'a>, Delay>,
-        Output<'a>,
-        Input<'a>,
-        Output<'a>,
-        AlwaysHigh,
-    >
-{
+impl<'a> RfSwitch for Radio<'a> {
     fn rf_switch_rx(&mut self) {
         self.set_ant_enabled(true).ok();
     }
@@ -209,6 +214,116 @@ pub fn lora_airtime_ms(payload_len: usize, sf: u8, bw_hz: u32, cr_proto: u8, pre
     let t_us = total_syms as u64 * sym_us;
 
     ((t_us / 1000) as u32).max(1)
+}
+
+/// MeshCore `MAX_TRANS_UNIT` — the largest frame any node puts on air.
+const MAX_TRANS_UNIT: usize = 255;
+
+/// While no reception is in flight, check this often that the chip is still
+/// in RX (badge-specific; upstream re-arms from its main loop instead).
+const RX_IDLE_WATCHDOG_MS: u64 = 5_000;
+
+/// Receive-watchdog windows (upstream `PacketMillis`, RadioLibWrappers.h).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, defmt::Format)]
+pub struct PacketMillis {
+    /// PreambleDetected → HeaderValid deadline.
+    pub preamble_ms: u32,
+    /// HeaderValid → RxDone deadline.
+    pub payload_ms: u32,
+}
+
+/// Preamble length stock MeshCore programs for `sf`
+/// (`RadioLibWrapper::preambleLengthForSF`): longer preambles at low SF.
+pub const fn preamble_length_for_sf(sf: u8) -> u16 {
+    if sf <= 8 { 32 } else { 16 }
+}
+
+/// Port of upstream `RadioLibWrapper::calcMaxPacketMillis()` (MeshCore
+/// 1.17.0, PR #2977): how long a genuine reception may legitimately stay in
+/// each phase before the latched IRQ state is declared stuck.
+///
+/// - `preamble_ms`: `(preamble + 8 + 4.25) · T_sym` — rest of the preamble,
+///   sync word, SFD and the 8-symbol explicit header.
+/// - `payload_ms`: payload-only airtime of a [`MAX_TRANS_UNIT`] frame (RadioLib
+///   `calculateTimeOnAir()` minus the preamble part above), scaled to CR 4/8
+///   because the sender's CR rides in the header and may be more robust than
+///   ours.
+///
+/// Parameters use the same MeshCore conventions as [`lora_airtime_ms`];
+/// `preamble_syms` should be the longest preamble expected from peers.
+/// SF8 / BW62.5 / CR4/5 / 32 symbols → 182 ms + 2130 ms.
+pub fn max_packet_millis(sf: u8, bw_hz: u32, cr_proto: u8, preamble_syms: u16) -> PacketMillis {
+    let sf = sf.clamp(5, 12);
+    let tsym_us = (1_000_000u64 << sf) / bw_hz.max(1) as u64;
+    // Semtech magic numbers for sync word + SFD (6.25 / 4.25 symbols, ×4).
+    let sf_coeff1_x4: u64 = if sf <= 6 { 25 } else { 17 };
+    let preamble_us = (((preamble_syms as u64 + 8) * 4 + sf_coeff1_x4) * tsym_us) / 4;
+
+    // Coded payload symbols: explicit header (20), CRC on (16), auto-LDRO.
+    let sf_coeff2: i64 = if sf <= 6 { 0 } else { 8 };
+    let ldro = tsym_us > 16_000;
+    let sf_div = 4 * (sf as i64 - if ldro { 2 } else { 0 });
+    let bits = (8 * MAX_TRANS_UNIT as i64 + 16 - 4 * sf as i64 + sf_coeff2 + 20).max(0);
+    let n_sym = ((bits + sf_div - 1) / sf_div) as u64;
+
+    let cr = cr_proto.clamp(5, 8) as u64;
+    let mut payload_us = n_sym * cr * tsym_us;
+    if cr < 8 {
+        payload_us = payload_us * 8 / cr; // rescale for max possible CR
+    }
+
+    PacketMillis {
+        preamble_ms: preamble_us.div_ceil(1000) as u32,
+        payload_ms: payload_us.div_ceil(1000) as u32,
+    }
+}
+
+/// Raw bit pattern of a latched IRQ status (the sx126x crate keeps it
+/// private), so exactly the flags that were read can be cleared — clearing
+/// `IrqMask::all()` would also eat a flag that latched after the read.
+fn irq_bits(irq: IrqStatus) -> u16 {
+    [
+        (irq.tx_done(), TxDone),
+        (irq.rx_done(), RxDone),
+        (irq.preamble_detected(), PreambleDetected),
+        (irq.syncword_valid(), SyncwordValid),
+        (irq.header_valid(), HeaderValid),
+        (irq.header_error(), HeaderError),
+        (irq.crc_err(), CrcErr),
+        (irq.cad_done(), CadDone),
+        (irq.cad_detected(), CadDetected),
+        (irq.timeout(), Timeout),
+    ]
+    .into_iter()
+    .filter(|(set, _)| *set)
+    .fold(0, |acc, (_, bit)| acc | bit as u16)
+}
+
+/// Where an in-flight reception is, tracked in software across
+/// `receive_packet()` calls (the select loop can cancel it mid-packet).
+/// Mirrors upstream `CustomSX1262::_activityAt` / `_headerSeen`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RxActivity {
+    /// Nothing on air that we know of.
+    Idle,
+    /// PreambleDetected latched at this instant; HeaderValid is due within
+    /// `PacketMillis::preamble_ms`.
+    Preamble(Instant),
+    /// HeaderValid latched at this instant; RxDone/CrcErr is due within
+    /// `PacketMillis::payload_ms`.
+    Header(Instant),
+}
+
+/// Result of one look at the latched IRQ flags.
+enum RxPoll {
+    /// No reception in flight — the channel is clear as far as we can hear.
+    Clear,
+    /// A preamble or header is in flight and still inside its window.
+    Busy,
+    /// A reception finished (RxDone/CrcErr). `Some` carries
+    /// `(len, rssi, snr_x4)` of a good packet; `None` is a CRC error or an
+    /// unreadable buffer.
+    Done(Option<(usize, i16, i8)>),
 }
 
 // ---------------------------------------------------------------------------
@@ -292,13 +407,7 @@ impl TxBudget {
 }
 
 pub struct SimpleLoRa<'a> {
-    pub(super) lora: SX126x<
-        ExclusiveDevice<Spim<'a>, Output<'a>, Delay>,
-        Output<'a>,
-        Input<'a>,
-        Output<'a>,
-        AlwaysHigh,
-    >,
+    pub(super) lora: Radio<'a>,
     pub(super) tx_timeout: RxTxTimeout,
     pub(super) crc_type: LoRaCrcType,
     pub(super) preamble_len: u16,
@@ -318,11 +427,18 @@ pub struct SimpleLoRa<'a> {
     /// Accumulated RX airtime in milliseconds (sum of per-packet on-air
     /// durations).
     pub rx_air_ms: u32,
-    /// Set between PreambleDetected and RxDone/CrcErr to signal an in-flight
-    /// reception. When the TX path pre-empts receive_packet() via select(),
-    /// this flag remains set, allowing send_message() to detect and defer
-    /// the transmission immediately.
-    rx_in_progress: bool,
+    /// In-flight reception state. Survives a select() cancelling
+    /// receive_packet() mid-packet, so send_message() knows to defer TX —
+    /// and, unlike a bare flag, it expires on the [`PacketMillis`] windows
+    /// so a false preamble can't hold the channel "busy" forever.
+    rx_activity: RxActivity,
+    /// Watchdog windows for `rx_activity`, recomputed on every reconfigure.
+    rx_windows: PacketMillis,
+    /// A packet that completed while send_message() was listening before
+    /// talk. It is read out of the chip before the TX payload overwrites the
+    /// shared data buffer, and handed out by the next receive_packet().
+    stash: Option<(usize, i16, i8)>,
+    stash_buf: [u8; MAX_TRANS_UNIT],
 }
 
 impl<'a> SimpleLoRa<'a> {
@@ -352,7 +468,7 @@ impl<'a> SimpleLoRa<'a> {
         let dio1 = Input::new(dio1_pin, Pull::None);
 
         // AlwaysHigh is a dummy DIO1 for the sx126x struct; real async DIO1 waiting
-        // is done externally via wait_for_rising_edge() so the executor is not blocked.
+        // is done externally via wait_for_high() so the executor is not blocked.
         let spi_dev = ExclusiveDevice::new(spim, nss, Delay).unwrap();
 
         let conf = build_lora_config(config);
@@ -382,7 +498,10 @@ impl<'a> SimpleLoRa<'a> {
             last_snr_x4: 0,
             tx_air_ms: 0,
             rx_air_ms: 0,
-            rx_in_progress: false,
+            rx_activity: RxActivity::Idle,
+            rx_windows: rx_windows_for(config),
+            stash: None,
+            stash_buf: [0; MAX_TRANS_UNIT],
         };
         radio.apply_rx_gain();
         Ok(radio)
@@ -415,10 +534,21 @@ impl<'a> SimpleLoRa<'a> {
         self.lora
             .set_standby(sx126x::op::StandbyConfig::StbyRc)
             .ok();
+        // Whatever was on air is gone from the receiver's point of view.
+        self.rx_activity = RxActivity::Idle;
     }
 
     /// Resume continuous RX after standby.
     pub fn resume_rx(&mut self) {
+        // Drop flags latched before standby so DIO1 starts low.
+        self.lora.wait_on_busy().ok();
+        self.lora.clear_irq_status(IrqMask::all()).ok();
+        self.rx_activity = RxActivity::Idle;
+        self.rearm_rx();
+    }
+
+    /// (Re-)enter continuous RX with the configured gain and RF path.
+    fn rearm_rx(&mut self) {
         self.lora.wait_on_busy().ok();
         self.lora.set_rx(RxTxTimeout::continuous_rx()).ok();
         self.apply_rx_gain();
@@ -463,6 +593,12 @@ impl<'a> SimpleLoRa<'a> {
         self.sf = config.sf_num;
         self.bw_hz = config.bw_hz_num;
         self.cr_proto = config.cr_num;
+        self.rx_windows = rx_windows_for(config);
+        defmt::debug!(
+            "SX1262 RX watchdog: preamble={=u32}ms payload={=u32}ms",
+            self.rx_windows.preamble_ms,
+            self.rx_windows.payload_ms
+        );
 
         self.resume_rx();
     }
@@ -488,176 +624,286 @@ impl<'a> SimpleLoRa<'a> {
 
     /// Wait for the next LoRa packet in continuous RX mode.
     ///
-    /// **Two-phase receive**: `PreambleDetected` fires on DIO1 before the full
-    /// packet arrives. Phase 1 sets `rx_in_progress = true`. Phase 2 waits for
-    /// `RxDone`/`CrcErr`/`Timeout`.
+    /// Event-driven RX state machine, a port of upstream MeshCore 1.17.0
+    /// `CustomSX1262::isReceiving()` (PRs #2977 / #3036):
     ///
-    /// If `select()` cancels between phases, `rx_in_progress` remains `true` so
-    /// `send_message()` defers TX (CANL: collision avoidance by neighbor
-    /// listening).
+    /// ```text
+    /// Idle ─PreambleDetected─▶ Preamble ─HeaderValid─▶ Header ─RxDone/CrcErr─▶ Idle
+    ///   ▲                         │ preamble_ms              │ payload_ms
+    ///   └─────────────────────────┴── elapsed, or HeaderError┘
+    /// ```
+    ///
+    /// DIO1 is awaited as a *level*, not an edge: anything latched — even a
+    /// flag that landed between clearing the IRQs and arming the wait — is
+    /// serviced instead of wedging the wait.  While a reception is in flight
+    /// the wait is bounded by its [`PacketMillis`] window; while idle, a
+    /// periodic check re-arms RX if the chip has silently left it.
+    ///
+    /// Cancel-safe: the state lives in `self`, so if `select()` cancels this
+    /// mid-packet, `send_message()` still sees the channel busy (CANL:
+    /// collision avoidance by neighbour listening) — until the window runs
+    /// out.  Returns `Ok(None)` on a CRC error.
     pub async fn receive_packet(
         &mut self,
         buf: &mut [u8],
     ) -> Result<Option<(usize, i16, i8)>, LoraError> {
-        self.rx_in_progress = false;
+        // A packet that completed while send_message() was listening.
+        if let Some((len, rssi, snr_x4)) = self.stash.take() {
+            if len <= buf.len() {
+                buf[..len].copy_from_slice(&self.stash_buf[..len]);
+                return Ok(Some((len, rssi, snr_x4)));
+            }
+            defmt::warn!(
+                "LoRa RX buffer too small: pkt={=usize} buf={=usize}",
+                len,
+                buf.len()
+            );
+        }
 
-        // Clear any stale IRQ so DIO1 is deasserted before the rising-edge wait.
-        self.lora.wait_on_busy().ok();
-        self.lora
-            .clear_irq_status(IrqMask::all())
-            .map_err(|_| LoraError::Spi("clear_irq before wait failed"))?;
+        loop {
+            if let RxPoll::Done(pkt) = self.poll_rx(Some(&mut *buf))? {
+                return Ok(pkt);
+            }
 
-        // ── Phase 1: wait for PreambleDetected or any terminal event ──────────
-        self.dio1.wait_for_rising_edge().await;
+            // A phase deadline expiring is handled by the next poll_rx().
+            let deadline = self
+                .rx_deadline()
+                .unwrap_or_else(|| Instant::now() + Duration::from_millis(RX_IDLE_WATCHDOG_MS));
+            if with_deadline(deadline, self.dio1.wait_for_high())
+                .await
+                .is_err()
+                && self.rx_activity == RxActivity::Idle
+            {
+                self.check_rx_mode();
+            }
+        }
+    }
 
+    /// Service whatever is latched in the IRQ status and advance
+    /// `rx_activity`, applying the upstream watchdog windows.
+    ///
+    /// Only the flags that were read get cleared, so DIO1 drops unless a new
+    /// event latched meanwhile.  A finished packet is read into `buf`, or
+    /// into the stash when `buf` is `None` (the TX path, which is about to
+    /// overwrite the chip's shared data buffer).
+    fn poll_rx(&mut self, buf: Option<&mut [u8]>) -> Result<RxPoll, LoraError> {
         self.lora.wait_on_busy().ok();
         let irq = self
             .lora
             .get_irq_status()
             .map_err(|_| LoraError::Spi("get_irq_status failed"))?;
-        self.lora.wait_on_busy().ok();
-        self.lora.clear_irq_status(IrqMask::all()).unwrap();
-
-        // If only preamble detected, mark channel busy and wait for terminal event.
-        let irq = if irq.preamble_detected() && !irq.rx_done() && !irq.crc_err() && !irq.timeout() {
-            defmt::debug!("LoRa preamble detected — waiting for RxDone");
-            self.rx_in_progress = true;
-
-            // ── Phase 2: wait for RxDone / CrcErr / Timeout ───────────────────
-            self.dio1.wait_for_rising_edge().await;
-
+        let bits = irq_bits(irq);
+        if bits != 0 {
             self.lora.wait_on_busy().ok();
-            let irq2 = self
-                .lora
-                .get_irq_status()
-                .map_err(|_| LoraError::Spi("get_irq_status (phase2) failed"))?;
-            self.lora.wait_on_busy().ok();
-            self.lora.clear_irq_status(IrqMask::all()).unwrap();
+            self.lora.clear_irq_status(IrqMask::from(bits)).ok();
+        }
+        let now = Instant::now();
 
-            self.rx_in_progress = false;
-            irq2
-        } else {
-            irq
-        };
-
-        self.rx_in_progress = false;
-
-        let result = if irq.rx_done() && !irq.crc_err() {
-            let buf_status = self
-                .lora
-                .get_rx_buffer_status()
-                .map_err(|_| LoraError::Buffer("get_rx_buffer_status failed"))?;
-            let len = buf_status.payload_length_rx() as usize;
-            let offset = buf_status.rx_start_buffer_pointer();
-
-            if len > buf.len() {
-                defmt::warn!(
-                    "LoRa RX buffer too small: pkt={=usize} buf={=usize}",
-                    len,
-                    buf.len()
-                );
-                None
-            } else if self.lora.read_buffer(offset, &mut buf[..len]).is_err() {
-                None
-            } else {
-                let (rssi, snr_x4) = self
+        // ── Terminal event: RxDone / CrcErr (Timeout can't fire in
+        // continuous RX, but if it ever latches, re-arming is right too) ──
+        if irq.rx_done() || irq.crc_err() || irq.timeout() {
+            self.rx_activity = RxActivity::Idle;
+            let pkt = if irq.crc_err() {
+                let rssi = self
                     .lora
                     .get_packet_status()
-                    .map(|s| (s.rssi_pkt() as i16, (s.snr_pkt() * 4.0) as i8))
-                    .unwrap_or((0, 0));
+                    .map(|s| s.rssi_pkt() as i16)
+                    .unwrap_or(0);
+                defmt::warn!(
+                    "LoRa CRC error {=i16}dBm — header decoded OK (SF/BW/CR/syncword match) but payload bytes corrupted",
+                    rssi
+                );
+                None
+            } else if irq.rx_done() {
+                let pkt = match buf {
+                    Some(buf) => read_rx_packet(&mut self.lora, buf),
+                    None => {
+                        if self.stash.is_some() {
+                            defmt::warn!("LoRa RX stash overwritten — earlier packet dropped");
+                        }
+                        self.stash = read_rx_packet(&mut self.lora, &mut self.stash_buf);
+                        self.stash
+                    }
+                };
+                if let Some((len, rssi, snr_x4)) = pkt {
+                    self.last_rssi = rssi;
+                    self.last_snr_x4 = snr_x4;
+                    let pkt_air_ms =
+                        lora_airtime_ms(len, self.sf, self.bw_hz, self.cr_proto, self.preamble_len);
+                    self.rx_air_ms = self.rx_air_ms.saturating_add(pkt_air_ms);
+                }
+                pkt
+            } else {
+                None
+            };
 
-                self.last_rssi = rssi;
-                self.last_snr_x4 = snr_x4;
-                let pkt_air_ms =
-                    lora_airtime_ms(len, self.sf, self.bw_hz, self.cr_proto, self.preamble_len);
-                self.rx_air_ms = self.rx_air_ms.saturating_add(pkt_air_ms);
+            // Re-arm continuous RX after every terminal event.
+            self.rearm_rx();
+            return Ok(RxPoll::Done(pkt));
+        }
 
-                Some((len, rssi, snr_x4))
+        // ── HeaderError: the "preamble" was noise or a collision ──────────
+        if irq.header_error() {
+            defmt::debug!("LoRa header error — dropping in-flight RX");
+            self.rx_activity = RxActivity::Idle;
+            self.rearm_rx();
+            return Ok(RxPoll::Clear);
+        }
+
+        if irq.header_valid() {
+            // A fresh HeaderValid always starts a fresh payload window.
+            self.rx_activity = RxActivity::Header(now);
+        } else if irq.preamble_detected() && self.rx_activity == RxActivity::Idle {
+            // Re-detections don't extend the window (upstream keeps the
+            // first `_activityAt`), so steady noise can't pin the channel.
+            self.rx_activity = RxActivity::Preamble(now);
+        }
+
+        // ── Watchdog windows ──────────────────────────────────────────────
+        match self.rx_activity {
+            RxActivity::Idle => Ok(RxPoll::Clear),
+            RxActivity::Preamble(since)
+                if (now - since).as_millis() > self.rx_windows.preamble_ms as u64 =>
+            {
+                // Upstream only drops the flag here: the modem has already
+                // gone back to searching, and restarting RX could clip a
+                // peer's unusually long preamble.
+                defmt::debug!(
+                    "LoRa preamble without header after {=u32}ms — channel clear",
+                    self.rx_windows.preamble_ms
+                );
+                self.rx_activity = RxActivity::Idle;
+                Ok(RxPoll::Clear)
             }
-        } else if irq.crc_err() {
-            let (rssi, _snr_x4) = self
-                .lora
-                .get_packet_status()
-                .map(|s| (s.rssi_pkt() as i16, (s.snr_pkt() * 4.0) as i8))
-                .unwrap_or((0, 0));
-            defmt::warn!(
-                "LoRa CRC error {=i16}dBm — header decoded OK (SF/BW/CR/syncword match) but payload bytes corrupted",
-                rssi
-            );
-            None
-        } else {
-            None
+            RxActivity::Header(since)
+                if (now - since).as_millis() > self.rx_windows.payload_ms as u64 =>
+            {
+                defmt::warn!(
+                    "LoRa HeaderValid but no RxDone after {=u32}ms — restarting RX",
+                    self.rx_windows.payload_ms
+                );
+                self.rx_activity = RxActivity::Idle;
+                self.rearm_rx();
+                Ok(RxPoll::Clear)
+            }
+            _ => Ok(RxPoll::Busy),
+        }
+    }
+
+    /// When the current phase's watchdog window runs out (+1 ms so the
+    /// strict `>` in poll_rx() has definitely passed), or `None` when idle.
+    fn rx_deadline(&self) -> Option<Instant> {
+        let (since, window_ms) = match self.rx_activity {
+            RxActivity::Idle => return None,
+            RxActivity::Preamble(since) => (since, self.rx_windows.preamble_ms),
+            RxActivity::Header(since) => (since, self.rx_windows.payload_ms),
         };
+        Some(since + Duration::from_millis(window_ms as u64 + 1))
+    }
 
-        // Re-arm continuous RX after every event.
+    /// Idle-RX watchdog: the chip should sit in continuous RX indefinitely,
+    /// but if a dropped SPI command or a brown-out leaves it elsewhere,
+    /// nothing would ever raise DIO1 again.  Re-arm if so.
+    fn check_rx_mode(&mut self) {
         self.lora.wait_on_busy().ok();
-        self.lora
-            .set_rx(RxTxTimeout::continuous_rx())
-            .map_err(|_| LoraError::Timeout)?;
-        self.apply_rx_gain();
-        self.lora.rf_switch_rx();
-
-        Ok(result)
+        let in_rx = matches!(
+            self.lora.get_status().ok().and_then(|s| s.chip_mode()),
+            Some(ChipMode::RX)
+        );
+        if !in_rx {
+            defmt::warn!("SX1262 watchdog: radio not in RX — re-arming");
+            self.lora.wait_on_busy().ok();
+            self.lora.clear_irq_status(IrqMask::all()).ok();
+            self.rearm_rx();
+        }
     }
 
     pub async fn send_message(&mut self, message: &[u8]) -> Result<(), LoraError> {
-        // ── Collision avoidance via neighbor listening (CANL) ─────────────────
+        // ── Listen before talk (CANL) ─────────────────────────────────────────
         // The radio is always in continuous RX, so it detects ongoing
         // transmissions with full receiver sensitivity — strictly better than
-        // CAD which loses reliability beyond ~400 m.  If a preamble was
-        // detected (rx_in_progress), we wait for the packet to finish plus a
-        // random backoff before transmitting.
+        // CAD which loses reliability beyond ~400 m.  poll_rx() is upstream's
+        // isReceiving(): busy from PreambleDetected until RxDone, bounded by
+        // the PacketMillis windows, so a false preamble costs at most
+        // `preamble_ms` instead of the full give-up time.  Retry cadence and
+        // give-up mirror upstream Dispatcher::checkSend()
+        // (getCADFailRetryDelay / getCADFailMaxDuration).
         const INITIAL_WINDOW_MS: u64 = 200;
-        const MAX_WAIT_MS: u64 = 4_000;
-        let window_ms = INITIAL_WINDOW_MS;
+        const CAD_FAIL_RETRY_DELAY_MS: u64 = 200;
+        const CAD_FAIL_MAX_DURATION_MS: u64 = 4_000;
 
         // Random pre-TX jitter: prevents all nodes transmitting simultaneously
         // after a shared event (e.g. all wanting to relay the same flood).
         Timer::after_millis(random_backoff_ms(INITIAL_WINDOW_MS)).await;
 
-        // If a preamble was detected (receive_packet was cancelled mid-receive
-        // by the select loop), wait for the in-progress packet to finish so we
-        // don't transmit over it.  DIO1 will fire on RxDone/CrcErr/Timeout.
-        if self.rx_in_progress {
-            defmt::warn!("TX deferred: waiting for in-progress RX to finish");
-            embassy_time::with_timeout(
-                embassy_time::Duration::from_millis(MAX_WAIT_MS),
-                self.dio1.wait_for_rising_edge(),
+        let lbt_start = Instant::now();
+        let mut deferred = false;
+        loop {
+            // A packet finishing here is stashed for the next receive_packet().
+            let busy = matches!(self.poll_rx(None), Ok(RxPoll::Busy));
+            if !busy {
+                if !deferred {
+                    break;
+                }
+                // The reception we waited out just ended: random backoff so
+                // every node that deferred on it doesn't key up at once, then
+                // look again.
+                deferred = false;
+                defmt::debug!(
+                    "TX: channel clear after {=u64}ms",
+                    lbt_start.elapsed().as_millis()
+                );
+                Timer::after_millis(random_backoff_ms(INITIAL_WINDOW_MS)).await;
+                continue;
+            }
+            if lbt_start.elapsed() > Duration::from_millis(CAD_FAIL_MAX_DURATION_MS) {
+                // Upstream ERR_EVENT_CAD_TIMEOUT: activity has gone on too
+                // long (radio may be in a bad state) — force the transmit.
+                defmt::warn!(
+                    "TX: channel busy for {=u64}ms — transmitting anyway",
+                    CAD_FAIL_MAX_DURATION_MS
+                );
+                break;
+            }
+            if !deferred {
+                defmt::debug!("TX deferred: reception in progress");
+                deferred = true;
+            }
+            // Wake on the next RX event or the retry tick, whichever is first.
+            with_timeout(
+                Duration::from_millis(CAD_FAIL_RETRY_DELAY_MS),
+                self.dio1.wait_for_high(),
             )
             .await
-            .ok(); // ignore timeout — force TX either way
-            self.lora.wait_on_busy().ok();
-            self.lora.clear_irq_status(IrqMask::all()).ok();
-            self.rx_in_progress = false;
-
-            // Re-arm RX briefly, then random backoff before checking again.
-            self.lora.set_rx(RxTxTimeout::continuous_rx()).ok();
-            self.apply_rx_gain();
-            self.lora.rf_switch_rx();
-            Timer::after_millis(random_backoff_ms(window_ms)).await;
+            .ok();
         }
 
         // ── Duty-cycle budget ─────────────────────────────────────────────────
-        if let Some(ref mut budget) = self.tx_budget {
-            let est_ms = lora_airtime_ms(
-                message.len(),
-                self.sf,
-                self.bw_hz,
-                self.cr_proto,
-                self.preamble_len,
+        let est_ms = lora_airtime_ms(
+            message.len(),
+            self.sf,
+            self.bw_hz,
+            self.cr_proto,
+            self.preamble_len,
+        );
+        if let Some(ref mut budget) = self.tx_budget
+            && !budget.can_tx(est_ms)
+        {
+            defmt::warn!(
+                "TX duty-cycle limit: est={=u32}ms budget={=u32}ms — packet dropped",
+                est_ms,
+                budget.budget_ms,
             );
-            if !budget.can_tx(est_ms) {
-                defmt::warn!(
-                    "TX duty-cycle limit: est={=u32}ms budget={=u32}ms — packet dropped",
-                    est_ms,
-                    budget.budget_ms,
-                );
-                return Err(LoraError::DutyCycle);
-            }
+            return Err(LoraError::DutyCycle);
         }
 
-        // Clear any stale IRQ (e.g. RxDone/PreambleDetected from the
-        // continuous-RX session) so DIO1 is LOW before the TX rising-edge wait.
+        // Leave RX before staging the payload: otherwise an incoming packet
+        // could overwrite the shared data buffer, or latch an RX IRQ that the
+        // level-triggered TxDone wait below would mistake for completion.
+        // (RadioLib remaps DIO1 to TxDone-only for the same reason.)  No
+        // await since the last poll_rx(), so nothing finished needs stashing;
+        // whatever was still in flight is lost to us either way.
+        self.standby();
         self.lora.wait_on_busy().ok();
         self.lora.clear_irq_status(IrqMask::all()).ok();
 
@@ -673,17 +919,19 @@ impl<'a> SimpleLoRa<'a> {
             .into();
         self.lora.set_packet_params(packet_params).unwrap();
 
-        let tx_start = embassy_time::Instant::now();
+        let tx_start = Instant::now();
         self.lora
             .set_tx(self.tx_timeout)
             .map_err(|_| LoraError::Timeout)?;
 
-        self.dio1.wait_for_rising_edge().await;
+        // In standby → TX nothing but TxDone can raise DIO1.
+        self.dio1.wait_for_high().await;
         let actual_ms = tx_start.elapsed().as_millis() as u32;
         // TxDone — PA is off; drop back to power-save (unless another vote holds).
         drop(_tx_boost);
 
-        self.lora.clear_irq_status(IrqMask::all()).unwrap();
+        self.lora.wait_on_busy().ok();
+        self.lora.clear_irq_status(IrqMask::all()).ok();
 
         self.tx_air_ms = self.tx_air_ms.saturating_add(actual_ms);
 
@@ -698,10 +946,7 @@ impl<'a> SimpleLoRa<'a> {
         }
 
         // Re-arm continuous RX so receive_packet() finds the chip in RX mode.
-        self.lora.wait_on_busy().ok();
-        self.lora.set_rx(RxTxTimeout::continuous_rx()).ok();
-        self.apply_rx_gain();
-        self.lora.rf_switch_rx();
+        self.rearm_rx();
 
         Ok(())
     }
@@ -726,6 +971,42 @@ fn random_backoff_ms(window_ms: u64) -> u64 {
     mixed % window_ms.max(1)
 }
 
+/// Pull the packet RxDone just flagged out of the chip's data buffer.
+/// Returns `(len, rssi_dBm, snr×4)`, or `None` if it doesn't fit / SPI fails.
+fn read_rx_packet(lora: &mut Radio<'_>, buf: &mut [u8]) -> Option<(usize, i16, i8)> {
+    lora.wait_on_busy().ok();
+    let Ok(status) = lora.get_rx_buffer_status() else {
+        defmt::warn!("LoRa RX: get_rx_buffer_status failed");
+        return None;
+    };
+    let len = status.payload_length_rx() as usize;
+    if len > buf.len() {
+        defmt::warn!(
+            "LoRa RX buffer too small: pkt={=usize} buf={=usize}",
+            len,
+            buf.len()
+        );
+        return None;
+    }
+    lora.read_buffer(status.rx_start_buffer_pointer(), &mut buf[..len])
+        .ok()?;
+    let (rssi, snr_x4) = lora
+        .get_packet_status()
+        .map(|s| (s.rssi_pkt() as i16, (s.snr_pkt() * 4.0) as i8))
+        .unwrap_or((0, 0));
+    Some((len, rssi, snr_x4))
+}
+
+/// Receive-watchdog windows for `config`. The preamble window covers the
+/// longer of our own preamble and the one stock MeshCore sends at this SF,
+/// since that is what peers actually put on air.
+fn rx_windows_for(config: &MeshCoreConfig) -> PacketMillis {
+    let preamble = config
+        .preamble_len
+        .max(preamble_length_for_sf(config.sf_num));
+    max_packet_millis(config.sf_num, config.bw_hz_num, config.cr_num, preamble)
+}
+
 pub(super) fn build_lora_config(config: &MeshCoreConfig) -> LoRaConfig {
     let mod_params = LoraModParams::default()
         .set_spread_factor(config.spread_factor)
@@ -744,12 +1025,18 @@ pub(super) fn build_lora_config(config: &MeshCoreConfig) -> LoRaConfig {
         .set_pa_duty_cycle(0x04)
         .set_hp_max(0x07);
 
+    // PreambleDetected / HeaderValid / HeaderError drive the RX watchdog in
+    // SimpleLoRa::poll_rx(): every step of a reception raises DIO1, so a
+    // false preamble is caught by HeaderError or the preamble window rather
+    // than leaving the channel "busy" until the next real packet.
     let dio1_irq_mask = IrqMask::none()
         .combine(TxDone)
         .combine(RxDone)
         .combine(CrcErr)
         .combine(Timeout)
-        .combine(PreambleDetected);
+        .combine(PreambleDetected)
+        .combine(HeaderValid)
+        .combine(HeaderError);
 
     let packet_params = LoRaPacketParams::default()
         .set_preamble_len(config.preamble_len)
