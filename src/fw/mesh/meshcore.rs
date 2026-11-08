@@ -1363,7 +1363,9 @@ async fn try_handle_txt_msg(
             dec.text.len().saturating_sub(4),
             signed_ack,
         );
-        send_ack(lora, &sender.pub_key, path_len_byte, path, signed_ack).await;
+        // Upstream still sends the 4-byte form for SIGNED messages
+        // (`BaseChatMesh::onPeerDataRecv`, TXT_TYPE_SIGNED_PLAIN branch).
+        send_ack(lora, &sender.pub_key, path_len_byte, path, &signed_ack.to_le_bytes()).await;
 
         // Advance the room's sync_since cursor so the next login resumes
         // after this post instead of replaying the whole backlog. Matches
@@ -1389,7 +1391,14 @@ async fn try_handle_txt_msg(
     // CLI replies from a repeater are consumed by the companion app only —
     // the repeater does not ACK our requests and does not expect one back.
     if is_plain {
-        send_ack(lora, &sender.pub_key, path_len_byte, path, ack_hash).await;
+        // MeshCore 1.16+ (f6e6fdaa, 717142ab, 2eb747d5, a130a95a) sends a
+        // 6-byte ACK for PLAIN messages: the 4-byte hash, the byte after the
+        // text's NUL (the extended attempt counter) and one random byte, so
+        // that retries of the same text produce distinct ACK packets and are
+        // not dropped as duplicates by repeaters.
+        let random = crate::signed_channel::Csprng::next_challenge()[0];
+        let ack = meshcore::payload::txt_msg::plain_ack_payload(ack_hash, dec.ack_tail, random);
+        send_ack(lora, &sender.pub_key, path_len_byte, path, &ack).await;
 
         let display_name = {
             let name_end = sender.name.iter().position(|&b| b == 0).unwrap_or(32);
@@ -2080,20 +2089,23 @@ pub async fn send_pm(
 /// Send an ACK for a received TxtMsg back toward the sender.
 ///
 /// If we have a stored path for the sender we send Direct; otherwise Flood.
+/// `ack` is the full ACK payload (4 bytes for SIGNED, 6 for PLAIN); it must
+/// be at least 4 bytes long.
 async fn send_ack(
     lora: &mut SimpleLoRa<'_>,
     sender_pk: &[u8; meshcore::PUB_KEY_SIZE],
     _recv_path_len: u8,
     _recv_path: &heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }>,
-    ack_hash: u32,
+    ack: &[u8],
 ) {
     use meshcore::MAX_TRANS_UNIT;
     use meshcore::packet::{Message, PayloadType, RouteType};
 
-    let ack_bytes = ack_hash.to_le_bytes();
+    // The first four bytes are the ACK hash; receivers match on those only.
+    let ack_hash = u32::from_le_bytes([ack[0], ack[1], ack[2], ack[3]]);
 
     let mut payload: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
-    let _ = payload.extend_from_slice(&ack_bytes);
+    let _ = payload.extend_from_slice(ack);
 
     // Route: Direct if we have a stored path, Flood otherwise.
     let contact = contacts::ContactStore::new().find_by_key(sender_pk).await;
