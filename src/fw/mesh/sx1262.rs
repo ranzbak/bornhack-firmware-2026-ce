@@ -223,6 +223,10 @@ const MAX_TRANS_UNIT: usize = 255;
 /// in RX (badge-specific; upstream re-arms from its main loop instead).
 const RX_IDLE_WATCHDOG_MS: u64 = 5_000;
 
+/// Added to upstream's `est_airtime × 1.5` TxDone deadline to absorb SPI and
+/// executor latency between `set_tx()` and the DIO1 wait.
+const TX_DONE_SLACK_MS: u64 = 100;
+
 /// Receive-watchdog windows (upstream `PacketMillis`, RadioLibWrappers.h).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, defmt::Format)]
 pub struct PacketMillis {
@@ -920,22 +924,40 @@ impl<'a> SimpleLoRa<'a> {
         self.lora.set_packet_params(packet_params).unwrap();
 
         let tx_start = Instant::now();
-        self.lora
-            .set_tx(self.tx_timeout)
-            .map_err(|_| LoraError::Timeout)?;
+        if self.lora.set_tx(self.tx_timeout).is_err() {
+            drop(_tx_boost);
+            self.rearm_rx();
+            return Err(LoraError::Timeout);
+        }
 
-        // In standby → TX nothing but TxDone can raise DIO1.
-        self.dio1.wait_for_high().await;
+        // TxDone watchdog: upstream Dispatcher gives a send est_airtime × 1.5
+        // before giving up on it; the slack covers our SPI / scheduling
+        // latency, which upstream's estimate doesn't have to.
+        let tx_deadline_ms = est_ms as u64 * 3 / 2 + TX_DONE_SLACK_MS;
+        let tx_done = with_timeout(
+            Duration::from_millis(tx_deadline_ms),
+            self.dio1.wait_for_high(),
+        )
+        .await
+        .is_ok();
         let actual_ms = tx_start.elapsed().as_millis() as u32;
         // TxDone — PA is off; drop back to power-save (unless another vote holds).
         drop(_tx_boost);
 
+        if !tx_done {
+            defmt::warn!(
+                "TX: no TxDone after {=u32}ms (est {=u32}ms) — aborting",
+                actual_ms,
+                est_ms
+            );
+            self.standby();
+        }
         self.lora.wait_on_busy().ok();
         self.lora.clear_irq_status(IrqMask::all()).ok();
 
         self.tx_air_ms = self.tx_air_ms.saturating_add(actual_ms);
 
-        // Deduct measured airtime from budget.
+        // Deduct measured airtime from budget (also on abort: the PA was on).
         if let Some(ref mut budget) = self.tx_budget {
             budget.deduct(actual_ms);
             defmt::debug!(
@@ -948,7 +970,11 @@ impl<'a> SimpleLoRa<'a> {
         // Re-arm continuous RX so receive_packet() finds the chip in RX mode.
         self.rearm_rx();
 
-        Ok(())
+        if tx_done {
+            Ok(())
+        } else {
+            Err(LoraError::Timeout)
+        }
     }
 }
 
