@@ -925,7 +925,7 @@ async fn nus_peripheral_loop<C>(
                             let response = match companion::cmd::parse(data) {
                                 Err(_) => {
                                     defmt::warn!("companion: empty write");
-                                    companion::Response::Error(companion::ErrorCode::Generic)
+                                    companion::Response::Error(companion::ErrorCode::UnsupportedCmd)
                                 }
 
                                 Ok(companion::cmd::Command::AppStart) => {
@@ -1126,7 +1126,7 @@ async fn nus_peripheral_loop<C>(
                                         None => {
                                             defmt::warn!("companion: GET_CONTACT_BY_KEY not found");
                                             companion::Response::Error(
-                                                companion::ErrorCode::InvalidParameter,
+                                                companion::ErrorCode::NotFound,
                                             )
                                         }
                                     }
@@ -1185,7 +1185,7 @@ async fn nus_peripheral_loop<C>(
                                         Err(e) => {
                                             defmt::warn!("companion: RESET_PATH failed: {:?}", e);
                                             companion::Response::Error(
-                                                companion::ErrorCode::Generic,
+                                                companion::ErrorCode::FileIoError,
                                             )
                                         }
                                     }
@@ -1203,7 +1203,7 @@ async fn nus_peripheral_loop<C>(
                                         Ok(false) => {
                                             defmt::warn!("companion: REMOVE_CONTACT not found");
                                             companion::Response::Error(
-                                                companion::ErrorCode::InvalidParameter,
+                                                companion::ErrorCode::NotFound,
                                             )
                                         }
                                         Err(e) => {
@@ -1212,7 +1212,7 @@ async fn nus_peripheral_loop<C>(
                                                 e
                                             );
                                             companion::Response::Error(
-                                                companion::ErrorCode::Generic,
+                                                companion::ErrorCode::FileIoError,
                                             )
                                         }
                                     }
@@ -1235,7 +1235,7 @@ async fn nus_peripheral_loop<C>(
                                                 "companion: ADD_UPDATE_CONTACT payload too short"
                                             );
                                             companion::Response::Error(
-                                                companion::ErrorCode::InvalidParameter,
+                                                companion::ErrorCode::IllegalArg,
                                             )
                                         }
                                     }
@@ -1273,7 +1273,7 @@ async fn nus_peripheral_loop<C>(
                                             index
                                         );
                                         companion::Response::Error(
-                                            companion::ErrorCode::IndexOutOfRange,
+                                            companion::ErrorCode::NotFound,
                                         )
                                     }
                                 }
@@ -1308,13 +1308,13 @@ async fn nus_peripheral_loop<C>(
                                             );
                                             // Reference ERR_CODE_NOT_FOUND (2).
                                             companion::Response::Error(
-                                                companion::ErrorCode::InvalidParameter,
+                                                companion::ErrorCode::NotFound,
                                             )
                                         }
                                         Some(_) if !is_cli && txt_type != txt_msg::TXT_TYPE_PLAIN => {
                                             // Reference ERR_CODE_UNSUPPORTED_CMD (1).
                                             companion::Response::Error(
-                                                companion::ErrorCode::InvalidCommand,
+                                                companion::ErrorCode::UnsupportedCmd,
                                             )
                                         }
                                         Some(c) => {
@@ -1384,7 +1384,7 @@ async fn nus_peripheral_loop<C>(
                                                         "companion: SEND_TXT_MSG TX queue full"
                                                     );
                                                     companion::Response::Error(
-                                                        companion::ErrorCode::InsufficientStorage,
+                                                        companion::ErrorCode::TableFull,
                                                     )
                                                 }
                                             }
@@ -1423,7 +1423,7 @@ async fn nus_peripheral_loop<C>(
                                                 channel
                                             );
                                             companion::Response::Error(
-                                                companion::ErrorCode::InsufficientStorage,
+                                                companion::ErrorCode::TableFull,
                                             )
                                         }
                                     }
@@ -1486,7 +1486,7 @@ async fn nus_peripheral_loop<C>(
                                             crate::MAX_CHANNEL_DATA,
                                         );
                                         companion::Response::Error(
-                                            companion::ErrorCode::InvalidParameter,
+                                            companion::ErrorCode::IllegalArg,
                                         )
                                     } else {
                                         let mut data: heapless::Vec<
@@ -1524,7 +1524,7 @@ async fn nus_peripheral_loop<C>(
                                                     "companion: SEND_CHANNEL_DATA → TX queue full",
                                                 );
                                                 companion::Response::Error(
-                                                    companion::ErrorCode::InsufficientStorage,
+                                                    companion::ErrorCode::TableFull,
                                                 )
                                             }
                                         }
@@ -1549,7 +1549,7 @@ async fn nus_peripheral_loop<C>(
                                             "companion: SET_DEFAULT_FLOOD_SCOPE empty name → ERR",
                                         );
                                         companion::Response::Error(
-                                            companion::ErrorCode::InvalidParameter,
+                                            companion::ErrorCode::IllegalArg,
                                         )
                                     } else {
                                         if let Err(e) =
@@ -1643,7 +1643,7 @@ async fn nus_peripheral_loop<C>(
                                             "companion: SET_RADIO_PARAMS out of range → ERROR"
                                         );
                                         companion::Response::Error(
-                                            companion::ErrorCode::InvalidParameter,
+                                            companion::ErrorCode::IllegalArg,
                                         )
                                     }
                                 }
@@ -1665,7 +1665,7 @@ async fn nus_peripheral_loop<C>(
                                             power
                                         );
                                         companion::Response::Error(
-                                            companion::ErrorCode::InvalidParameter,
+                                            companion::ErrorCode::IllegalArg,
                                         )
                                     }
                                 }
@@ -1678,7 +1678,7 @@ async fn nus_peripheral_loop<C>(
                                             mode,
                                         );
                                         companion::Response::Error(
-                                            companion::ErrorCode::InvalidParameter,
+                                            companion::ErrorCode::IllegalArg,
                                         )
                                     } else {
                                         defmt::info!(
@@ -1702,7 +1702,7 @@ async fn nus_peripheral_loop<C>(
                                                     e
                                                 );
                                                 companion::Response::Error(
-                                                    companion::ErrorCode::Generic,
+                                                    companion::ErrorCode::FileIoError,
                                                 )
                                             }
                                         }
@@ -1729,7 +1729,7 @@ async fn nus_peripheral_loop<C>(
                                                 e
                                             );
                                             companion::Response::Error(
-                                                companion::ErrorCode::Generic,
+                                                companion::ErrorCode::FileIoError,
                                             )
                                         }
                                     }
@@ -1762,21 +1762,26 @@ async fn nus_peripheral_loop<C>(
                                     advert_loc_policy,
                                     multi_acks,
                                 }) => {
-                                    defmt::info!(
-                                        "companion: SET_OTHER_PARAMS manual={=u8} tele={=u8} loc={=u8} macks={=u8} → OK",
-                                        manual_add_contacts,
-                                        telemetry,
-                                        advert_loc_policy,
-                                        multi_acks
-                                    );
-                                    pending_other = Some(settings::OtherParams {
+                                    // Upstream CMD_SET_OTHER_PARAMS leaves fields the
+                                    // frame does not carry unchanged.
+                                    let new_other = settings::OtherParams {
                                         manual_add_contacts,
                                         // loc/env bits (telemetry >> 2/4) ignored
                                         // — no GPS / environment sensors on this device.
-                                        telemetry_mode_base: telemetry & 0x03,
-                                        advert_loc_policy,
-                                        multi_acks,
-                                    });
+                                        telemetry_mode_base: telemetry
+                                            .map_or(other_params.telemetry_mode_base, |t| t & 0x03),
+                                        advert_loc_policy: advert_loc_policy
+                                            .unwrap_or(other_params.advert_loc_policy),
+                                        multi_acks: multi_acks.unwrap_or(other_params.multi_acks),
+                                    };
+                                    defmt::info!(
+                                        "companion: SET_OTHER_PARAMS manual={=u8} tele={=u8} loc={=u8} macks={=u8} → OK",
+                                        new_other.manual_add_contacts,
+                                        new_other.telemetry_mode_base,
+                                        new_other.advert_loc_policy,
+                                        new_other.multi_acks
+                                    );
+                                    pending_other = Some(new_other);
                                     companion::Response::Ok
                                 }
 
@@ -1798,7 +1803,7 @@ async fn nus_peripheral_loop<C>(
                                             lon
                                         );
                                         companion::Response::Error(
-                                            companion::ErrorCode::InvalidParameter,
+                                            companion::ErrorCode::IllegalArg,
                                         )
                                     }
                                 }
@@ -1864,7 +1869,7 @@ async fn nus_peripheral_loop<C>(
                                         crate::MAX_ANON_REQ_DATA,
                                     );
                                     companion::Response::Error(
-                                        companion::ErrorCode::InvalidParameter,
+                                        companion::ErrorCode::TableFull,
                                     )
                                 }
                                 Ok(companion::cmd::Command::SendAnonReq { pub_key, data }) => {
@@ -1906,7 +1911,7 @@ async fn nus_peripheral_loop<C>(
                                                 "companion: SEND_ANON_REQ → TX queue full"
                                             );
                                             companion::Response::Error(
-                                                companion::ErrorCode::InsufficientStorage,
+                                                companion::ErrorCode::TableFull,
                                             )
                                         }
                                     }
@@ -1926,7 +1931,7 @@ async fn nus_peripheral_loop<C>(
                                             packet.len(),
                                         );
                                         companion::Response::Error(
-                                            companion::ErrorCode::InvalidParameter,
+                                            companion::ErrorCode::IllegalArg,
                                         )
                                     } else {
                                         let mut frame = [0u8; ::meshcore::MAX_TRANS_UNIT];
@@ -1948,11 +1953,34 @@ async fn nus_peripheral_loop<C>(
                                                     "companion: SEND_RAW_PACKET → TX queue full"
                                                 );
                                                 companion::Response::Error(
-                                                    companion::ErrorCode::InsufficientStorage,
+                                                    companion::ErrorCode::TableFull,
                                                 )
                                             }
                                         }
                                     }
+                                }
+
+                                // GET_DEVICE_TIME (0x05) — upstream replies
+                                // RESP_CODE_CURR_TIME with the RTC; 0 while the
+                                // badge has no wall clock yet.
+                                Ok(companion::cmd::Command::GetDeviceTime) => {
+                                    companion::Response::CurrentTime(crate::unix_now().unwrap_or(0))
+                                }
+
+                                // Frames upstream refuses before touching any
+                                // state; the parser carries upstream's ERR code.
+                                Ok(companion::cmd::Command::Rejected { cmd, error }) => {
+                                    defmt::info!(
+                                        "companion: cmd {=u8:#04x} rejected (err {=u8})",
+                                        cmd,
+                                        error as u8,
+                                    );
+                                    companion::Response::Error(error)
+                                }
+
+                                // SEND_RAW_DATA (0x19): parsed, not dispatched yet.
+                                Ok(companion::cmd::Command::SendRawData { .. }) => {
+                                    companion::Response::Error(companion::ErrorCode::UnsupportedCmd)
                                 }
 
                                 // RUN_CLI_COMMAND (0x42, v14+) — text CLI, see
@@ -2115,7 +2143,7 @@ async fn nus_peripheral_loop<C>(
                                                 &pub_key[..6]
                                             );
                                             companion::Response::Error(
-                                                companion::ErrorCode::InvalidParameter,
+                                                companion::ErrorCode::NotFound,
                                             )
                                         }
                                     }
@@ -2146,7 +2174,7 @@ async fn nus_peripheral_loop<C>(
                                                 e
                                             );
                                             companion::Response::Error(
-                                                companion::ErrorCode::Generic,
+                                                companion::ErrorCode::FileIoError,
                                             )
                                         }
                                     }
@@ -2276,7 +2304,7 @@ async fn nus_peripheral_loop<C>(
                                                 other
                                             );
                                             companion::Response::Error(
-                                                companion::ErrorCode::InvalidParameter,
+                                                companion::ErrorCode::IllegalArg,
                                             )
                                         }
                                     }
@@ -2303,7 +2331,7 @@ async fn nus_peripheral_loop<C>(
                                         data.len(),
                                         data,
                                     );
-                                    companion::Response::Error(companion::ErrorCode::InvalidCommand)
+                                    companion::Response::Error(companion::ErrorCode::UnsupportedCmd)
                                 }
                             };
 
