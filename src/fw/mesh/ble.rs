@@ -2029,9 +2029,44 @@ async fn nus_peripheral_loop<C>(
                                     companion::Response::Error(error)
                                 }
 
-                                // SEND_RAW_DATA (0x19): parsed, not dispatched yet.
-                                Ok(companion::cmd::Command::SendRawData { .. }) => {
-                                    companion::Response::Error(companion::ErrorCode::UnsupportedCmd)
+                                // SEND_RAW_DATA (0x19) — upstream createRawData +
+                                // sendDirect: a PAYLOAD_TYPE_RAW_CUSTOM packet
+                                // DIRECT along the given path (encoded path_len,
+                                // validated by the parser). TABLE_FULL when the
+                                // payload does not fit or the TX queue is full.
+                                Ok(companion::cmd::Command::SendRawData { path_len, path, payload }) => {
+                                    let mut pv: heapless::Vec<u8, { ::meshcore::MAX_PATH_SIZE }> =
+                                        heapless::Vec::new();
+                                    let mut pl: heapless::Vec<u8, { ::meshcore::MAX_PAYLOAD_SIZE }> =
+                                        heapless::Vec::new();
+                                    let msg = (pv.extend_from_slice(path).is_ok()
+                                        && pl.extend_from_slice(payload).is_ok())
+                                    .then(|| ::meshcore::packet::Message {
+                                        payload_type: ::meshcore::packet::PayloadType::RawCustom,
+                                        route: ::meshcore::packet::RouteType::Direct,
+                                        version: 0,
+                                        transport_code: 0,
+                                        transport_code_2: 0,
+                                        path_len_byte: path_len,
+                                        path: pv,
+                                        payload: pl,
+                                    });
+                                    let mut frame = [0u8; ::meshcore::MAX_TRANS_UNIT];
+                                    let len = msg.and_then(|m| ::meshcore::packet::serialize(&m, &mut frame).ok());
+                                    match len.map(|len| crate::tx_send(crate::TxRequest::RawFrame { data: frame, len })) {
+                                        Some(Ok(())) => {
+                                            defmt::info!(
+                                                "companion: SEND_RAW_DATA path_len={=u8:#04x} ({=usize}B) → queued",
+                                                path_len,
+                                                payload.len(),
+                                            );
+                                            companion::Response::Ok
+                                        }
+                                        _ => {
+                                            defmt::warn!("companion: SEND_RAW_DATA not queued");
+                                            companion::Response::Error(companion::ErrorCode::TableFull)
+                                        }
+                                    }
                                 }
 
                                 // RUN_CLI_COMMAND (0x42, v14+) — text CLI, see
