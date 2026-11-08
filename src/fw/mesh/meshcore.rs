@@ -1502,6 +1502,7 @@ async fn dispatch_tx(
             send_admin_status_request(lora, msg, identity).await
         }
         crate::TxRequest::BinaryReq(msg) => send_binary_request(lora, msg, identity).await,
+        crate::TxRequest::AnonReq(msg) => send_anon_request(lora, msg, identity).await,
         crate::TxRequest::TelemReq(msg) => send_telem_request(lora, msg, identity).await,
         crate::TxRequest::DiscoveryReq(msg) => send_discovery_request(lora, msg, identity).await,
         crate::TxRequest::ControlData(msg) => send_control_data(lora, msg).await,
@@ -2667,6 +2668,152 @@ async fn send_admin_status_request(
 // Generic binary request transmission
 // ---------------------------------------------------------------------------
 
+/// Build and transmit an unauthenticated `PAYLOAD_TYPE_ANON_REQ` —
+/// the companion protocol's `SEND_ANON_REQ` (0x39 / 57) pipe, which the app
+/// uses for **Discover Regions** (`ANON_REQ_TYPE_REGIONS = 0x01`).
+///
+/// `req.data[0]` is the `ANON_REQ_TYPE_*` discriminant. Plaintext layout:
+/// ```text
+/// [tag:4 LE][anon_req_type:1][params...]
+/// ```
+/// matching C++ `BaseChatMesh::sendAnonReq()`, whose `createAnonDatagram` body
+/// is `[tag:4][data...]`. No login is required — the repeater derives the
+/// shared secret from the sender identity carried in the packet.
+async fn send_anon_request(
+    lora: &mut SimpleLoRa<'_>,
+    req: crate::TxAnonReq,
+    identity: &DeviceIdentity,
+) {
+    use meshcore::MAX_TRANS_UNIT;
+    use meshcore::packet::{Message, PayloadType, RouteType};
+
+    if req.data.is_empty() {
+        defmt::warn!("send_anon_req: empty data — dropping");
+        return;
+    }
+
+    crate::LAST_REQ_TARGET.lock(|cell| cell.set(Some(req.pub_key)));
+
+    // ANON_REQ payload: `[dest_hash:1][sender_pk:32][mac:2][AES(tag:4 ‖ body)]`;
+    // the repeater reads the tag as its `timestamp` and switches on the first
+    // body byte. Built here rather than through `anon_req::encrypt`, whose
+    // plaintext slot only fits a 15-byte login password — a request carrying
+    // a multi-hop reply path needs up to `MAX_ANON_REQ_DATA`.
+    let secret = match meshcore::identity::derive_shared_secret(&identity.sec_key, &req.pub_key) {
+        Ok(s) => s,
+        Err(e) => {
+            defmt::warn!(
+                "send_anon_req: key exchange failed: {:?}",
+                defmt::Debug2Format(&e)
+            );
+            return;
+        }
+    };
+    let mut aes_key = [0u8; meshcore::CIPHER_KEY_SIZE];
+    aes_key.copy_from_slice(&secret[..meshcore::CIPHER_KEY_SIZE]);
+    let plain_len = 4 + req.data.len();
+    let mut plain = [0u8; 4 + crate::MAX_ANON_REQ_DATA];
+    plain[..4].copy_from_slice(&req.tag.to_le_bytes());
+    plain[4..plain_len].copy_from_slice(&req.data);
+    let mut cipher = [0u8; 4 + crate::MAX_ANON_REQ_DATA];
+    let (cipher_len, mac) = match meshcore::crypto::encrypt_then_mac(
+        &aes_key,
+        &secret,
+        &plain[..plain_len],
+        &mut cipher,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            defmt::warn!(
+                "send_anon_req: encrypt failed: {:?}",
+                defmt::Debug2Format(&e)
+            );
+            return;
+        }
+    };
+
+    // Route like the reference: a stored path goes direct, a contact without
+    // one floods, and a non-contact (FIRMWARE_VER_CODE 13 transient contact,
+    // `out_path_len = 0`) goes zero-hop direct.
+    let contact = contacts::ContactStore::new().find_by_key(&req.pub_key).await;
+    let (route, path_len_byte, path_bytes) = match contact {
+        Some(ref c) if c.out_path_len != contacts::OUT_PATH_UNKNOWN => {
+            let actual = c.path_actual_bytes();
+            let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
+            let _ = pv.extend_from_slice(&c.out_path[..actual]);
+            (RouteType::Direct, c.out_path_len, pv)
+        }
+        Some(_) => (
+            RouteType::Flood,
+            flood_path_len_byte(),
+            heapless::Vec::new(),
+        ),
+        None => (RouteType::Direct, 0, heapless::Vec::new()),
+    };
+
+    // The repeater gates ANON_REQ_TYPE_REGIONS (and OWNER/BASIC) on
+    // `packet->isRouteDirect()` — a flooded request is silently ignored, which
+    // looks identical to "discovery returns nothing". Say so rather than let it
+    // fail quietly; the fix is to establish a path to the repeater first.
+    if route != RouteType::Direct {
+        defmt::warn!(
+            "send_anon_req: no path to {=[u8]:02x} — sending FLOOD, but the repeater \
+             only answers anon type {=u8:#04x} on a DIRECT route; expect no reply",
+            &req.pub_key[..6],
+            req.data[0],
+        );
+    }
+
+    let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
+    let _ = payload_vec.push(req.pub_key[0]);
+    let _ = payload_vec.extend_from_slice(&identity.pub_key);
+    let _ = payload_vec.extend_from_slice(&mac);
+    let _ = payload_vec.extend_from_slice(&cipher[..cipher_len]);
+
+    let (route, transport_code) = match route {
+        RouteType::Flood => flood_route(PayloadType::AnonReq.to_u8(), &payload_vec),
+        r => (r, 0),
+    };
+    let msg = Message {
+        payload_type: PayloadType::AnonReq,
+        route,
+        version: 0,
+        transport_code,
+        path_len_byte,
+        path: path_bytes,
+        payload: payload_vec,
+    };
+
+    let mut frame = [0u8; MAX_TRANS_UNIT];
+    match meshcore::packet::serialize(&msg, &mut frame) {
+        Ok(len) => {
+            // The reply comes back as a plain RESPONSE echoing our tag, which is
+            // the same shape a binary request gets — so reuse that pending slot
+            // and the app sees the reference's PUSH_CODE_BINARY_RESPONSE (0x8C).
+            crate::PENDING_BINARY_REQ_TAG.set(req.tag);
+            if let Err(e) = lora.send_message(&frame[..len]).await {
+                defmt::warn!("send_anon_req: TX failed: {:?}", e);
+                crate::PENDING_BINARY_REQ_TAG.clear();
+            } else {
+                defmt::info!(
+                    "Anon req sent to {=[u8]:02x} tag={=u32:#010x} anon_type={=u8:#04x} direct={=bool} ({=usize}B)",
+                    &req.pub_key[..6],
+                    req.tag,
+                    req.data[0],
+                    msg.route == RouteType::Direct,
+                    len,
+                );
+            }
+        }
+        Err(e) => {
+            defmt::warn!(
+                "send_anon_req: packet serialize failed: {:?}",
+                defmt::Debug2Format(&e)
+            );
+        }
+    }
+}
+
 /// Build and transmit a generic `PAYLOAD_TYPE_REQ` with an opaque body —
 /// used by the companion protocol's `SEND_BINARY_REQ` (0x32) pipe for
 /// `REQ_TYPE_GET_NEIGHBOURS`, `REQ_TYPE_GET_ACCESS_LIST`,
@@ -2681,6 +2828,9 @@ async fn send_admin_status_request(
 /// path. `req_type` is stuffed into the txt_msg `flags` byte by decomposing
 /// it into `(attempt, txt_type)` such that `(attempt & 3) | (txt_type << 2) ==
 /// req_type`.
+///
+/// Unlike [`send_anon_request`] this requires the caller to be logged in to the
+/// target, so the shared secret is already in its ACL cache.
 async fn send_binary_request(
     lora: &mut SimpleLoRa<'_>,
     req: crate::TxBinaryReq,

@@ -96,6 +96,11 @@ pub mod fw {
     #[path = "lock.rs"]
     pub mod lock;
 
+    /// Companion text CLI — pure logic, compiled here so its unit tests run
+    /// on the host.
+    #[path = "mesh/cli.rs"]
+    pub mod cli;
+
     /// Host-simulator stubs for the shared settings menu, which reads these EPD
     /// tuning atomics/consts (`menu.rs`). The host has no e-paper panel, so the
     /// state is inert — the menu's adjust actions still update the live value
