@@ -2384,9 +2384,22 @@ async fn nus_peripheral_loop<C>(
                                                 rx_air_secs: s.rx_air_secs,
                                             }
                                         }
+                                        // EXCEPTION: STATS_TYPE_CORE (0) / PACKETS (2)
+                                        // exist upstream; the badge keeps no such
+                                        // counters and answers UNSUPPORTED_CMD.
+                                        0x00 | 0x02 => {
+                                            defmt::warn!(
+                                                "companion: GET_STATS type={=u8:#04x} not implemented",
+                                                stats_type
+                                            );
+                                            companion::Response::Error(
+                                                companion::ErrorCode::UnsupportedCmd,
+                                            )
+                                        }
+                                        // Upstream: unknown stats type → ILLEGAL_ARG.
                                         other => {
                                             defmt::warn!(
-                                                "companion: GET_STATS unsupported type={=u8:#04x}",
+                                                "companion: GET_STATS unknown type={=u8:#04x}",
                                                 other
                                             );
                                             companion::Response::Error(
