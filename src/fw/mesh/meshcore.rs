@@ -630,11 +630,19 @@ async fn push_grp_txt(
         }
     }
 
-    let ch = match channels.iter().find(|c| c.hash == grp.channel_hash) {
+    // The channel id is a single hash byte and can collide: like upstream
+    // Mesh::onRecvPacket, try (up to 4) channels with this hash in slot order
+    // and take the first whose key verifies the MAC.
+    let ch = match meshcore::payload::find_channel(
+        channels,
+        grp.channel_hash,
+        |c| c.hash,
+        |c| grp_txt::verify_mac(&c.key, &grp).is_ok(),
+    ) {
         Some(c) => c,
         None => {
             defmt::debug!(
-                "MeshCore GrpTxt [hash={=u8} {=i16}dBm] no matching channel (have: {=[u8]})",
+                "MeshCore GrpTxt [hash={=u8} {=i16}dBm] no channel verifies (have: {=[u8]})",
                 grp.channel_hash,
                 rssi,
                 &channels
@@ -645,15 +653,6 @@ async fn push_grp_txt(
             return;
         }
     };
-
-    if grp_txt::verify_mac(&ch.key, &grp).is_err() {
-        defmt::warn!(
-            "MeshCore GrpTxt [channel={=u8}] MAC mismatch on channel hash={=u8}",
-            grp.channel_hash,
-            ch.slot_idx,
-        );
-        return;
-    }
 
     // Region filter — before dedup, so a hidden copy can't suppress a later
     // one flooded with the right region.
@@ -802,22 +801,20 @@ async fn push_grp_data(
         }
     };
 
-    let Some(ch) = channels.iter().find(|c| c.hash == grp.channel_hash) else {
+    // Colliding channel hashes: first of up to 4 matches whose MAC verifies
+    // (upstream Mesh::onRecvPacket / searchChannelsByHash).
+    let Some(ch) = meshcore::payload::find_channel(
+        channels,
+        grp.channel_hash,
+        |c| c.hash,
+        |c| grp_data::verify_mac(&c.key, &grp).is_ok(),
+    ) else {
         defmt::debug!(
-            "GrpData: no channel match for hash={=u8:#04x}",
+            "GrpData: no channel verifies hash={=u8:#04x}",
             grp.channel_hash
         );
         return;
     };
-
-    if grp_data::verify_mac(&ch.key, &grp).is_err() {
-        defmt::warn!(
-            "GrpData [channel={=u8}] MAC mismatch on hash={=u8:#04x}",
-            ch.slot_idx,
-            grp.channel_hash,
-        );
-        return;
-    }
 
     // Region filter — before dedup, so a hidden copy can't suppress a later
     // one flooded with the right region.
