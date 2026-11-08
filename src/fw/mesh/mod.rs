@@ -619,6 +619,18 @@ pub static PENDING_ADMIN_STATUS_TAG: PendingTag = PendingTag::new();
 /// routing delivers the echoed-timestamp response to `BINARY_RESULT_CHANNEL`.
 pub static PENDING_BINARY_REQ_TAG: PendingTag = PendingTag::new();
 
+/// Target of the in-flight login (`CMD_SEND_LOGIN`), keyed like upstream's
+/// `pending_login`: the first 4 pub-key bytes as a LE u32 (see [`login_tag`]).
+/// A Response/Path reply is only a login result when it comes from this
+/// contact; any other unmatched response goes to the app as
+/// `PUSH_CODE_BINARY_RESPONSE` (MeshCore 1.18, e.g. sensor telemetry pushes).
+pub static PENDING_LOGIN: PendingTag = PendingTag::new();
+
+/// [`PENDING_LOGIN`] key for a contact's pub_key.
+pub fn login_tag(pub_key: &[u8; ::meshcore::PUB_KEY_SIZE]) -> u32 {
+    u32::from_le_bytes([pub_key[0], pub_key[1], pub_key[2], pub_key[3]])
+}
+
 /// Fast-path hint for the contact-scan loops in the receive handlers.
 ///
 /// Every outbound request handler (`send_login`, `send_admin_status_request`,
