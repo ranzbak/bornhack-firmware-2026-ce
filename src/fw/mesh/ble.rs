@@ -2555,38 +2555,14 @@ async fn nus_peripheral_loop<C>(
                                 crate::fw::kv::wipe_and_reset().await;
                             }
 
-                            // Persist an ADD_UPDATE_CONTACT payload to flash and push
-                            // ContactStart/Contact/ContactEnd back into the outbox.
+                            // Persist an ADD_UPDATE_CONTACT payload to flash. Upstream
+                            // answers the command with PACKET_OK only (already sent);
+                            // it pushes no contact frames.
                             if let Some(ref contact) = pending_contact {
                                 let store = contacts::ContactStore::new();
                                 match store.add_or_update(contact).await {
                                     Ok(r) => {
                                         defmt::info!("companion: ADD_UPDATE_CONTACT → {:?}", r);
-                                        let mut prefix = [0u8; 6];
-                                        prefix.copy_from_slice(&contact.pub_key[..6]);
-                                        let name_end =
-                                            contact.name.iter().position(|&b| b == 0).unwrap_or(32);
-                                        outbox_push(
-                                            outbox,
-                                            &companion::Response::ContactStart { count: 1 },
-                                        );
-                                        outbox_push(
-                                            outbox,
-                                            &companion::Response::Contact(
-                                                companion::response::Contact {
-                                                    pub_key_prefix: prefix,
-                                                    flags: contact.flags,
-                                                    last_seen: contact.last_advert_ts,
-                                                    name: &contact.name[..name_end],
-                                                },
-                                            ),
-                                        );
-                                        outbox_push(
-                                            outbox,
-                                            &companion::Response::ContactEnd {
-                                                lastmod: contact.lastmod,
-                                            },
-                                        );
                                     }
                                     Err(e) => defmt::warn!(
                                         "companion: ADD_UPDATE_CONTACT store failed: {:?}",
