@@ -1539,8 +1539,9 @@ async fn nus_peripheral_loop<C>(
                                         // The reference reads the default at send
                                         // time, so a new default takes effect at once
                                         // unless a 0x36 override / un-scoped is active.
+                                        let live = default_scope_key(value);
+                                        crate::DEFAULT_SCOPE_KEY.lock(|cell| cell.set(live));
                                         if SCOPE_FOLLOWS_DEFAULT.load(Ordering::Relaxed) {
-                                            let live = default_scope_key(value);
                                             crate::FLOOD_SCOPE_KEY.lock(|cell| cell.set(live));
                                         }
                                         match value {

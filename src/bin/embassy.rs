@@ -458,6 +458,7 @@ async fn main(spawner: Spawner) {
                 None => Some(settings::dk_bornhack_default_scope()),
             };
             bornhack_aegg::fw::mesh::FLOOD_SCOPE_KEY.lock(|c| c.set(scope));
+            bornhack_aegg::fw::mesh::DEFAULT_SCOPE_KEY.lock(|c| c.set(scope));
         }
 
         {

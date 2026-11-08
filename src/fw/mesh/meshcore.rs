@@ -30,10 +30,10 @@ struct LoadedChannel {
 
 impl LoadedChannel {
     /// Effective flood-scope key: the channel's region override, else the
-    /// global `FLOOD_SCOPE_KEY` (def_scope / dk-bornhack). `None` = unscoped.
+    /// global `DEFAULT_SCOPE_KEY` (def_scope / dk-bornhack). `None` = unscoped.
     fn scope_key(&self) -> Option<[u8; 16]> {
         if self.region.is_empty() {
-            crate::FLOOD_SCOPE_KEY.lock(|c| c.get())
+            crate::DEFAULT_SCOPE_KEY.lock(|c| c.get())
         } else {
             Some(meshcore::packet::region_key(&self.region))
         }
@@ -439,7 +439,7 @@ pub async fn run_meshcore_listener<'a>(
                             && msg.transport_code != 0)
                             .then_some(msg.transport_code);
                         let foreign_region =
-                            match (scope_code, crate::FLOOD_SCOPE_KEY.lock(|c| c.get())) {
+                            match (scope_code, crate::DEFAULT_SCOPE_KEY.lock(|c| c.get())) {
                                 (Some(tc), Some(key)) => {
                                     tc != meshcore::packet::calc_transport_code(
                                         &key,

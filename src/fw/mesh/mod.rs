@@ -228,8 +228,17 @@ pub static TUNING_CHANGED_SIGNAL: Signal<CriticalSectionRawMutex, u32> = Signal:
 /// signal only exists to break the receive call so the loop iterates.
 pub static TX_WAKEUP: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
-/// 16-byte transport key for region-scoped flood packets.
+/// 16-byte transport key for region-scoped flood packets — the companion
+/// app's live send scope (`SET_FLOOD_SCOPE` override / un-scoped, else the
+/// default). Only app-originated floods use it.
 pub static FLOOD_SCOPE_KEY: Mutex<CriticalSectionRawMutex, core::cell::Cell<Option<[u8; 16]>>> =
+    Mutex::new(core::cell::Cell::new(None));
+
+/// The badge's global region key: persisted `def_scope`, else dk-bornhack.
+/// Unlike [`FLOOD_SCOPE_KEY`] a session `SET_FLOOD_SCOPE` never changes it,
+/// mirroring the reference's `default_scope_key` vs `send_scope`. Channels
+/// without a region override send and filter against it.
+pub static DEFAULT_SCOPE_KEY: Mutex<CriticalSectionRawMutex, core::cell::Cell<Option<[u8; 16]>>> =
     Mutex::new(core::cell::Cell::new(None));
 
 // ---------------------------------------------------------------------------
