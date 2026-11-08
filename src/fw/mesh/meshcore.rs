@@ -1722,9 +1722,10 @@ async fn send_grp_data(
             let (r, code) = flood_route(PayloadType::GrpData.to_u8(), &msg_payload);
             (r, flood_path_len_byte(), heapless::Vec::new(), code)
         } else {
+            // `path_len` is the encoded byte ((hash_size-1)<<6 | hops), not a
+            // byte count; the parser already cut `path` to hops * hash_size.
             let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
-            let copy = (req.path_len as usize).min(req.path.len());
-            let _ = pv.extend_from_slice(&req.path[..copy]);
+            let _ = pv.extend_from_slice(&req.path);
             (RouteType::Direct, req.path_len, pv, 0u16)
         };
 
