@@ -10,6 +10,7 @@ pub mod ble;
 pub mod bonds;
 pub mod channel_browser;
 pub mod channels;
+pub mod cli;
 pub mod contacts;
 pub mod contacts_screen;
 pub mod device_identity;
@@ -337,10 +338,16 @@ pub struct TxBinaryReq {
 
 /// Maximum body carried in a `CMD_SEND_ANON_REQ`.
 ///
-/// Capped by `meshcore::payload::anon_req::MAX_PASSWORD_LEN` — the ANON_REQ
-/// plaintext is `[tag:4][body...]` inside a fixed 32-byte block, and `encrypt`
-/// rejects anything longer. A REGIONS request is 1–2 bytes, so this is ample.
-pub const MAX_ANON_REQ_DATA: usize = ::meshcore::payload::anon_req::MAX_PASSWORD_LEN;
+/// The ANON_REQ payload is `[dest_hash:1][sender_pk:32][mac:2][ciphertext]`
+/// and must fit `MAX_PAYLOAD_SIZE`; the ciphertext is the AES-padded
+/// `[tag:4][body...]`. That leaves 140 body bytes — enough for a REGIONS /
+/// OWNER request carrying a full 3-byte-hash reply path, which the 15-byte
+/// login-password slot of `anon_req::encrypt` was not.
+pub const MAX_ANON_REQ_DATA: usize =
+    (::meshcore::MAX_PAYLOAD_SIZE - 1 - ::meshcore::PUB_KEY_SIZE - ::meshcore::CIPHER_MAC_SIZE)
+        / ::meshcore::CIPHER_BLOCK_SIZE
+        * ::meshcore::CIPHER_BLOCK_SIZE
+        - 4;
 
 /// Unauthenticated `PAYLOAD_TYPE_ANON_REQ` with an opaque
 /// `[anon_req_type:1][params...]` body — the app's **Discover Regions**

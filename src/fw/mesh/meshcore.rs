@@ -2602,7 +2602,6 @@ async fn send_anon_request(
 ) {
     use meshcore::MAX_TRANS_UNIT;
     use meshcore::packet::{Message, PayloadType, RouteType};
-    use meshcore::payload::anon_req;
 
     if req.data.is_empty() {
         defmt::warn!("send_anon_req: empty data — dropping");
@@ -2611,19 +2610,35 @@ async fn send_anon_request(
 
     crate::LAST_REQ_TARGET.lock(|cell| cell.set(Some(req.pub_key)));
 
-    // ANON_REQ plaintext is `[tag:4][body...]`; the repeater reads the tag as
-    // its `timestamp` and switches on the first body byte. `anon_req::encrypt`
-    // lays out exactly that when `sync_since` is None, so the body goes in the
-    // `password` slot — it is an opaque tail either way.
-    let encrypted = match anon_req::encrypt(
-        &identity.sec_key,
-        &identity.pub_key,
-        &req.pub_key,
-        req.tag,
-        None,
-        &req.data,
+    // ANON_REQ payload: `[dest_hash:1][sender_pk:32][mac:2][AES(tag:4 ‖ body)]`;
+    // the repeater reads the tag as its `timestamp` and switches on the first
+    // body byte. Built here rather than through `anon_req::encrypt`, whose
+    // plaintext slot only fits a 15-byte login password — a request carrying
+    // a multi-hop reply path needs up to `MAX_ANON_REQ_DATA`.
+    let secret = match meshcore::identity::derive_shared_secret(&identity.sec_key, &req.pub_key) {
+        Ok(s) => s,
+        Err(e) => {
+            defmt::warn!(
+                "send_anon_req: key exchange failed: {:?}",
+                defmt::Debug2Format(&e)
+            );
+            return;
+        }
+    };
+    let mut aes_key = [0u8; meshcore::CIPHER_KEY_SIZE];
+    aes_key.copy_from_slice(&secret[..meshcore::CIPHER_KEY_SIZE]);
+    let plain_len = 4 + req.data.len();
+    let mut plain = [0u8; 4 + crate::MAX_ANON_REQ_DATA];
+    plain[..4].copy_from_slice(&req.tag.to_le_bytes());
+    plain[4..plain_len].copy_from_slice(&req.data);
+    let mut cipher = [0u8; 4 + crate::MAX_ANON_REQ_DATA];
+    let (cipher_len, mac) = match meshcore::crypto::encrypt_then_mac(
+        &aes_key,
+        &secret,
+        &plain[..plain_len],
+        &mut cipher,
     ) {
-        Ok(p) => p,
+        Ok(r) => r,
         Err(e) => {
             defmt::warn!(
                 "send_anon_req: encrypt failed: {:?}",
@@ -2633,6 +2648,9 @@ async fn send_anon_request(
         }
     };
 
+    // Route like the reference: a stored path goes direct, a contact without
+    // one floods, and a non-contact (FIRMWARE_VER_CODE 13 transient contact,
+    // `out_path_len = 0`) goes zero-hop direct.
     let contact = contacts::ContactStore::new().find_by_key(&req.pub_key).await;
     let (route, path_len_byte, path_bytes) = match contact {
         Some(ref c) if c.out_path_len != contacts::OUT_PATH_UNKNOWN => {
@@ -2641,11 +2659,12 @@ async fn send_anon_request(
             let _ = pv.extend_from_slice(&c.out_path[..actual]);
             (RouteType::Direct, c.out_path_len, pv)
         }
-        _ => (
+        Some(_) => (
             RouteType::Flood,
             flood_path_len_byte(),
             heapless::Vec::new(),
         ),
+        None => (RouteType::Direct, 0, heapless::Vec::new()),
     };
 
     // The repeater gates ANON_REQ_TYPE_REGIONS (and OWNER/BASIC) on
@@ -2662,7 +2681,10 @@ async fn send_anon_request(
     }
 
     let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
-    let _ = payload_vec.extend_from_slice(&encrypted);
+    let _ = payload_vec.push(req.pub_key[0]);
+    let _ = payload_vec.extend_from_slice(&identity.pub_key);
+    let _ = payload_vec.extend_from_slice(&mac);
+    let _ = payload_vec.extend_from_slice(&cipher[..cipher_len]);
 
     let (route, transport_code) = match route {
         RouteType::Flood => flood_route(PayloadType::AnonReq.to_u8(), &payload_vec),

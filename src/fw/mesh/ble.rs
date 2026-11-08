@@ -50,7 +50,7 @@ use static_cell::StaticCell;
 use trouble_host::prelude::*;
 
 use super::bonds::{BOND_CMD_CHANNEL, BondCmd, INITIAL_BONDS};
-use super::{channels, contacts, msg_queue, settings};
+use super::{channels, cli, contacts, msg_queue, settings};
 
 // ---------------------------------------------------------------------------
 // Interrupt bindings for MPSL + RNG
@@ -256,6 +256,28 @@ fn outbox_push(
         outbox.pop_front();
         let _ = outbox.push_back(entry);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Flood send scope (SET_FLOOD_SCOPE 0x36 / SET_DEFAULT_FLOOD_SCOPE 0x3F)
+// ---------------------------------------------------------------------------
+
+/// `true` while no `SET_FLOOD_SCOPE` override or un-scoped request is active,
+/// so [`crate::FLOOD_SCOPE_KEY`] tracks the default scope. Together with that
+/// key this models the reference companion's `send_scope` / `send_unscoped`
+/// (`MyMesh::sendFloodScoped`); like those it is runtime-only and resets to
+/// the default scope at boot.
+static SCOPE_FOLLOWS_DEFAULT: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(true);
+
+/// Live flood key when following the default scope: the persisted
+/// `def_scope`, else the dk-bornhack fallback (the same rule boot applies).
+/// An all-zero key is the reference's null `TransportKey`, i.e. un-scoped.
+fn default_scope_key(def: Option<settings::DefaultFloodScope>) -> Option<[u8; 16]> {
+    let key = def
+        .map(|s| s.key)
+        .unwrap_or_else(settings::dk_bornhack_default_scope);
+    (key != [0u8; 16]).then_some(key)
 }
 
 /// Events pushed to the BLE task from the radio and system channels.
@@ -894,6 +916,8 @@ async fn nus_peripheral_loop<C>(
                             let mut pending_default_scope: Option<
                                 settings::DefaultFloodScope,
                             > = None;
+                            // RUN_CLI_COMMAND reply text, borrowed by the encoded response.
+                            let mut cli_reply = cli::Reply::new();
                             // Self-telemetry LPP buffer: voltage (4B) + temperature (4B).
                             let mut self_telem_lpp: [u8; 8] = [0u8; 8];
                             let mut self_telem_lpp_len: usize;
@@ -927,12 +951,11 @@ async fn nus_peripheral_loop<C>(
                                 Ok(companion::cmd::Command::DeviceQuery(ver)) => {
                                     defmt::debug!("companion: DEVICE_QUERY ver={=u8}", ver);
                                     companion::Response::DeviceInfo(companion::DeviceInfo {
-                                        // FIRMWARE_VER_CODE bumped 10 → 11 in MeshCore 1.15.0
-                                        // (commit d2fdd6fa).  Advertises support for the
-                                        // PAYLOAD_TYPE_GRP_DATA codec with the 1.15 wire
-                                        // format (no timestamp, u16 data_type, explicit
-                                        // data_len byte).
-                                        fw_version: 11,
+                                        // FIRMWARE_VER_CODE 14 = MeshCore 1.18: 11 (1.15)
+                                        // GRP_DATA codec, 12 SET_FLOOD_SCOPE un-scoped
+                                        // variant, 13 non-contact SEND_ANON_REQ (plus
+                                        // SEND_RAW_PACKET), 14 RUN_CLI_COMMAND.
+                                        fw_version: cli::FIRMWARE_VER_CODE,
                                         // Protocol encodes capacity as (actual ÷ 2); u8 max = 255
                                         // so we saturate at 510 (255 × 2) as the reported limit.
                                         max_contacts_raw: (contacts::MAX_CONTACTS / 2)
@@ -943,9 +966,9 @@ async fn nus_peripheral_loop<C>(
                                             let v = crate::BLE_PASSKEY.load(Ordering::Relaxed);
                                             if v == u32::MAX { 0 } else { v }
                                         },
-                                        fw_build: b"dev",
-                                        model: b"BornHack Cyber\xC3\x86gg",
-                                        version: b"v1.15.0",
+                                        fw_build: cli::FIRMWARE_BUILD.as_bytes(),
+                                        model: cli::BOARD_NAME.as_bytes(),
+                                        version: cli::FIRMWARE_VERSION.as_bytes(),
                                         client_repeat: false,
                                         // Report the current `PATH_HASH_MODE` so the
                                         // companion app reflects the value the user just
@@ -1381,16 +1404,35 @@ async fn nus_peripheral_loop<C>(
                                     }
                                 }
 
-                                // Pre-MeshCore-1.15 `SET_FLOOD_SCOPE` (0x36).
-                                // Older phone-app builds still send this.
-                                // Apply at runtime so they aren't broken,
-                                // but don't persist — `SET_DEFAULT_FLOOD_SCOPE`
-                                // (0x3F) is the persistent path on 1.15+.
+                                // `SET_FLOOD_SCOPE` (0x36 0x00) — runtime send-scope
+                                // override, not persisted. Like the reference, a
+                                // missing (or all-zero) key drops the override and
+                                // falls back to the default scope; either form
+                                // also ends a 0x36 0x01 un-scoped period.
                                 Ok(companion::cmd::Command::SetFloodScope(key)) => {
-                                    crate::FLOOD_SCOPE_KEY.lock(|cell| cell.set(key));
+                                    let key = key.filter(|k| *k != [0u8; 16]);
+                                    let live = match key {
+                                        Some(k) => Some(k),
+                                        None => default_scope_key(
+                                            settings::get_default_flood_scope().await,
+                                        ),
+                                    };
+                                    SCOPE_FOLLOWS_DEFAULT.store(key.is_none(), Ordering::Relaxed);
+                                    crate::FLOOD_SCOPE_KEY.lock(|cell| cell.set(live));
                                     defmt::debug!(
-                                        "companion: SET_FLOOD_SCOPE (legacy) → applied, not persisted"
+                                        "companion: SET_FLOOD_SCOPE override={=bool} scoped={=bool}",
+                                        key.is_some(),
+                                        live.is_some(),
                                     );
+                                    companion::Response::Ok
+                                }
+
+                                // `SET_FLOOD_SCOPE` (0x36 0x01, v12+) — send floods
+                                // un-scoped until the next 0x36 0x00.
+                                Ok(companion::cmd::Command::SetFloodUnscoped) => {
+                                    SCOPE_FOLLOWS_DEFAULT.store(false, Ordering::Relaxed);
+                                    crate::FLOOD_SCOPE_KEY.lock(|cell| cell.set(None));
+                                    defmt::debug!("companion: SET_FLOOD_SCOPE un-scoped");
                                     companion::Response::Ok
                                 }
 
@@ -1481,6 +1523,13 @@ async fn nus_peripheral_loop<C>(
                                                 "settings: default_flood_scope persist failed: {:?}",
                                                 e
                                             );
+                                        }
+                                        // The reference reads the default at send
+                                        // time, so a new default takes effect at once
+                                        // unless a 0x36 override / un-scoped is active.
+                                        if SCOPE_FOLLOWS_DEFAULT.load(Ordering::Relaxed) {
+                                            let live = default_scope_key(value);
+                                            crate::FLOOD_SCOPE_KEY.lock(|cell| cell.set(live));
                                         }
                                         match value {
                                             Some(v) => defmt::info!(
@@ -1764,49 +1813,163 @@ async fn nus_peripheral_loop<C>(
                                 // SEND_ANON_REQ (0x39) — the app's "Discover
                                 // Regions" transport. No login needed; the
                                 // repeater answers ANON_REQ_TYPE_REGIONS only on
-                                // a DIRECT route, so a target with no known path
+                                // a DIRECT route, so a contact with no known path
                                 // will get silence (send_anon_request logs it).
+                                // Since FIRMWARE_VER_CODE 13 the target may be a
+                                // non-contact, sent zero-hop direct like the
+                                // reference's transient contact.
+                                Ok(companion::cmd::Command::SendAnonReq { data, .. })
+                                    if data.len() > crate::MAX_ANON_REQ_DATA =>
+                                {
+                                    defmt::warn!(
+                                        "companion: SEND_ANON_REQ body too long ({=usize}B > {=usize}B)",
+                                        data.len(),
+                                        crate::MAX_ANON_REQ_DATA,
+                                    );
+                                    companion::Response::Error(
+                                        companion::ErrorCode::InvalidParameter,
+                                    )
+                                }
                                 Ok(companion::cmd::Command::SendAnonReq { pub_key, data }) => {
                                     let tag = crate::unix_now().unwrap_or(0);
                                     let mut d: heapless::Vec<u8, { crate::MAX_ANON_REQ_DATA }> =
                                         heapless::Vec::new();
-                                    let copy = data.len().min(crate::MAX_ANON_REQ_DATA);
-                                    let _ = d.extend_from_slice(&data[..copy]);
-                                    if copy < data.len() {
-                                        defmt::warn!(
-                                            "companion: SEND_ANON_REQ body truncated {=usize}B → {=usize}B",
-                                            data.len(),
-                                            copy,
-                                        );
-                                    }
+                                    let _ = d.extend_from_slice(data);
                                     let contact =
                                         contacts::ContactStore::new().find_by_key(pub_key).await;
                                     let is_flood = contact
                                         .as_ref()
                                         .map(|c| c.out_path_len == contacts::OUT_PATH_UNKNOWN)
-                                        .unwrap_or(true);
+                                        .unwrap_or(false);
                                     let est_timeout_ms =
                                         if is_flood { 30_000u32 } else { 15_000u32 };
                                     defmt::info!(
-                                        "companion: SEND_ANON_REQ key={=[u8]:02x} tag={=u32:#010x} anon_type={=u8:#04x} ({=usize}B) flood={=bool}",
+                                        "companion: SEND_ANON_REQ key={=[u8]:02x} tag={=u32:#010x} anon_type={=u8:#04x} ({=usize}B) contact={=bool} flood={=bool}",
                                         &pub_key[..6],
                                         tag,
                                         d.first().copied().unwrap_or(0),
                                         d.len(),
+                                        contact.is_some(),
                                         is_flood,
                                     );
-                                    let _ = crate::tx_send(crate::TxRequest::AnonReq(
+                                    match crate::tx_send(crate::TxRequest::AnonReq(
                                         crate::TxAnonReq {
                                             pub_key: *pub_key,
                                             tag,
                                             data: d,
                                         },
-                                    ));
-                                    companion::Response::SentWithTag {
-                                        is_flood,
-                                        tag,
-                                        est_timeout_ms,
+                                    )) {
+                                        Ok(()) => companion::Response::SentWithTag {
+                                            is_flood,
+                                            tag,
+                                            est_timeout_ms,
+                                        },
+                                        Err(_) => {
+                                            defmt::warn!(
+                                                "companion: SEND_ANON_REQ → TX queue full"
+                                            );
+                                            companion::Response::Error(
+                                                companion::ErrorCode::InsufficientStorage,
+                                            )
+                                        }
                                     }
+                                }
+
+                                // SEND_RAW_PACKET (0x41, v13+) — the reference
+                                // validates the frame with `tryParsePacket()` and
+                                // queues it untouched. `priority` picks a slot in
+                                // the reference's TX queue; ours is FIFO, so it
+                                // is logged and otherwise ignored.
+                                Ok(companion::cmd::Command::SendRawPacket { priority, packet }) => {
+                                    let valid = ::meshcore::packet::deserialize(packet)
+                                        .is_ok_and(|m| m.version == 0);
+                                    if !valid {
+                                        defmt::warn!(
+                                            "companion: SEND_RAW_PACKET unparseable ({=usize}B) → ERROR",
+                                            packet.len(),
+                                        );
+                                        companion::Response::Error(
+                                            companion::ErrorCode::InvalidParameter,
+                                        )
+                                    } else {
+                                        let mut frame = [0u8; ::meshcore::MAX_TRANS_UNIT];
+                                        frame[..packet.len()].copy_from_slice(packet);
+                                        match crate::tx_send(crate::TxRequest::RawFrame {
+                                            data: frame,
+                                            len: packet.len(),
+                                        }) {
+                                            Ok(()) => {
+                                                defmt::info!(
+                                                    "companion: SEND_RAW_PACKET pri={=u8} ({=usize}B) → queued",
+                                                    priority,
+                                                    packet.len(),
+                                                );
+                                                companion::Response::Ok
+                                            }
+                                            Err(_) => {
+                                                defmt::warn!(
+                                                    "companion: SEND_RAW_PACKET → TX queue full"
+                                                );
+                                                companion::Response::Error(
+                                                    companion::ErrorCode::InsufficientStorage,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // RUN_CLI_COMMAND (0x42, v14+) — text CLI, see
+                                // `cli.rs`. Setting changes reuse the pending_*
+                                // paths so they apply after the reply is sent.
+                                Ok(companion::cmd::Command::RunCli(line)) => {
+                                    let cur = cli::Settings {
+                                        name: &node_name[..node_name_len],
+                                        freq_hz: radio_params.freq_hz,
+                                        bw_hz: radio_params.bw_hz,
+                                        sf: radio_params.sf,
+                                        cr: radio_params.cr,
+                                        tx_power: radio_params.tx_power,
+                                        tz_offset: crate::TIMEZONE_OFFSET.load(Ordering::Relaxed),
+                                    };
+                                    match cli::run(line, &cur, &mut cli_reply) {
+                                        cli::Action::None => {}
+                                        cli::Action::SetName(name) => {
+                                            let mut new_name = [0u8; settings::MAX_NODE_NAME];
+                                            new_name[..name.len()].copy_from_slice(name);
+                                            pending_name = Some((new_name, name.len()));
+                                        }
+                                        cli::Action::SetRadio {
+                                            freq_hz,
+                                            bw_hz,
+                                            sf,
+                                            cr,
+                                        } => {
+                                            pending_radio = Some(settings::RadioParams {
+                                                freq_hz,
+                                                bw_hz,
+                                                sf,
+                                                cr,
+                                                ..radio_params
+                                            });
+                                        }
+                                        cli::Action::SetTxPower(tx_power) => {
+                                            pending_radio = Some(settings::RadioParams {
+                                                tx_power,
+                                                ..radio_params
+                                            });
+                                        }
+                                        cli::Action::SetTzOffset(tz) => {
+                                            crate::TIMEZONE_OFFSET.store(tz, Ordering::Relaxed);
+                                            crate::TZ_CHANGED_SIGNAL.signal(());
+                                        }
+                                        cli::Action::Reboot => pending_reboot = true,
+                                    }
+                                    defmt::info!(
+                                        "companion: RUN_CLI {=[u8]:a} → {=str}",
+                                        line,
+                                        cli_reply.as_str(),
+                                    );
+                                    companion::Response::CliReply(cli_reply.as_bytes())
                                 }
 
                                 Ok(companion::cmd::Command::SendBinaryReq {
