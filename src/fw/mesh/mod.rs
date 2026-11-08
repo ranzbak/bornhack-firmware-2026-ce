@@ -285,9 +285,9 @@ pub struct TxChannelMsg {
 }
 
 /// Maximum binary blob carried in a `CMD_SEND_CHANNEL_DATA`
-/// (PAYLOAD_TYPE_GRP_DATA). MeshCore 1.15 caps `data_len` at one byte, so the
-/// blob is at most 255 B.
-pub const MAX_CHANNEL_DATA: usize = 255;
+/// (PAYLOAD_TYPE_GRP_DATA): upstream `MAX_GROUP_DATA_LENGTH` = 184 - 16 - 3 =
+/// 165 B (#3386) — the most that still fits one encrypted payload.
+pub const MAX_CHANNEL_DATA: usize = ::meshcore::MAX_GROUP_DATA_LENGTH;
 
 pub struct TxChannelData {
     pub channel_idx: u8,

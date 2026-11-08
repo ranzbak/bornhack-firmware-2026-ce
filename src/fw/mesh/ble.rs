@@ -1401,9 +1401,20 @@ async fn nus_peripheral_loop<C>(
                                     path,
                                     payload,
                                 }) => {
-                                    if payload.len() > crate::MAX_CHANNEL_DATA {
+                                    // Validate up front like upstream (ILLEGAL_ARG)
+                                    // so the app gets an error, not OK-then-drop:
+                                    // bad path encoding (0xFF = flood is fine),
+                                    // DATA_TYPE_RESERVED (0), or a blob over
+                                    // MAX_GROUP_DATA_LENGTH (#3386).
+                                    if (path_len != contacts::OUT_PATH_UNKNOWN
+                                        && !::meshcore::packet::is_valid_path_len(path_len))
+                                        || data_type == 0
+                                        || payload.len() > crate::MAX_CHANNEL_DATA
+                                    {
                                         defmt::warn!(
-                                            "companion: SEND_CHANNEL_DATA payload too long ({=usize}B > {=usize}B)",
+                                            "companion: SEND_CHANNEL_DATA rejected: path_len={=u8:#04x} type={=u16:#06x} payload={=usize}B (max {=usize}B)",
+                                            path_len,
+                                            data_type,
                                             payload.len(),
                                             crate::MAX_CHANNEL_DATA,
                                         );
