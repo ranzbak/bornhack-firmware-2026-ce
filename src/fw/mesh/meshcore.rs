@@ -24,6 +24,50 @@ struct LoadedChannel {
     name: [u8; 32],
     key: [u8; 16],
     hash: u8,
+    /// Region override (see `channels::get_region`); empty = global scope.
+    region: heapless::String<{ channels::REGION_NAME_MAX }>,
+}
+
+impl LoadedChannel {
+    /// Effective flood-scope key: the channel's region override, else the
+    /// global `FLOOD_SCOPE_KEY` (def_scope / dk-bornhack). `None` = unscoped.
+    fn scope_key(&self) -> Option<[u8; 16]> {
+        if self.region.is_empty() {
+            crate::FLOOD_SCOPE_KEY.lock(|c| c.get())
+        } else {
+            Some(meshcore::packet::region_key(&self.region))
+        }
+    }
+
+    /// Region filter for received channel messages. With the filter on, a
+    /// message is shown only when it was flooded with this channel's
+    /// effective region (`scope_code` = the non-zero TransportFlood code, or
+    /// `None` for unscoped/direct packets). Filter off, no region configured,
+    /// or the internal SHDW game channel (zero-hop beacons) → always shown.
+    fn region_ok(&self, scope_code: Option<u16>, payload_type: u8, payload: &[u8]) -> bool {
+        if !crate::REGION_FILTER.load(core::sync::atomic::Ordering::Relaxed)
+            || self.slot_idx == channels::SHDW_SLOT
+        {
+            return true;
+        }
+        let Some(key) = self.scope_key() else {
+            return true;
+        };
+        let ok = scope_code
+            == Some(meshcore::packet::calc_transport_code(
+                &key,
+                payload_type,
+                payload,
+            ));
+        if !ok {
+            defmt::info!(
+                "channel slot {=u8}: region mismatch (tc={=u16:#06x}) — hidden",
+                self.slot_idx,
+                scope_code.unwrap_or(0),
+            );
+        }
+        ok
+    }
 }
 
 async fn load_channels() -> heapless::Vec<LoadedChannel, { channels::NUM_CHANNELS }> {
@@ -45,6 +89,7 @@ async fn load_channels() -> heapless::Vec<LoadedChannel, { channels::NUM_CHANNEL
                 name,
                 key,
                 hash,
+                region: channels::get_region(i).await.unwrap_or_default(),
             });
         }
     }
@@ -76,6 +121,7 @@ fn update_cached_channels(loaded: &heapless::Vec<LoadedChannel, { channels::NUM_
             let _ = list.push(crate::CachedChannel {
                 slot_idx: ch.slot_idx,
                 name,
+                region: ch.region.clone(),
             });
         }
     });
@@ -234,6 +280,13 @@ pub async fn run_meshcore_listener<'a>(
             cortex_m::peripheral::SCB::sys_reset();
         }
 
+        // Persist a region override set from the on-device channel browser,
+        // then reload the table below so TX/RX pick it up.
+        if let Some((idx, region)) = crate::CHANNEL_REGION_SIGNAL.try_take() {
+            channels::set_region(idx, &region).await;
+            crate::CHANNELS_CHANGED_SIGNAL.signal(());
+        }
+
         // Reload channel table if the BLE task updated a channel.
         if crate::CHANNELS_CHANGED_SIGNAL.signaled() {
             crate::CHANNELS_CHANGED_SIGNAL.reset();
@@ -374,52 +427,34 @@ pub async fn run_meshcore_listener<'a>(
                             msg.payload.len(),
                         );
 
-                        // Region check: if we have a flood-scope key and this is a
-                        // TransportFlood packet, verify the transport code.  A mismatch
-                        // means the packet belongs to a different region.  With the
-                        // (opt-in) region filter on it is dropped; otherwise it is
-                        // still handled locally but never relayed, so client-repeat
-                        // doesn't carry foreign-region floods into ours.
-                        // Transport code 0 is unscoped (MeshCore 1.18, #3568): the
-                        // reference `calc_transport_code` never yields 0, so it can only
-                        // mean "no region" and is accepted like a plain flood.
-                        let mut foreign_region = false;
-                        if matches!(msg.route, RouteType::TransportFlood) && msg.transport_code != 0 {
-                            let key = crate::FLOOD_SCOPE_KEY.lock(|c| c.get());
-                            defmt::debug!(
-                                "TransportFlood pkt: type={=u8} tc={=u16:#06x} key_set={=bool}",
-                                msg.payload_type.to_u8(),
-                                msg.transport_code,
-                                key.is_some(),
-                            );
-                            if let Some(key) = key {
-                                let expected = meshcore::packet::calc_transport_code(
-                                    &key,
-                                    msg.payload_type.to_u8(),
-                                    &msg.payload,
-                                );
-                                defmt::debug!(
-                                    "TransportFlood region check: got={=u16:#06x} expected={=u16:#06x}",
-                                    msg.transport_code,
-                                    expected,
-                                );
-                                if msg.transport_code != expected {
-                                    let drop = crate::REGION_FILTER
-                                        .load(core::sync::atomic::Ordering::Relaxed);
-                                    defmt::info!(
-                                        "TransportFlood region mismatch (got {=u16:#06x}, expected {=u16:#06x}) — {=str}",
-                                        msg.transport_code,
-                                        expected,
-                                        if drop { "dropped" } else { "accepted, not relayed" },
-                                    );
-                                    if drop {
-                                        continue;
-                                    }
-                                    foreign_region = true;
+                        // Region: a non-zero TransportFlood code is the sender's
+                        // region scope. Code 0 is unscoped (MeshCore 1.18, #3568):
+                        // the reference `calc_transport_code` never yields 0. Every
+                        // packet is still handled here; only channel messages are
+                        // region-filtered (per channel, see `LoadedChannel::region_ok`).
+                        // A code that doesn't match our global flood scope marks the
+                        // packet foreign so client-repeat doesn't carry other
+                        // regions' floods into ours.
+                        let scope_code = (matches!(msg.route, RouteType::TransportFlood)
+                            && msg.transport_code != 0)
+                            .then_some(msg.transport_code);
+                        let foreign_region =
+                            match (scope_code, crate::FLOOD_SCOPE_KEY.lock(|c| c.get())) {
+                                (Some(tc), Some(key)) => {
+                                    tc != meshcore::packet::calc_transport_code(
+                                        &key,
+                                        msg.payload_type.to_u8(),
+                                        &msg.payload,
+                                    )
                                 }
-                            }
-                            // No key set → wildcard: accept all TransportFlood
-                            // packets.
+                                // Unscoped, or no key set (wildcard).
+                                _ => false,
+                            };
+                        if foreign_region {
+                            defmt::debug!(
+                                "TransportFlood foreign region (tc={=u16:#06x}) — not relayed",
+                                msg.transport_code,
+                            );
                         }
 
                         // Client-repeat relay (if enabled) — own region / unscoped only.
@@ -438,8 +473,15 @@ pub async fn run_meshcore_listener<'a>(
                         };
                         match msg.payload_type {
                             PayloadType::GrpTxt => {
-                                push_grp_txt(&msg.payload, rssi, snr_x4, path_len, &loaded_channels)
-                                    .await
+                                push_grp_txt(
+                                    &msg.payload,
+                                    rssi,
+                                    snr_x4,
+                                    path_len,
+                                    scope_code,
+                                    &loaded_channels,
+                                )
+                                .await
                             }
                             PayloadType::GrpData => {
                                 push_grp_data(
@@ -447,6 +489,7 @@ pub async fn run_meshcore_listener<'a>(
                                     rssi,
                                     snr_x4,
                                     path_len,
+                                    scope_code,
                                     &loaded_channels,
                                 )
                                 .await
@@ -528,6 +571,7 @@ async fn push_grp_txt(
     rssi: i16,
     _snr_x4: i8,
     path_len: u8,
+    scope_code: Option<u16>,
     channels: &[LoadedChannel],
 ) {
     use meshcore::payload::grp_txt;
@@ -608,6 +652,16 @@ async fn push_grp_txt(
             grp.channel_hash,
             ch.slot_idx,
         );
+        return;
+    }
+
+    // Region filter — before dedup, so a hidden copy can't suppress a later
+    // one flooded with the right region.
+    if !ch.region_ok(
+        scope_code,
+        meshcore::packet::PayloadType::GrpTxt.to_u8(),
+        payload,
+    ) {
         return;
     }
 
@@ -734,29 +788,11 @@ async fn push_grp_data(
     rssi: i16,
     snr_x4: i8,
     path_len: u8,
+    scope_code: Option<u16>,
     channels: &[LoadedChannel],
 ) {
     use meshcore::packet::PayloadType;
     use meshcore::payload::grp_data;
-
-    // Suppress exact duplicates of the same broadcast arriving via more
-    // than one mesh path (direct + one or more repeater hops) — see
-    // `GRP_DATA_SEEN`'s doc comment. Must happen before any of the
-    // stateful handlers below (beacon boost, Battle result) run.
-    let dh = relay_hash(PayloadType::GrpData.to_u8(), payload);
-    let is_new = GRP_DATA_SEEN.lock(|cell| {
-        let mut ring = cell.borrow_mut();
-        if ring.contains(dh) {
-            false
-        } else {
-            ring.insert(dh);
-            true
-        }
-    });
-    if !is_new {
-        defmt::debug!("GrpData: duplicate suppressed (hash={=u32:#010x})", dh);
-        return;
-    }
 
     let grp = match grp_data::deserialize(payload) {
         Ok(g) => g,
@@ -780,6 +816,31 @@ async fn push_grp_data(
             ch.slot_idx,
             grp.channel_hash,
         );
+        return;
+    }
+
+    // Region filter — before dedup, so a hidden copy can't suppress a later
+    // one flooded with the right region.
+    if !ch.region_ok(scope_code, PayloadType::GrpData.to_u8(), payload) {
+        return;
+    }
+
+    // Suppress exact duplicates of the same broadcast arriving via more
+    // than one mesh path (direct + one or more repeater hops) — see
+    // `GRP_DATA_SEEN`'s doc comment. Must happen before any of the
+    // stateful handlers below (beacon boost, Battle result) run.
+    let dh = relay_hash(PayloadType::GrpData.to_u8(), payload);
+    let is_new = GRP_DATA_SEEN.lock(|cell| {
+        let mut ring = cell.borrow_mut();
+        if ring.contains(dh) {
+            false
+        } else {
+            ring.insert(dh);
+            true
+        }
+    });
+    if !is_new {
+        defmt::debug!("GrpData: duplicate suppressed (hash={=u32:#010x})", dh);
         return;
     }
 
@@ -1372,14 +1433,27 @@ async fn try_handle_txt_msg(
 ///
 /// When no key is set, returns `(Flood, 0)` — unscoped, accepted by all nodes.
 fn flood_route(payload_type_u8: u8, payload: &[u8]) -> (meshcore::packet::RouteType, u16) {
+    scoped_flood_route(
+        crate::FLOOD_SCOPE_KEY.lock(|cell| cell.get()),
+        payload_type_u8,
+        payload,
+    )
+}
+
+/// [`flood_route`] with an explicit scope key (e.g. a channel's region).
+fn scoped_flood_route(
+    key: Option<[u8; 16]>,
+    payload_type_u8: u8,
+    payload: &[u8],
+) -> (meshcore::packet::RouteType, u16) {
     use meshcore::packet::RouteType;
-    crate::FLOOD_SCOPE_KEY.lock(|cell| match cell.get() {
+    match key {
         Some(key) => {
             let code = meshcore::packet::calc_transport_code(&key, payload_type_u8, payload);
             (RouteType::TransportFlood, code)
         }
         None => (RouteType::Flood, 0),
-    })
+    }
 }
 
 /// `path_len_byte` to use for a freshly-originated flood packet (0 hops).
@@ -1466,6 +1540,13 @@ async fn send_grp_txt(
         return;
     };
     let (key, hash) = (ch.key, ch.hash);
+    // Badge-originated sends use the channel's effective region; companion
+    // sends keep the app-controlled flood scope.
+    let scope = if req.channel_region {
+        ch.scope_key()
+    } else {
+        crate::FLOOD_SCOPE_KEY.lock(|c| c.get())
+    };
 
     // MeshCore GrpTxt wire format embeds the sender as "Name: MessageText".
     // Use the persisted node name, falling back to the 4-byte device-ID hex if
@@ -1513,7 +1594,8 @@ async fn send_grp_txt(
     let mut msg_payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
     let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
-    let (route, transport_code) = flood_route(PayloadType::GrpTxt.to_u8(), &msg_payload);
+    let (route, transport_code) =
+        scoped_flood_route(scope, PayloadType::GrpTxt.to_u8(), &msg_payload);
     let msg = Message {
         payload_type: PayloadType::GrpTxt,
         route,
@@ -3478,8 +3560,7 @@ async fn try_dispatch_path_by_pk(
             let solicited = crate::PENDING_BINARY_REQ_TAG.take_if_match(tag);
             let mut pub_key = [0u8; meshcore::PUB_KEY_SIZE];
             pub_key.copy_from_slice(sender_pk);
-            let mut body: heapless::Vec<u8, { crate::MAX_BINARY_RESP_BODY }> =
-                heapless::Vec::new();
+            let mut body: heapless::Vec<u8, { crate::MAX_BINARY_RESP_BODY }> = heapless::Vec::new();
             let n = (dec.extra.len() - 4).min(crate::MAX_BINARY_RESP_BODY);
             let _ = body.extend_from_slice(&dec.extra[4..4 + n]);
 
@@ -3491,7 +3572,8 @@ async fn try_dispatch_path_by_pk(
                 solicited,
             );
 
-            let _ = crate::BINARY_RESULT_CHANNEL.try_send(crate::BinaryResult { pub_key, tag, body });
+            let _ =
+                crate::BINARY_RESULT_CHANNEL.try_send(crate::BinaryResult { pub_key, tag, body });
         }
     }
 

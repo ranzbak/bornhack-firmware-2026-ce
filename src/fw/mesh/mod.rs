@@ -122,6 +122,8 @@ pub static CHANNEL_MSG_RING: Mutex<CriticalSectionRawMutex, RefCell<ChannelMsgRi
 pub struct CachedChannel {
     pub slot_idx: u8,
     pub name: heapless::String<20>,
+    /// Per-channel region override; empty = global flood scope.
+    pub region: heapless::String<{ channels::REGION_NAME_MAX }>,
 }
 
 pub static CACHED_CHANNELS: Mutex<
@@ -204,6 +206,14 @@ pub static CONTACT_RESET_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::n
 /// channels.
 pub static CHANNELS_CHANGED_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
+/// Set (non-empty) or clear (empty) a channel slot's region override from the
+/// on-device channel browser. The meshcore task persists it and reloads its
+/// channel table; senders also fire `TX_WAKEUP` so that happens promptly.
+pub static CHANNEL_REGION_SIGNAL: Signal<
+    CriticalSectionRawMutex,
+    (u8, heapless::String<{ channels::REGION_NAME_MAX }>),
+> = Signal::new();
+
 /// Signals the meshcore task that tuning params changed; carries the new
 /// airtime_factor_x1000.
 pub static TUNING_CHANGED_SIGNAL: Signal<CriticalSectionRawMutex, u32> = Signal::new();
@@ -282,6 +292,10 @@ pub struct TxChannelMsg {
     pub channel_idx: u8,
     pub timestamp: u32,
     pub text: heapless::Vec<u8, { msg_queue::MAX_TEXT }>,
+    /// Flood with the channel's effective region (its override, else the
+    /// global scope) — badge-originated sends. `false` keeps the
+    /// app-controlled `FLOOD_SCOPE_KEY` for companion-app sends.
+    pub channel_region: bool,
 }
 
 /// Maximum binary blob carried in a `CMD_SEND_CHANNEL_DATA`

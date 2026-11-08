@@ -1360,6 +1360,7 @@ async fn nus_peripheral_loop<C>(
                                             channel_idx: channel,
                                             timestamp,
                                             text: v,
+                                            channel_region: false,
                                         },
                                     )) {
                                         Ok(()) => {
