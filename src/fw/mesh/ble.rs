@@ -1253,6 +1253,18 @@ async fn nus_peripheral_loop<C>(
                                     companion::Response::Ok
                                 }
 
+                                // Upstream refuses to move the RTC backwards
+                                // (ERR_CODE_ILLEGAL_ARG). EXCEPTION: only once the
+                                // phone itself set the clock — a clock seeded from
+                                // mesh timestamps may be wrong and the phone must
+                                // be able to correct it.
+                                Ok(companion::cmd::Command::SetDeviceTime(ts))
+                                    if crate::BLE_TIME_LOCKED.load(core::sync::atomic::Ordering::Relaxed)
+                                        && crate::unix_now().is_some_and(|now| ts < now) =>
+                                {
+                                    defmt::warn!("companion: SET_DEVICE_TIME {=u32} is in the past", ts);
+                                    companion::Response::Error(companion::ErrorCode::IllegalArg)
+                                }
                                 Ok(companion::cmd::Command::SetDeviceTime(ts)) => {
                                     crate::set_wall_clock(ts);
                                     crate::BLE_TIME_LOCKED
