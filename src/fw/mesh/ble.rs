@@ -1161,6 +1161,12 @@ async fn nus_peripheral_loop<C>(
                                     companion::Response::Ok
                                 }
 
+                                // Upstream CMD_RESET_PATH: unknown contact → NOT_FOUND.
+                                Ok(companion::cmd::Command::ResetPath(key))
+                                    if contacts::ContactStore::new().find_by_key(key).await.is_none() =>
+                                {
+                                    companion::Response::Error(companion::ErrorCode::NotFound)
+                                }
                                 Ok(companion::cmd::Command::ResetPath(key)) => {
                                     defmt::info!(
                                         "companion: RESET_PATH key={=[u8]:02x}",
