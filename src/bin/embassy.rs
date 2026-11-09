@@ -306,6 +306,11 @@ async fn main(spawner: Spawner) {
         static RED_1680: StaticCell<[u8; PLANE_N]> = StaticCell::new();
         static PREV_1680: StaticCell<[u8; PLANE_N]> = StaticCell::new();
         static PREV_RED_1680: StaticCell<[u8; PLANE_N]> = StaticCell::new();
+        // Damage bitmap: 1 bit per panel pixel, so the same PLANE_N bytes.
+        // Records every pixel a waveform has touched but not confirmed, and is
+        // cleared only when a drive completes — this is what lets an
+        // interrupted refresh be resumed instead of diffed away.
+        static DIRTY_1680: StaticCell<[u8; PLANE_N]> = StaticCell::new();
         static CODE_BW_1680: StaticCell<[u8; PLANE_N]> = StaticCell::new();
         static CODE_RED_1680: StaticCell<[u8; PLANE_N]> = StaticCell::new();
         // 152×152 UI canvas planes (the driver scales these into the panel).
@@ -353,6 +358,7 @@ async fn main(spawner: Spawner) {
             RED_1680.init([0x00; PLANE_N]),
             PREV_1680.init([0xFF; PLANE_N]),
             PREV_RED_1680.init([0x00; PLANE_N]),
+            DIRTY_1680.init([0x00; PLANE_N]),
             CODE_BW_1680.init([0xFF; PLANE_N]),
             CODE_RED_1680.init([0xFF; PLANE_N]),
             false, // scale_fill: canvas matches the 152×152 panel 1:1
@@ -1033,6 +1039,11 @@ async fn display_loop(
 /// non-blink delta waveform, so every runtime update uses [`RefreshMode::Fast`]
 /// (the boot paint in `main` is the only full refresh) and screen switches ride
 /// the same delta path.
+///
+/// A button or signal arriving mid-drive cancels the refresh rather than
+/// queueing behind it; the controller is recovered by hardware reset on the
+/// next refresh. See the `select` at the bottom of the loop for the mechanism
+/// and its trade-offs.
 #[cfg(feature = "ssd1680-driver")]
 async fn display_loop_1680<D>(
     display: &mut D,
@@ -1048,6 +1059,7 @@ async fn display_loop_1680<D>(
         + embedded_graphics::geometry::OriginDimensions,
 {
     use bornhack_aegg::epd_driver::RefreshMode;
+    use embassy_futures::select::{Either, select};
 
     #[cfg(feature = "game")]
     let mut sprite_frame: u8 = 0;
@@ -1088,15 +1100,42 @@ async fn display_loop_1680<D>(
             .swap(false, core::sync::atomic::Ordering::Relaxed);
         let mode = RefreshMode::Fast;
 
-        // Drive to completion (not wrapped in a cancelling `select` — a dropped
-        // mid-SPI refresh future could desync the controller). A button pressed
-        // during the drive is latched in the watch channel and returns from the
-        // wait below immediately after.
-        let _ = display.refresh(mode).await;
+        // Interrupt the in-flight LUT on a new draw event instead of waiting the
+        // whole drive out — the SSD1675 path does the same, and it is what makes
+        // button presses feel immediate rather than one refresh behind.
+        //
+        // The SSD1680 has no abort command, so the mechanism is: drop the
+        // refresh future (it parks in `busy_wait_for_completion`), which leaves
+        // `Display::in_flight` set; the next refresh sees the flag and runs
+        // `hw_reset_and_init` — RESET pin, SoftReset, re-init — before driving
+        // the new frame. See the "Cancellation safety" section in
+        // `vendor/ssd1680/src/display.rs`. Losing controller RAM to that reset
+        // costs nothing here because `update_delta` re-uploads both full code
+        // planes every call. The adapter commits `prev`/`prev_red` only after
+        // the await returns, so a cancelled frame's pixels stay dirty and the
+        // next delta re-drives them.
+        //
+        // `allow_sprite = false`: only buttons/signals cut a drive short. If the
+        // animation frame timer could interrupt too, a timer faster than the
+        // refresh would cancel every drive in turn and the panel would never
+        // finish one — the sprite would freeze while the controller thrashed
+        // through resets. Animation ticks therefore wait their turn; user input
+        // does not.
+        let sprite_advance = match select(
+            display.refresh(mode),
+            wait_display_event(button_rcvr, active_screen, false),
+        )
+        .await
+        {
+            // Drive completed untouched — wait for the next event as before.
+            Either::First(_) => wait_display_event(button_rcvr, active_screen, true).await,
+            // Interrupted: redraw immediately without advancing the animation
+            // frame (the sprite timer is suppressed above, so this is always a
+            // button or signal).
+            Either::Second(_) => false,
+        };
 
         led::set_led(&led::LED_RED, led::LedState::BlinkOnce);
-
-        let sprite_advance = wait_display_event(button_rcvr, active_screen, true).await;
 
         #[cfg(feature = "game")]
         if sprite_advance {
