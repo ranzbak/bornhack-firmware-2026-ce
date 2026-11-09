@@ -164,7 +164,7 @@ fn run_sim(policy: &dyn Policy, seed: u64, max_days: u32) -> f64 {
     let ticks_per_day: u32 = 8640;
     let max_ticks = max_days * ticks_per_day;
 
-    let mut state = GameState::new_egg(seed, PetKind::Bartholomeus);
+    let mut state = GameState::new_egg(seed, PetKind::DEFAULT);
     // These survival-curve tests exercise the core stat-decay/action
     // mechanics, not the money layer — none of the `Policy` impls below earn
     // HEX, so the Stage-5 affordability gate would otherwise starve the pet
@@ -194,7 +194,7 @@ fn run_sim_with_interval(
     let ticks_per_day: u32 = 8640;
     let max_ticks = max_days * ticks_per_day;
 
-    let mut state = GameState::new_egg(seed, PetKind::Bartholomeus);
+    let mut state = GameState::new_egg(seed, PetKind::DEFAULT);
     // See the comment in `run_sim` — money is irrelevant to these tests and
     // would otherwise starve the pet of affordable actions.
     state.money_enabled = false;
@@ -218,7 +218,7 @@ fn run_sim_with_interval(
 
 #[test]
 fn new_egg_starts_hatching() {
-    let state = GameState::new_egg(42, PetKind::Bartholomeus);
+    let state = GameState::new_egg(42, PetKind::DEFAULT);
     assert_eq!(state.phase, Phase::Hatching);
     assert_eq!(state.hatching_countdown, HATCHING_TICKS());
     assert_eq!(state.hunger, 0);
@@ -228,7 +228,7 @@ fn new_egg_starts_hatching() {
 
 #[test]
 fn hatching_completes() {
-    let mut state = GameState::new_egg(42, PetKind::Bartholomeus);
+    let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
     assert_eq!(state.phase, Phase::Active);
     assert_eq!(state.hatching_countdown, 0);
@@ -236,7 +236,7 @@ fn hatching_completes() {
 
 #[test]
 fn hunger_increases_over_time() {
-    let mut state = GameState::new_egg(42, PetKind::Bartholomeus);
+    let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32); // hatch
     let h0 = state.hunger;
     state.update(HATCHING_TICKS() as u32 + 100);
@@ -250,7 +250,7 @@ fn hunger_increases_over_time() {
 
 #[test]
 fn feed_reduces_hunger() {
-    let mut state = GameState::new_egg(42, PetKind::Bartholomeus);
+    let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
     // Let hunger build up.
     state.update(HATCHING_TICKS() as u32 + 1000);
@@ -268,7 +268,7 @@ fn feed_reduces_hunger() {
 fn play_reduces_miserable_by_happiness_step() {
     use bornhack_aegg::game::engine::HAPPINESS_STEP;
 
-    let mut state = GameState::new_egg(42, PetKind::Bartholomeus);
+    let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
     state.miserable = 30000; // artificially set high
     assert!(state.play());
@@ -282,7 +282,7 @@ fn play_reduces_miserable_by_happiness_step() {
 
 #[test]
 fn sleep_recovers_tired() {
-    let mut state = GameState::new_egg(42, PetKind::Bartholomeus);
+    let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
     state.tired = 50000;
     assert!(state.sleep());
@@ -292,7 +292,7 @@ fn sleep_recovers_tired() {
 
 #[test]
 fn auto_wake_when_tired_zero() {
-    let mut state = GameState::new_egg(42, PetKind::Bartholomeus);
+    let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
     state.tired = 1000;
     assert!(state.sleep());
@@ -360,7 +360,7 @@ fn diagnostic_attentive_hourly_dump() {
     let ticks_per_hour: u32 = 360;
     let max_ticks = ticks_per_day * 3;
 
-    let mut state = GameState::new_egg(42, PetKind::Bartholomeus);
+    let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     // See the comment in `run_sim` — money is irrelevant to this diagnostic.
     state.money_enabled = false;
     let mut tick: u32 = 0;
@@ -442,7 +442,7 @@ fn different_seeds_produce_different_results() {
 
 #[test]
 fn leaving_triggers_on_maxed_stats() {
-    let mut state = GameState::new_egg(42, PetKind::Bartholomeus);
+    let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
     // Force all remaining "maxed" stats to max. NOTE: `drained` was removed
     // in Stage 4, so `count_maxed` now covers 3 stats (hunger/tired/sick)
@@ -463,7 +463,7 @@ fn leaving_triggers_on_maxed_stats() {
 
 #[test]
 fn next_wake_tick_during_hatching() {
-    let state = GameState::new_egg(42, PetKind::Bartholomeus);
+    let state = GameState::new_egg(42, PetKind::DEFAULT);
     let wake = state.next_wake_tick();
     assert_eq!(
         wake,
@@ -474,7 +474,7 @@ fn next_wake_tick_during_hatching() {
 
 #[test]
 fn next_wake_tick_bounded_by_max_sleep() {
-    let mut state = GameState::new_egg(42, PetKind::Bartholomeus);
+    let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
     let wake = state.next_wake_tick();
     assert!(
@@ -485,7 +485,7 @@ fn next_wake_tick_bounded_by_max_sleep() {
 
 #[test]
 fn cooldown_prevents_action_spam() {
-    let mut state = GameState::new_egg(42, PetKind::Bartholomeus);
+    let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
     assert!(state.feed(FoodKind::Apple));
     state.update(state.last_update_tick + FEED_DURATION() as u32);

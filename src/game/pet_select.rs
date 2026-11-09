@@ -20,7 +20,7 @@ use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
 
 use super::engine::PetKind;
-use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_WHITE};
+use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_BLACK, TEXT_BOLD_WHITE};
 use crate::{BLACK, TriColor, WHITE};
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -39,6 +39,12 @@ const MONEY_LABELS: [&str; 3] = ["With money", "Without money", "Hard mode (US)"
 /// Number of rows in the money phase — derived from `MONEY_LABELS`.
 const MONEY_OPTION_COUNT: u8 = MONEY_LABELS.len() as u8;
 
+/// Shown in place of the pet list when the roster is empty.  The roster comes
+/// only from `PETS.CFG` (see `crate::game::pet_registry`), so an absent or
+/// unusable manifest leaves nothing to select — name the file so the player
+/// knows what to put back on the USB partition.
+const NO_PETS_LINES: [&str; 2] = ["No pets installed", "Check PETS.CFG"];
+
 /// What to do after selection: 0 = new game, 1 = new generation.
 static MODE: AtomicU8 = AtomicU8::new(0);
 
@@ -54,6 +60,32 @@ static CHOSEN_KIND_IDX: AtomicU8 = AtomicU8::new(0);
 
 const PHASE_PET: u8 = 0;
 const PHASE_MONEY: u8 = 1;
+
+// ── Layout ───────────────────────────────────────────────────────────────────
+
+/// Top of the option-list band — just below the title bar.
+const LIST_BAND_TOP: i32 = ui::TITLE_BAR_H as i32 + 2;
+/// Baseline of the "Fire to confirm" hint at the bottom of the screen.
+const HINT_BASELINE_Y: i32 = 148;
+/// Height of the band the option rows are laid out in: everything between
+/// the title bar and the top of the hint text (13px font, bottom baseline).
+const LIST_BAND_H: i32 = HINT_BASELINE_Y - 13 - LIST_BAND_TOP;
+
+/// Row pitch and the y of the first row's centre for a list of `count`
+/// options, as `(row_h, start_y)`.
+///
+/// The pitch shrinks with the item count so a growing pet roster keeps
+/// fitting in the band instead of drawing over the "Fire to confirm"
+/// hint (the 5-pet roster overflowed at the old fixed 24px pitch). Capped
+/// at 24 so short lists keep the roomy look, floored at 15 so the
+/// highlight box never clips the 13px font, and the resulting block is
+/// centred vertically in the band.
+fn row_layout(count: usize) -> (i32, i32) {
+    let count = count.max(1) as i32;
+    let row_h = (LIST_BAND_H / count).clamp(15, 24);
+    let start_y = LIST_BAND_TOP + (LIST_BAND_H - row_h * count) / 2 + row_h / 2;
+    (row_h, start_y)
+}
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -132,6 +164,13 @@ pub fn cursor_down() {
 /// `PHASE_PET` for next time, and closes the screen.
 pub fn confirm() {
     if PHASE.load(Ordering::Relaxed) == PHASE_PET {
+        if PetKind::roster().is_empty() {
+            // No `PETS.CFG` (or none of its rows were usable) — there is
+            // nothing to confirm.  Stay on the screen showing the "no pets"
+            // notice rather than advancing to money and starting a game
+            // whose pet has no sprites.
+            return;
+        }
         let idx = SELECTION.load(Ordering::Relaxed);
         CHOSEN_KIND_IDX.store(idx, Ordering::Relaxed);
         PHASE.store(PHASE_MONEY, Ordering::Relaxed);
@@ -149,10 +188,13 @@ pub fn confirm() {
         _ => (true, false),
     };
     let idx = CHOSEN_KIND_IDX.load(Ordering::Relaxed) as usize;
-    let kind = PetKind::roster()
-        .get(idx)
-        .copied()
-        .unwrap_or(PetKind::Bartholomeus);
+    // The roster is `PETS.CFG`-driven and can be empty, so there is no pet to
+    // fall back on: bail out rather than start a game on a made-up prefix.
+    let Some(kind) = PetKind::roster().get(idx).copied() else {
+        PHASE.store(PHASE_PET, Ordering::Relaxed);
+        close();
+        return;
+    };
     let mode = MODE.load(Ordering::Relaxed);
 
     match mode {
@@ -190,8 +232,13 @@ where
         .alignment(Alignment::Center)
         .build();
 
-    let start_y = 40;
-    let row_h = 24i32;
+    let (row_h, start_y) = row_layout(if PHASE.load(Ordering::Relaxed) == PHASE_MONEY {
+        MONEY_LABELS.len()
+    } else {
+        // An empty roster still draws the two-line "no pets" notice, so lay
+        // the band out for those rows instead of collapsing to one.
+        PetKind::roster().len().max(NO_PETS_LINES.len())
+    });
 
     let draw_row =
         |display: &mut D, i: usize, label: &str, is_selected: bool| -> Result<(), D::Error> {
@@ -204,10 +251,15 @@ where
                 .into_styled(PrimitiveStyle::with_fill(BLACK))
                 .draw(display)?;
             }
+            // Bold either way — the highlight box already carries the
+            // selection, so the unselected rows don't need to be lighter to
+            // read as unselected, and the bold face is easier on e-ink.
+            // Same 7x13 metrics as the regular face, so the layout is
+            // unchanged.
             let f = if is_selected {
                 TEXT_BOLD_WHITE
             } else {
-                TEXT_BLACK
+                TEXT_BOLD_BLACK
             };
             Text::with_text_style(label, Point::new(76, y), f, centered).draw(display)?;
             Ok(())
@@ -219,6 +271,13 @@ where
         for (i, label) in MONEY_LABELS.iter().enumerate() {
             draw_row(display, i, label, i == selection)?;
         }
+    } else if PetKind::roster().is_empty() {
+        // Nothing to choose from — `PETS.CFG` is missing, empty or declared
+        // only unusable prefixes.  Say so instead of drawing a blank screen;
+        // the file lives on the USB partition, so this is user-fixable.
+        for (i, line) in NO_PETS_LINES.iter().enumerate() {
+            draw_row(display, i, line, false)?;
+        }
     } else {
         // Pet list.
         for (i, kind) in PetKind::roster().iter().enumerate() {
@@ -226,18 +285,21 @@ where
         }
     }
 
-    // Hint at bottom.
-    let hint_style = TextStyleBuilder::new()
-        .baseline(Baseline::Bottom)
-        .alignment(Alignment::Center)
-        .build();
-    Text::with_text_style(
-        "Fire to confirm",
-        Point::new(76, 148),
-        TEXT_BLACK,
-        hint_style,
-    )
-    .draw(display)?;
+    // Hint at bottom — suppressed on the empty-roster notice, where Fire has
+    // nothing to confirm.
+    if !(PHASE.load(Ordering::Relaxed) == PHASE_PET && PetKind::roster().is_empty()) {
+        let hint_style = TextStyleBuilder::new()
+            .baseline(Baseline::Bottom)
+            .alignment(Alignment::Center)
+            .build();
+        Text::with_text_style(
+            "Fire to confirm",
+            Point::new(76, 148),
+            TEXT_BLACK,
+            hint_style,
+        )
+        .draw(display)?;
+    }
 
     Ok(())
 }
@@ -255,6 +317,22 @@ mod tests {
     /// lock first and resets the statics it touches before returning it.
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
+    /// Stand in for the boot-time `PETS.CFG` load: with no built-in pets the
+    /// roster is empty until something installs one, and every test below
+    /// needs at least two rows to move a cursor over.  `install` is
+    /// once-only and idempotent, so calling it from each test is safe
+    /// whatever order they run in.
+    fn install_test_roster() {
+        use crate::game::pet_registry::{self, PetDef};
+        let mut defs: heapless::Vec<PetDef, 3> = heapless::Vec::new();
+        for (id, name) in [(0u8, "One"), (1, "Two"), (2, "Three")] {
+            let mut n = heapless::String::new();
+            let _ = n.push_str(name);
+            let _ = defs.push(PetDef { id, name: n });
+        }
+        pet_registry::install(&defs);
+    }
+
     /// Up at the top of the roster used to be a no-op; it should now wrap
     /// to the last pet, and Down at the bottom should wrap back to the
     /// first — same "wrap instead of doing nothing" fix applied across
@@ -262,7 +340,9 @@ mod tests {
     #[test]
     fn cursor_wraps_at_both_ends() {
         let _guard = TEST_LOCK.lock().unwrap();
+        install_test_roster();
         let max = PetKind::roster().len() as u8;
+        assert!(max > 0, "roster must be installed for the cursor to move");
         PHASE.store(PHASE_PET, Ordering::Relaxed);
         SELECTION.store(0, Ordering::Relaxed);
 
@@ -313,6 +393,7 @@ mod tests {
     #[test]
     fn confirm_advances_pet_phase_to_money_phase() {
         let _guard = TEST_LOCK.lock().unwrap();
+        install_test_roster();
         open_new_game();
         assert_eq!(PHASE.load(Ordering::Relaxed), PHASE_PET);
         assert!(is_active());
@@ -333,6 +414,7 @@ mod tests {
     #[test]
     fn full_flow_money_off_starts_game_without_money() {
         let _guard = TEST_LOCK.lock().unwrap();
+        install_test_roster();
         open_new_game();
         confirm(); // pet phase (SELECTION=0) -> money phase
 
@@ -356,6 +438,7 @@ mod tests {
     #[test]
     fn full_flow_money_on_starts_game_with_money() {
         let _guard = TEST_LOCK.lock().unwrap();
+        install_test_roster();
         open_new_game();
         confirm(); // pet phase (SELECTION=0) -> money phase, default SELECTION=0
 
@@ -378,6 +461,7 @@ mod tests {
     #[test]
     fn full_flow_hard_mode_starts_hard() {
         let _guard = TEST_LOCK.lock().unwrap();
+        install_test_roster();
         open_new_game();
         confirm(); // pet phase (SELECTION=0) -> money phase
 

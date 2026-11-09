@@ -38,9 +38,10 @@ const PCX_HEADER_SIZE: usize = 128;
 // than caching every filename — at 4 × 21 × 4 = 336 bytes it accepts
 // any number of sprite files without a hardcoded cap.
 
-/// Pet/category-prefix range covered by the catalogue.  `PP=0` Bartholomeus,
-/// `1` Cat, `2` Slug, `3` sponsors, `4` menu icons, `5..7` custom pets from
-/// `PETS.CFG`.  Sized to cover every valid pet prefix so custom pets get
+/// Pet/category-prefix range covered by the catalogue.  `PP=3` is the sponsor
+/// slideshow and `4` the menu icons; every other prefix is a pet slot, filled
+/// by whatever `PETS.CFG` declares.  Sized to cover every valid pet prefix so
+/// pets get
 /// per-animation frame counts from the same scan — keep in sync with
 /// [`crate::game::pet_registry::MAX_PET_PREFIX`].  Kept small (paired with a
 /// u16 presence cell below) because the debug build is RAM-tight — growing
