@@ -733,12 +733,12 @@ pub fn new_generation(kind: super::engine::PetKind, money_enabled: bool, hard_mo
     }
 }
 
-/// Get the current pet's kind (defaults to Bartholomeus if no game).
+/// Get the current pet's kind (defaults to sprite prefix 0 if no game).
 pub fn pet_kind() -> super::engine::PetKind {
     let state = unsafe { (*GAME.get()).as_ref() };
     match state {
         Some(s) => s.pet_kind,
-        None => super::engine::PetKind::Bartholomeus,
+        None => super::engine::PetKind::DEFAULT,
     }
 }
 

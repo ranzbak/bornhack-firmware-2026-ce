@@ -96,6 +96,15 @@ pub mod fw {
     #[path = "lock.rs"]
     pub mod lock;
 
+    /// `PETS.CFG` parser — the real firmware module. Only its `parse` half
+    /// compiles here (`load_and_install` is `embassy-core`-gated, and there
+    /// is no FAT12 partition off-badge), which is what the simulator needs to
+    /// install a roster from the repo's `assets/to-badge/PETS.CFG`. Without
+    /// it the sim would have no pets at all, since none are built in.
+    #[cfg(feature = "game")]
+    #[path = "pets_cfg.rs"]
+    pub mod pets_cfg;
+
     /// Host-simulator stubs for the shared settings menu, which reads these EPD
     /// tuning atomics/consts (`menu.rs`). The host has no e-paper panel, so the
     /// state is inert — the menu's adjust actions still update the live value

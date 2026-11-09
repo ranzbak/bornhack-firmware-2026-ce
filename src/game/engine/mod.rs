@@ -27,28 +27,26 @@ pub use to_display::DisplayAnim;
 
 /// Kind of pet — determines which sprite set to use.
 ///
-/// New variants can be added here for future pets; the filename
-/// generation in `anim_files` and the selection screen will pick
-/// them up automatically.
+/// Pets are not enumerated in code: the roster is whatever `PETS.CFG`
+/// declares.  Adding one means dropping its `PPAAFF.PCX` sprites on the USB
+/// partition and adding a manifest line — the filename generation in
+/// `anim_files` and the selection screen pick it up automatically.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "embassy-core", derive(defmt::Format))]
 ///
 /// Represented as a single byte — the sprite-prefix (`PP` in `PPAAFF.PCX`).
-/// The three built-ins are consts; extra pets can be installed at runtime
-/// from a `PETS.CFG` manifest on the USB partition (see
-/// [`crate::game::pet_registry`]) with no firmware reflash.  Persisted as
-/// this byte, so both existing and custom-pet saves round-trip.
+/// Which bytes name a real pet is decided at runtime by
+/// [`crate::game::pet_registry`], populated from the `PETS.CFG` manifest.
+/// Persisted as this byte, so saves round-trip regardless of the roster.
 #[repr(transparent)]
 pub struct PetKind(pub u8);
 
-#[allow(non_upper_case_globals)]
 impl PetKind {
-    /// Pet kind 0 — formerly named `Snail`, renamed to Bartholomeus when the
-    /// snail artwork was reworked.  Persisted byte value remains 0 so existing
-    /// saves still load.
-    pub const Bartholomeus: PetKind = PetKind(0);
-    pub const Cat: PetKind = PetKind(1);
-    pub const Slug: PetKind = PetKind(2);
+    /// Sprite prefix `0` — the placeholder used where a kind is structurally
+    /// required but none has been chosen: pre-`pet_kind` saves, empty realm
+    /// slots, and an unresolvable battle opponent.  Carries no guarantee of
+    /// being in the roster; `PETS.CFG` decides whether prefix 0 is a pet.
+    pub const DEFAULT: PetKind = PetKind(0);
 
     /// Reconstruct from the persisted / sprite-prefix byte.  Any byte is a
     /// valid id; whether it resolves to a real pet is decided by the registry.
@@ -62,13 +60,13 @@ impl PetKind {
     }
 
     /// Human-readable name for the selection screen and Unicorn Realm.
-    /// Resolves through the runtime registry (built-ins + `PETS.CFG` pets).
+    /// Resolves through the runtime registry populated from `PETS.CFG`.
     pub fn name(self) -> &'static str {
         crate::game::pet_registry::name_of(self.0)
     }
 
-    /// All selectable pet kinds, in order — built-ins plus any installed via
-    /// `PETS.CFG`.  Falls back to the three built-ins before install.
+    /// All selectable pet kinds, in `PETS.CFG` order.  Empty until the
+    /// manifest is installed, and on a badge whose manifest declares none.
     pub fn roster() -> &'static [PetKind] {
         crate::game::pet_registry::roster()
     }
@@ -2217,9 +2215,9 @@ impl PetRecord {
         } else if buf.len() >= 25 {
             // Old 25-byte format without pet_kind.
             name.copy_from_slice(&buf[12..24]);
-            PetKind::Bartholomeus
+            PetKind::DEFAULT
         } else {
-            PetKind::Bartholomeus
+            PetKind::DEFAULT
         };
         Self {
             generation: u16::from_le_bytes([buf[0], buf[1]]),
@@ -2278,7 +2276,7 @@ impl PetRealm {
                 vitality: 0,
                 curiosity: 0,
                 resilience: 0,
-                pet_kind: PetKind::Bartholomeus,
+                pet_kind: PetKind::DEFAULT,
                 name: [0; PET_NAME_MAX],
                 name_len: 0,
             }; REALM_MAX_PETS],
@@ -2332,7 +2330,7 @@ mod overweight_diabetes_tests {
     /// versioned 97-byte `SAVE_SIZE` (1 version byte + 96 fields).
     #[test]
     fn save_round_trip_includes_new_fields() {
-        let mut state = GameState::new_egg(42, PetKind::Cat);
+        let mut state = GameState::new_egg(42, PetKind::from_u8(1));
         state.weight = 41000;
         state.diabetic = true;
         state.cooldown_exercise = 12;
@@ -2357,7 +2355,7 @@ mod overweight_diabetes_tests {
         assert_eq!(restored.wins, 3);
         assert_eq!(restored.losses, 1);
         assert_eq!(restored.cooldown_battle, 77);
-        assert_eq!(restored.pet_kind.id(), PetKind::Cat.id());
+        assert_eq!(restored.pet_kind.id(), 1);
         assert_eq!(restored.money, 12345);
         assert!(!restored.money_enabled);
         assert!(restored.hard_mode);
@@ -2370,7 +2368,7 @@ mod overweight_diabetes_tests {
     #[test]
     fn old_or_wrong_version_save_is_rejected() {
         // A valid current save round-trips.
-        let good = GameState::new_egg(7, PetKind::Slug).to_bytes();
+        let good = GameState::new_egg(7, PetKind::from_u8(2)).to_bytes();
         assert!(GameState::from_bytes(&good).is_some());
 
         // Old-layout blob one byte short of the versioned size — rejected on length.
@@ -2387,7 +2385,7 @@ mod overweight_diabetes_tests {
     /// mode enabled.
     #[test]
     fn new_egg_starts_with_100_hax_and_money_enabled() {
-        let state = GameState::new_egg(1, PetKind::Bartholomeus);
+        let state = GameState::new_egg(1, PetKind::DEFAULT);
         assert_eq!(state.money, 100);
         assert!(state.money_enabled);
     }
@@ -2398,7 +2396,7 @@ mod overweight_diabetes_tests {
     /// waiting for the next 15-minute save interval).
     #[test]
     fn add_money_saturates_and_flags_save() {
-        let mut state = GameState::new_egg(2, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(2, PetKind::DEFAULT);
         state.money = u32::MAX - 5;
         state.add_money(100);
         assert_eq!(state.money, u32::MAX);
@@ -2412,7 +2410,7 @@ mod overweight_diabetes_tests {
     /// Spending succeeds and debits the balance when the pet can afford it.
     #[test]
     fn spend_money_succeeds_when_affordable() {
-        let mut state = GameState::new_egg(3, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(3, PetKind::DEFAULT);
         state.money = 50;
         assert!(state.spend_money(30));
         assert_eq!(state.money, 20);
@@ -2422,7 +2420,7 @@ mod overweight_diabetes_tests {
     /// afford it — money should never go negative (or wrap, in u32 terms).
     #[test]
     fn spend_money_fails_when_too_poor() {
-        let mut state = GameState::new_egg(4, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(4, PetKind::DEFAULT);
         state.money = 10;
         assert!(!state.spend_money(30));
         assert_eq!(state.money, 10);
@@ -2432,7 +2430,7 @@ mod overweight_diabetes_tests {
     /// not affordable one HAX above it.
     #[test]
     fn can_afford_reports_threshold() {
-        let mut state = GameState::new_egg(5, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(5, PetKind::DEFAULT);
         state.money = 20;
         assert!(state.can_afford(20));
         assert!(!state.can_afford(21));
@@ -2463,7 +2461,7 @@ mod overweight_diabetes_tests {
             Action::OnlyPets,
         ];
         for action in all {
-            let mut state = GameState::new_egg(5, PetKind::Bartholomeus);
+            let mut state = GameState::new_egg(5, PetKind::DEFAULT);
             state.active_action = Some(action);
             state.action_ticks_remaining = 3;
 
@@ -2479,7 +2477,7 @@ mod overweight_diabetes_tests {
 
         // No action in progress still round-trips as None, not some
         // stray Some(_).
-        let mut state = GameState::new_egg(6, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(6, PetKind::DEFAULT);
         state.active_action = None;
         let restored = GameState::from_bytes(&state.to_bytes()).unwrap();
         assert_eq!(restored.active_action, None);
@@ -2489,7 +2487,7 @@ mod overweight_diabetes_tests {
     /// cooldown, regardless of win/loss.
     #[test]
     fn record_battle_updates_counters_and_cooldown() {
-        let mut state = GameState::new_egg(1, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(1, PetKind::DEFAULT);
         assert_eq!(state.wins, 0);
         assert_eq!(state.losses, 0);
 
@@ -2516,7 +2514,7 @@ mod overweight_diabetes_tests {
     /// (`Phase::Gone`) long before the multi-day diabetes window elapses.
     #[test]
     fn sustained_overweight_triggers_permanent_diabetes() {
-        let mut state = GameState::new_egg(1, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(1, PetKind::DEFAULT);
         state.weight = OVERWEIGHT_TRIGGER() + 1;
 
         state.check_diabetes(DIABETES_ONSET_TICKS() + 10);
@@ -2532,7 +2530,7 @@ mod overweight_diabetes_tests {
     /// before the onset threshold is reached — no premature diabetes.
     #[test]
     fn overweight_progress_resets_on_recovery() {
-        let mut state = GameState::new_egg(2, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(2, PetKind::DEFAULT);
         state.weight = OVERWEIGHT_TRIGGER() + 1;
 
         // Advance partway toward onset, then recover.
@@ -2552,7 +2550,7 @@ mod overweight_diabetes_tests {
     #[test]
     fn unhealthy_food_gains_more_weight_than_healthy_food() {
         let run = |food: FoodKind| -> u16 {
-            let mut state = GameState::new_egg(7, PetKind::Bartholomeus);
+            let mut state = GameState::new_egg(7, PetKind::DEFAULT);
             state.update(HATCHING_TICKS() as u32);
             assert!(state.feed(food));
             state.update(state.last_update_tick + FEED_DURATION() as u32);
@@ -2584,7 +2582,7 @@ mod overweight_diabetes_tests {
     #[test]
     fn cake_is_least_filling_pizza_is_most_filling() {
         let run = |food: FoodKind| -> u16 {
-            let mut state = GameState::new_egg(9, PetKind::Bartholomeus);
+            let mut state = GameState::new_egg(9, PetKind::DEFAULT);
             state.update(HATCHING_TICKS() as u32);
             state.hunger = HUNGER_RATE().saturating_mul(10_000); // build up hunger first
             assert!(state.feed(food));
@@ -2606,7 +2604,7 @@ mod overweight_diabetes_tests {
     #[test]
     fn alcoholic_drinks_raise_drunk_non_alcoholic_dont() {
         let run = |drink: DrinkKind| -> u16 {
-            let mut state = GameState::new_egg(11, PetKind::Bartholomeus);
+            let mut state = GameState::new_egg(11, PetKind::DEFAULT);
             state.update(HATCHING_TICKS() as u32);
             assert!(state.drink(drink));
             state.update(state.last_update_tick + DRINK_DURATION() as u32);
@@ -2631,7 +2629,7 @@ mod overweight_diabetes_tests {
     /// `alcoholic` permanently true — mirrors the diabetes onset test.
     #[test]
     fn sustained_drunk_triggers_permanent_alcoholism() {
-        let mut state = GameState::new_egg(13, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(13, PetKind::DEFAULT);
         state.drunk = DRUNK_TRIGGER() + 1;
 
         state.check_alcoholism(ALCOHOLIC_ONSET_TICKS() + 10);
@@ -2650,7 +2648,7 @@ mod overweight_diabetes_tests {
     /// than the "already-known friend" ~10% boost.
     #[test]
     fn friend_boost_does_not_overflow_and_scales_with_big() {
-        let mut state = GameState::new_egg(17, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(17, PetKind::DEFAULT);
         state.miserable = STAT_MAX();
 
         state.friend_boost(true);
@@ -2683,7 +2681,7 @@ mod overweight_diabetes_tests {
     /// (tens to low hundreds of ticks), not tens of thousands.
     #[test]
     fn sick_rate_estimate_includes_diabetes_penalty() {
-        let mut state = GameState::new_egg(23, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(23, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.diabetic = true;
         state.cooldown_medicate = 0;
@@ -2712,7 +2710,7 @@ mod overweight_diabetes_tests {
     /// every other action cooldown this function tracks).
     #[test]
     fn next_wake_tick_accounts_for_battle_cooldown() {
-        let mut state = GameState::new_egg(19, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(19, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.last_update_tick = 1000;
         state.cooldown_battle = 42;
@@ -2733,7 +2731,7 @@ mod overweight_diabetes_tests {
     /// cooldown/hunger-cost path) when money mode is off.
     #[test]
     fn minigame_win_awards_hax_when_money_enabled() {
-        let mut state = GameState::new_egg(30, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(30, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money = 0;
         state.money_enabled = true;
@@ -2752,7 +2750,7 @@ mod overweight_diabetes_tests {
     /// nothing. With money mode off, even a win grants nothing.
     #[test]
     fn battle_win_awards_hax_winner_only() {
-        let mut state = GameState::new_egg(31, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(31, PetKind::DEFAULT);
         state.money_enabled = true;
         state.money = 0;
 
@@ -2773,7 +2771,7 @@ mod overweight_diabetes_tests {
     /// the action is still in progress is rejected.
     #[test]
     fn only_pets_starts_action() {
-        let mut state = GameState::new_egg(32, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(32, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
 
         assert!(state.only_pets());
@@ -2788,7 +2786,7 @@ mod overweight_diabetes_tests {
     /// happiness bump, plus its own cooldown.
     #[test]
     fn only_pets_hobby_completion_awards_hax_and_happiness() {
-        let mut state = GameState::new_egg(33, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(33, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 50; // >= BROKE_THRESHOLD, so this exercises the hobby branch.
@@ -2808,7 +2806,7 @@ mod overweight_diabetes_tests {
     /// rises.
     #[test]
     fn only_pets_broke_branch_pays_100_and_drops_happiness() {
-        let mut state = GameState::new_egg(34, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(34, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 5; // < BROKE_THRESHOLD
@@ -2829,7 +2827,7 @@ mod overweight_diabetes_tests {
     /// more than unhealthy (Burger), mirroring `FoodKind::hax_price`.
     #[test]
     fn feed_charges_by_food_health() {
-        let mut state = GameState::new_egg(40, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(40, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 100;
@@ -2838,7 +2836,7 @@ mod overweight_diabetes_tests {
         assert_eq!(state.money, 85, "healthy food (Salad) should cost 15 HAX");
 
         // Fresh egg so the cooldown from the first feed doesn't reject this one.
-        let mut state = GameState::new_egg(41, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(41, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 100;
@@ -2851,7 +2849,7 @@ mod overweight_diabetes_tests {
     /// more than unhealthy (Cola), mirroring `DrinkKind::hax_price`.
     #[test]
     fn drink_charges_by_health() {
-        let mut state = GameState::new_egg(42, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(42, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 100;
@@ -2859,7 +2857,7 @@ mod overweight_diabetes_tests {
         assert!(state.drink(DrinkKind::Water));
         assert_eq!(state.money, 85, "healthy drink (Water) should cost 15 HAX");
 
-        let mut state = GameState::new_egg(43, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(43, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 100;
@@ -2871,7 +2869,7 @@ mod overweight_diabetes_tests {
     /// The basic Play action costs a flat `PLAY_HAX_COST` (10 HAX).
     #[test]
     fn play_costs_10() {
-        let mut state = GameState::new_egg(44, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(44, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 100;
@@ -2884,7 +2882,7 @@ mod overweight_diabetes_tests {
     /// and is rejected when the pet can't afford it.
     #[test]
     fn aspirine_costs_1_hax() {
-        let mut state = GameState::new_egg(44, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(44, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 100;
@@ -2892,7 +2890,7 @@ mod overweight_diabetes_tests {
         assert_eq!(state.money, 99);
 
         // Broke (0 HAX): heal is rejected, no charge, no action started.
-        let mut broke = GameState::new_egg(45, PetKind::Bartholomeus);
+        let mut broke = GameState::new_egg(45, PetKind::DEFAULT);
         broke.update(HATCHING_TICKS() as u32);
         broke.money_enabled = true;
         broke.money = 0;
@@ -2906,14 +2904,14 @@ mod overweight_diabetes_tests {
     /// diabetic/alcoholic respectively, so those flags are set first.
     #[test]
     fn drug_costs_15() {
-        let mut state = GameState::new_egg(45, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(45, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 100;
         assert!(state.ozempic());
         assert_eq!(state.money, 85, "ozempic should cost 15 HAX");
 
-        let mut state = GameState::new_egg(46, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(46, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 100;
@@ -2921,7 +2919,7 @@ mod overweight_diabetes_tests {
         assert!(state.medicate());
         assert_eq!(state.money, 85, "medicate should cost 15 HAX");
 
-        let mut state = GameState::new_egg(47, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(47, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 100;
@@ -2934,7 +2932,7 @@ mod overweight_diabetes_tests {
     /// nothing at all — the whole money layer stays inert.
     #[test]
     fn actions_free_when_money_disabled() {
-        let mut state = GameState::new_egg(48, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(48, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = false;
         state.money = 100;
@@ -2942,7 +2940,7 @@ mod overweight_diabetes_tests {
         assert!(state.feed(FoodKind::Salad));
         assert_eq!(state.money, 100, "feed should not charge when money is off");
 
-        let mut state = GameState::new_egg(49, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(49, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = false;
         state.money = 100;
@@ -2956,7 +2954,7 @@ mod overweight_diabetes_tests {
     /// `feed()` returns false, the balance is untouched, and no action starts.
     #[test]
     fn broke_action_is_now_rejected() {
-        let mut state = GameState::new_egg(50, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(50, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 5;
@@ -2971,7 +2969,7 @@ mod overweight_diabetes_tests {
     /// one is in progress returns false and leaves `money` unchanged.
     #[test]
     fn rejected_action_does_not_charge() {
-        let mut state = GameState::new_egg(51, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(51, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 100;
@@ -2990,7 +2988,7 @@ mod overweight_diabetes_tests {
     /// action starts.
     #[test]
     fn unaffordable_action_is_rejected() {
-        let mut state = GameState::new_egg(60, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(60, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 5;
@@ -3003,7 +3001,7 @@ mod overweight_diabetes_tests {
     /// An affordable priced action charges its price and starts normally.
     #[test]
     fn affordable_action_charges_and_starts() {
-        let mut state = GameState::new_egg(61, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(61, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 100;
@@ -3017,7 +3015,7 @@ mod overweight_diabetes_tests {
     /// the action proceeds free even at 0 balance.
     #[test]
     fn money_disabled_ignores_affordability() {
-        let mut state = GameState::new_egg(62, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(62, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = false;
         state.money = 0;
@@ -3030,7 +3028,7 @@ mod overweight_diabetes_tests {
     /// affordability — it starts even at `money == 0`.
     #[test]
     fn only_pets_never_gated_when_broke() {
-        let mut state = GameState::new_egg(63, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(63, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 0;
@@ -3044,7 +3042,7 @@ mod overweight_diabetes_tests {
     /// normal 15. Normal (non-hard) mode is unaffected — regression check.
     #[test]
     fn hard_mode_healthy_food_costs_20() {
-        let mut state = GameState::new_egg(70, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(70, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.hard_mode = true;
@@ -3053,7 +3051,7 @@ mod overweight_diabetes_tests {
         assert!(state.feed(FoodKind::Salad));
         assert_eq!(state.money, 80, "hard-mode healthy food should cost 20 HAX");
 
-        let mut normal = GameState::new_egg(71, PetKind::Bartholomeus);
+        let mut normal = GameState::new_egg(71, PetKind::DEFAULT);
         normal.update(HATCHING_TICKS() as u32);
         normal.money_enabled = true;
         normal.hard_mode = false;
@@ -3067,7 +3065,7 @@ mod overweight_diabetes_tests {
     /// normal 15. Normal mode is unaffected.
     #[test]
     fn hard_mode_medication_costs_45() {
-        let mut state = GameState::new_egg(72, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(72, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.hard_mode = true;
@@ -3076,7 +3074,7 @@ mod overweight_diabetes_tests {
         assert!(state.ozempic());
         assert_eq!(state.money, 55, "hard-mode ozempic should cost 45 HAX");
 
-        let mut normal = GameState::new_egg(73, PetKind::Bartholomeus);
+        let mut normal = GameState::new_egg(73, PetKind::DEFAULT);
         normal.update(HATCHING_TICKS() as u32);
         normal.money_enabled = true;
         normal.hard_mode = false;
@@ -3090,7 +3088,7 @@ mod overweight_diabetes_tests {
     /// is unaffected.
     #[test]
     fn hard_mode_rehab_costs_75() {
-        let mut state = GameState::new_egg(74, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(74, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.hard_mode = true;
@@ -3100,7 +3098,7 @@ mod overweight_diabetes_tests {
         assert!(state.rehab());
         assert_eq!(state.money, 25, "hard-mode rehab should cost 75 HAX");
 
-        let mut normal = GameState::new_egg(75, PetKind::Bartholomeus);
+        let mut normal = GameState::new_egg(75, PetKind::DEFAULT);
         normal.update(HATCHING_TICKS() as u32);
         normal.money_enabled = true;
         normal.hard_mode = false;
@@ -3115,7 +3113,7 @@ mod overweight_diabetes_tests {
     /// food and the flat Play cost are untouched.
     #[test]
     fn hard_mode_unhealthy_food_and_play_unchanged() {
-        let mut state = GameState::new_egg(76, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(76, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.hard_mode = true;
@@ -3124,7 +3122,7 @@ mod overweight_diabetes_tests {
         assert!(state.feed(FoodKind::Frikandel));
         assert_eq!(state.money, 90, "hard mode should not touch unhealthy food price");
 
-        let mut state = GameState::new_egg(77, PetKind::Bartholomeus);
+        let mut state = GameState::new_egg(77, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.hard_mode = true;

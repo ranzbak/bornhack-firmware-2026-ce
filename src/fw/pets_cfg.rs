@@ -1,18 +1,21 @@
-//! Read `PETS.CFG` from the USB-MSC FAT12 partition and register any custom
-//! pets it declares, so new pets can be added without a firmware reflash.
+//! Read `PETS.CFG` from the USB-MSC FAT12 partition and register the pets it
+//! declares.  This file is the *only* source of the roster — no pet is baked
+//! into the firmware, so pets are added, renamed and removed without a
+//! reflash, and a badge with no `PETS.CFG` has no selectable pet at all.
 //!
 //! Format — one `PREFIX=NAME` per line, `#` introduces a comment.  `PREFIX`
-//! is the pet's sprite-prefix byte in decimal.  `0`/`1`/`2` are the built-in
-//! pets — listing them just renames them; `3` and `4` are reserved (sponsors,
-//! menu icons) and ignored; new pets use `5..7`.  The pet's sprites are the
+//! is the pet's sprite-prefix byte in decimal; `3` and `4` are reserved
+//! (sponsors, menu icons) and ignored, anything else below
+//! [`pet_registry::MAX_PET_PREFIX`] is a pet slot.  The pet's sprites are the
 //! matching `PPAAFF.PCX` files (e.g. `050100.PCX` for pet 5's idle-frame 0).
-//! Names longer than [`NAME_CAP`] chars are truncated.
+//! Names longer than [`NAME_CAP`] chars are truncated.  Rows are listed in
+//! selection-screen order.
 //!
 //! ```text
-//! # rename a built-in, add two new pets (drop 05xxxx.PCX / 06xxxx.PCX too)
-//! 0=Bartho
-//! 5=Dragon
-//! 6=Ghost
+//! # the shipped roster — each line needs matching PPxxxx.PCX sprites
+//! 0=Bartholomeus
+//! 1=Cat
+//! 5=Panda
 //! ```
 //!
 //! Call [`load_and_install`] exactly once at boot, after
@@ -20,28 +23,35 @@
 
 use crate::game::pet_registry::{self, MAX_PETS, NAME_CAP, PetDef};
 
+/// Only the FAT12 read path needs this; host builds (simulator, unit tests)
+/// pull in just [`parse`].
+#[cfg(feature = "embassy-core")]
 const READ_BUF_LEN: usize = 1024;
 
 /// Load `PETS.CFG` (if present) and install the resulting roster.  Always
-/// calls [`pet_registry::install`] — with an empty custom list when the file
-/// is missing or unreadable — so the built-in roster is set up either way.
+/// calls [`pet_registry::install`], so the registry is marked installed even
+/// when the file is missing or unreadable — in that case with an empty list,
+/// leaving the badge with no selectable pet.
 #[cfg(feature = "embassy-core")]
 pub async fn load_and_install() {
     use crate::fw::fat12;
 
-    let mut customs: heapless::Vec<PetDef, MAX_PETS> = heapless::Vec::new();
+    let mut pets: heapless::Vec<PetDef, MAX_PETS> = heapless::Vec::new();
 
     if let Some(name) = fat12::to_8_3("PETS.CFG")
         && let Ok(file) = fat12::find_file(&name).await
     {
         let mut buf = [0u8; READ_BUF_LEN];
         if let Ok(n) = fat12::read_file(&file, 0, &mut buf).await {
-            let parsed = parse(&buf[..n], &mut customs);
-            defmt::info!("PETS.CFG: {} custom pet(s) parsed", parsed);
+            let parsed = parse(&buf[..n], &mut pets);
+            defmt::info!("PETS.CFG: {} pet(s) parsed", parsed);
         }
     }
 
-    pet_registry::install(&customs);
+    if pets.is_empty() {
+        defmt::warn!("PETS.CFG: no pets declared — none will be selectable");
+    }
+    pet_registry::install(&pets);
 }
 
 /// Parse `data` as one `PREFIX=NAME` per line into `out`.  Returns the number

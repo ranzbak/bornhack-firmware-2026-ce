@@ -193,14 +193,14 @@ const FULL_SIZE: usize = 9;
 pub const KIND_UNKNOWN: u8 = 0xFF;
 
 /// Resolve a combatant's sprite species: use `kind` when it's a real value,
-/// else fall back to the stored friend record for `device_id`, else the first
-/// firmware pet (Bartholomeus). There is no generic placeholder — every drawn
-/// species is a real pet.
+/// else fall back to the stored friend record for `device_id`, else sprite
+/// prefix 0. There is no generic placeholder sprite set — prefix 0 is drawn
+/// on the assumption `PETS.CFG` declares a pet there, as the shipped one does.
 pub fn resolve_kind(kind: u8, device_id: [u8; 2]) -> u8 {
     if kind != KIND_UNKNOWN {
         return kind;
     }
-    super::friends::pet_kind_of(device_id).unwrap_or(super::engine::PetKind::Bartholomeus.id())
+    super::friends::pet_kind_of(device_id).unwrap_or(super::engine::PetKind::DEFAULT.id())
 }
 
 impl BattleResultMsg {
@@ -408,7 +408,7 @@ mod tests {
         // full lifecycle module: build a fresh egg, mark it Active, and
         // snapshot it directly.
         use crate::game::engine::{GameState, PetKind, Phase};
-        let mut state = GameState::new_egg(1, PetKind::Cat);
+        let mut state = GameState::new_egg(1, PetKind::from_u8(1));
         state.phase = Phase::Active;
         state.stats(0)
     }
