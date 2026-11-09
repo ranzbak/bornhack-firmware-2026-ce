@@ -791,6 +791,8 @@ cargo run -- export \
     ../bornhack-firmware-2026/assets/bornpets-sponsors-slug.json5 \
     ../bornhack-firmware-2026/assets/sponsors.json5 \
     ../bornhack-firmware-2026/assets/bornpets-menu-icons.json5 \
+    ../bornhack-firmware-2026/assets/bornpets-sponsors-panda.json5 \
+    ../bornhack-firmware-2026/assets/bornpets-sponsors-badger.json5 \
     --output-dir ../bornhack-firmware-2026/assets/to-badge \
     --format pcx
 ```
@@ -806,6 +808,22 @@ Each JSON5 file contributes a separate `PP` prefix range:
 | `bornpets-sponsors-slug.json5` | `02xx` | Slug pet animations |
 | `sponsors.json5` | `03xx` | First-boot sponsor slideshow images |
 | `bornpets-menu-icons.json5` | `04xx` | On-screen menu icons (top + bottom rows, normal + selected) |
+| `bornpets-sponsors-panda.json5` | `05xx` | Panda pet animations |
+| `bornpets-sponsors-badger.json5` | `06xx` | Badger pet animations |
+
+The `PP` prefix is the config's **position** in the argument list, not its
+filename, so the order above is fixed — reordering or dropping an entry
+renumbers every pet after it. To regenerate a single pet, keep the full list so
+the positions still line up, export to a scratch directory, and copy over only
+that pet's files:
+
+```bash
+cargo run -- export <all configs, in the order above> --output-dir /tmp/pcx --format pcx
+cp /tmp/pcx/06*.PCX ../bornhack-firmware-2026/assets/to-badge/
+```
+
+Frames that are entirely transparent produce no PCX file, so a row may declare
+more frames than it uses; the firmware counts the files actually present.
 
 After generating, copy all `.PCX` files from `assets/to-badge/` to the badge's USB drive.
 
