@@ -313,6 +313,11 @@ async fn main(spawner: Spawner) {
         static DIRTY_1680: StaticCell<[u8; PLANE_N]> = StaticCell::new();
         static CODE_BW_1680: StaticCell<[u8; PLANE_N]> = StaticCell::new();
         static CODE_RED_1680: StaticCell<[u8; PLANE_N]> = StaticCell::new();
+        // Top-up ledger: a 4-bit hold counter per panel pixel (152·152/2 =
+        // 11552 bytes). Schedules short re-saturation pulses for pixels that
+        // stay unchanged across deltas; see `ssd1680::topup`.
+        const TOPUP_N: usize = ssd1680::TopUpLedger::bytes_for(152, 152);
+        static TOPUP_1680: StaticCell<[u8; TOPUP_N]> = StaticCell::new();
         // 152×152 UI canvas planes (the driver scales these into the panel).
         use bornhack_aegg::fw::epd_1680_driver::CANVAS_BYTES;
         static CANVAS_BW_1680: StaticCell<[u8; CANVAS_BYTES]> = StaticCell::new();
@@ -361,6 +366,7 @@ async fn main(spawner: Spawner) {
             DIRTY_1680.init([0x00; PLANE_N]),
             CODE_BW_1680.init([0xFF; PLANE_N]),
             CODE_RED_1680.init([0xFF; PLANE_N]),
+            TOPUP_1680.init([0x00; TOPUP_N]),
             false, // scale_fill: canvas matches the 152×152 panel 1:1
         )
     };
@@ -1127,8 +1133,30 @@ async fn display_loop_1680<D>(
         )
         .await
         {
-            // Drive completed untouched — wait for the next event as before.
-            Either::First(_) => wait_display_event(button_rcvr, active_screen, true).await,
+            // Drive completed untouched — wait for the next event. The driver
+            // leaves the analog rails up so a quick follow-up update skips the
+            // booster soft-start; drop them once nothing has happened for
+            // `ANALOG_IDLE_MS`. The power-off runs beside the wait (not before
+            // it) so the sprite timer inside `wait_display_event` keeps its
+            // original deadline. An event during the power-off drops it
+            // mid-command; the next refresh then resets the controller.
+            Either::First(_) => {
+                const ANALOG_IDLE_MS: u64 = 1000;
+                let idle_power_off = async {
+                    Timer::after_millis(ANALOG_IDLE_MS).await;
+                    let _ = display.deep_sleep().await;
+                    core::future::pending::<core::convert::Infallible>().await
+                };
+                match select(
+                    wait_display_event(button_rcvr, active_screen, true),
+                    idle_power_off,
+                )
+                .await
+                {
+                    Either::First(advance) => advance,
+                    Either::Second(never) => match never {},
+                }
+            }
             // Interrupted: redraw immediately without advancing the animation
             // frame (the sprite timer is suppressed above, so this is always a
             // button or signal).

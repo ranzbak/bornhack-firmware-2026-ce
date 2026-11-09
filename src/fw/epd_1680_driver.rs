@@ -23,7 +23,7 @@
 
 use crate::color::EpdColor;
 use crate::epd_driver::{EpdDriver, PlaneAccess, RefreshMode};
-use ssd1680::{BoundingBox, DeltaState, Display, Interface};
+use ssd1680::{BoundingBox, DeltaState, Display, Interface, TopUpConfig, TopUpLedger};
 use ssd1680::interface::DisplayInterface;
 use embassy_nrf::gpio::{Input, Output};
 use embassy_nrf::spim::Spim;
@@ -77,6 +77,10 @@ pub struct Driver<'a, const N: usize> {
     /// ledger only on a completed drive, so they are re-driven to the latest
     /// target instead.
     delta: DeltaState,
+    /// Per-pixel hold counters: schedules a short same-polarity top-up for
+    /// black/white pixels that sat unchanged through several deltas. See
+    /// `ssd1680::topup`.
+    topup: TopUpLedger,
     /// Scratch B/W code plane (`0x24` delta codes) for [`build_code_planes`].
     code_bw: &'a mut [u8; N],
     /// Scratch Red code plane (`0x26` delta codes) for [`build_code_planes`].
@@ -100,6 +104,9 @@ impl<'a, const N: usize> Driver<'a, N> {
     /// * `dirty`                 - Damage bitmap, 1 bit per panel pixel, so
     ///   also `N` bytes. Zeroed here: nothing has been driven yet.
     /// * `code_bw`/`code_red`    - Delta code-plane scratch, each `N` bytes.
+    ///   Reused for the top-up planes once the delta has run.
+    /// * `topup_counts`          - Top-up ledger, half a byte per panel pixel
+    ///   ([`TopUpLedger::bytes_for`]); zeroed here.
     /// * `scale_fill`            - Upscale to fill (true) or centre 1:1 (false).
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -115,6 +122,7 @@ impl<'a, const N: usize> Driver<'a, N> {
         dirty: &'static mut [u8; N],
         code_bw: &'a mut [u8; N],
         code_red: &'a mut [u8; N],
+        topup_counts: &'static mut [u8],
         scale_fill: bool,
     ) -> Self {
         canvas_bw.fill(0xFF);
@@ -125,6 +133,12 @@ impl<'a, const N: usize> Driver<'a, N> {
         shadow_red.fill(0x00);
         dirty.fill(0x00);
         let delta = DeltaState::new(shadow_bw, shadow_red, dirty, width, height);
+        let topup = TopUpLedger::new(topup_counts, width, height, TopUpConfig::default());
+        // Keep the analog rails up between back-to-back updates (a delta and
+        // its top-up, or a burst of button presses). The display loop calls
+        // `deep_sleep` once updates stop, which drops them.
+        let mut display = display;
+        display.set_analog_hold(true);
         Self {
             display,
             width,
@@ -134,6 +148,7 @@ impl<'a, const N: usize> Driver<'a, N> {
             panel_bw,
             panel_red,
             delta,
+            topup,
             code_bw,
             code_red,
             scale_fill,
@@ -332,6 +347,7 @@ impl<'a, const N: usize> EpdDriver for Driver<'a, N> {
                 // there are no half-driven pixels left to carry forward.
                 self.delta
                     .commit_full(&self.panel_bw[..n], &self.panel_red[..n]);
+                self.topup.reset();
             }
             RefreshMode::Fast => {
                 // Encode per-pixel delta codes: changed pixels get their target
@@ -375,23 +391,46 @@ impl<'a, const N: usize> EpdDriver for Driver<'a, N> {
                     // shadow stays stale and every pixel this build touched
                     // stays in the damage bitmap for the next one.
                     self.delta.commit(&self.panel_bw[..n], &self.panel_red[..n]);
+
+                    // Second pass on the still-powered rails: top up black and
+                    // white pixels that have sat unchanged through enough
+                    // deltas. `after_delta` reads which pixels this delta drove
+                    // from the code planes and rewrites them in place as top-up
+                    // codes. A red delta runs ~2× the frames, so it counts
+                    // double. If this pass is cancelled, nothing is lost: the
+                    // image is already committed, and the next refresh resets
+                    // the controller.
+                    let weight = if skip_red { 1 } else { 2 };
+                    let plan = self.topup.after_delta(
+                        &self.panel_bw[..n],
+                        &self.panel_red[..n],
+                        &mut self.code_bw[..n],
+                        &mut self.code_red[..n],
+                        weight,
+                    );
+                    if !plan.is_empty() {
+                        defmt::info!("1680 top-up: black={} white={}", plan.black, plan.white);
+                        self.display
+                            .topup(&self.code_bw[..n], &self.code_red[..n])
+                            .await?;
+                    }
                 }
             }
         }
         Ok(())
     }
 
-    /// Intentionally a no-op on the .
+    /// Drops the analog rails the held delta/top-up path leaves on; does not
+    /// enter the controller's deep-sleep mode.
     ///
     /// Deep-sleep mode 1 only exits via a hardware reset, which clears the
     /// controller RAM. The fast [`RefreshMode::Fast`] (`delta`) path relies on
     /// that RAM persisting (the controller diffs against its latched previous
     /// frame). Sleeping between refreshes would force a reset (RAM clear) on the
-    /// next refresh and blank the unchanged background. The full/partial
-    /// waveforms already leave the panel quiescent (`DisableAnalog |
-    /// DisableOsc`), so skipping the explicit deep sleep costs little — and
-    /// matches the validated bring-up, which never slept the panel.
+    /// next refresh and blank the unchanged background. Powering the rails down
+    /// (`0x22 = 0x03`) is the lowest state that keeps RAM, and is a no-op when
+    /// they are already off.
     async fn deep_sleep(&mut self) -> Result<(), <Self as EpdDriver>::Error> {
-        Ok(())
+        self.display.power_off().await
     }
 }
