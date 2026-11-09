@@ -793,6 +793,8 @@ cargo run -- export \
     ../bornhack-firmware-2026/assets/bornpets-menu-icons.json5 \
     ../bornhack-firmware-2026/assets/bornpets-sponsors-panda.json5 \
     ../bornhack-firmware-2026/assets/bornpets-sponsors-badger.json5 \
+    ../bornhack-firmware-2026/assets/bornpets-sponsors-seastar.json5 \
+    ../bornhack-firmware-2026/assets/bornpets-sponsors-jellyfish.json5 \
     --output-dir ../bornhack-firmware-2026/assets/to-badge \
     --format pcx
 ```
@@ -810,6 +812,8 @@ Each JSON5 file contributes a separate `PP` prefix range:
 | `bornpets-menu-icons.json5` | `04xx` | On-screen menu icons (top + bottom rows, normal + selected) |
 | `bornpets-sponsors-panda.json5` | `05xx` | Panda pet animations |
 | `bornpets-sponsors-badger.json5` | `06xx` | Badger pet animations |
+| `bornpets-sponsors-seastar.json5` | `07xx` | Sea star pet animations |
+| `bornpets-sponsors-jellyfish.json5` | `08xx` | Jellyfish pet animations |
 
 The `PP` prefix is the config's **position** in the argument list, not its
 filename, so the order above is fixed — reordering or dropping an entry
