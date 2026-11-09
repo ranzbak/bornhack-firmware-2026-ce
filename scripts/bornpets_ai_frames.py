@@ -1,0 +1,1255 @@
+#!/usr/bin/env python3
+"""Generate bornpets sprite-sheet frames with the OpenAI image API.
+
+Pipeline (one frame at a time, so a bad frame can be regenerated alone):
+
+    gen       panda frame -> upscaled reference PNG -> /v1/images/edits
+              -> raw 1024x1024 RGBA PNG in <work>/raw/
+    quantize  raw PNG -> alpha-trim -> rescale to the panda frame's bbox
+              -> 3-colour palette (black/white/red) + transparency
+              -> <work>/frames/
+    assemble  <work>/frames/ -> paste into the pet's sheet PNG
+
+BORNPETS_PET picks the pet (default: badger); its prompts live in PROFILES.
+Requires OPENAI_API_KEY in the environment. Network calls go through `curl`
+(multipart upload); no third-party Python packages beyond Pillow.
+
+    python3 scripts/bornpets_ai_frames.py gen --only badger_idle_0
+    python3 scripts/bornpets_ai_frames.py quantize --only badger_idle_0
+    python3 scripts/bornpets_ai_frames.py assemble
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+from PIL import Image
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bornpets_sheet import BLACK, RED, TRANSPARENT, WHITE, load_sequences  # noqa: E402
+
+REPO = Path(__file__).resolve().parent.parent
+PANDA_SHEET = REPO / "assets/bornpets-sprites-panda.png"
+PANDA_CFG = REPO / "assets/bornpets-sponsors-panda.json5"
+# Which pet to work on. Its prompts live in PROFILES below; its sheet and config
+# follow the asset naming convention.
+PET = os.environ.get("BORNPETS_PET", "badger")
+# The pet sheet is a SOURCE file that gets hand-edited between generations, so
+# which one to write is a deliberate choice rather than a constant: point these at
+# the working copy (v3, v4, ...) and the hand-edited original is never touched.
+PET_SHEET = Path(os.environ.get("BORNPETS_SHEET", REPO / f"assets/bornpets-sprites-{PET}.png"))
+PET_CFG = Path(os.environ.get("BORNPETS_CFG", REPO / f"assets/bornpets-sponsors-{PET}.json5"))
+
+API_URL = "https://api.openai.com/v1/images/edits"
+# gpt-image-1 (which the badger was drawn with) has been retired.
+MODEL = os.environ.get("BORNPETS_MODEL", "gpt-image-2")
+
+# gpt-image-1 only renders these canvases. Pick the one closest to the frame's
+# aspect so the model doesn't compose for a square and leave the wide 152x75
+# frame half empty.
+GEN_SIZES = ((1024, 1024), (1536, 1024), (1024, 1536))
+
+
+def gen_size(frame_w: int, frame_h: int) -> tuple[int, int]:
+    target = frame_w / frame_h
+    return min(GEN_SIZES, key=lambda s: abs(s[0] / s[1] - target))
+
+# The one frame that is generated standalone, hand-checked, and then passed as a
+# character sheet into every other frame's request.
+ANCHOR_ID = f"{PET}_idle_0"
+
+# Escape hatch for a frame that needs a different camera distance from the
+# anchor's. Empty in practice: dropping to low fidelity was tried on the battle
+# stand and did not change the framing, it only cost character consistency.
+FIDELITY_OVERRIDES: dict[str, str] = {}
+
+# Chroma key for the generated background. Magenta is outside the badge palette,
+# so keying it out can never eat real artwork.
+KEY = (255, 0, 255, 255)
+
+
+def anchor_path(work: Path) -> Path:
+    return work / "anchor.png"
+
+# ---------------------------------------------------------------------------
+# Prompt construction
+# ---------------------------------------------------------------------------
+
+# The anchor image carries the character; the prompt carries the scene.
+#
+# Earlier revisions also fed the matching panda frame in as a pose reference.
+# That produced panda clones. The other pets in this game do not work that way
+# — the slug sleeps in a bed under a moon and a 04:00 clock, and lounges in a
+# deck chair between two speakers, while the panda just lies down. Each pet gets
+# its own read on the same action, so the badger does too.
+BADGER_IDENTITY = (
+    "IMAGE 1 is the CHARACTER SHEET for this game's badger pet. It defines who "
+    "the character is and must be reproduced exactly: the round white head, the "
+    "two black stripes running from beside the nose up through each eye to the "
+    "top of the head, the white centre blaze between them, the white cheeks, "
+    "the small rounded ears, the small black snout, the small black dot eyes, "
+    "the white body, the red paw pads, and the line weight. Anyone must "
+    "recognise it as the same badger in every frame."
+)
+
+BADGER_FREEDOM = (
+    "You are NOT copying image 1's pose. Compose this frame yourself: choose the "
+    "badger's posture, expression, camera framing and any props or background "
+    "objects that best tell the viewer what is happening. Be playful and "
+    "characterful - this is a virtual-pet game, and the scene should read "
+    "instantly at a glance. Badger-native props are encouraged where they suit "
+    "the scene: earthworms and grubs for food, its underground sett, loose soil "
+    "and digging. Only add night-time or moon imagery when the scene brief "
+    "actually calls for it - do not put a moon in every frame."
+)
+
+# The badge renders transparency as unlit background, so a sprite only reads as
+# a silhouette if it is white-dominant. A naturalistic dark-bodied badger
+# disappears once it is scaled down to 152x75.
+STYLE_TEMPLATE = (
+    "Style: chunky hard-edged 1-bit retro pixel art for a monochrome e-ink "
+    "virtual-pet game, matching image 1's line weight exactly. Use ONLY pure "
+    "black (#000000), pure white (#FFFFFF) and pure red (#FF0000) for the "
+    "artwork - no grey, no other colours, no anti-aliasing, no shading, no "
+    "gradients. The art is WHITE-DOMINANT: shapes are filled solid white and "
+    "black is used only for outlines, {markings} and small "
+    "details. Red is a bold accent used sparingly, in chunky solid shapes "
+    "at least 3 pixels thick - never thin red hairlines, they disappear when the "
+    "sprite is scaled down.\n\n"
+    "THERE IS NO BACKGROUND AND NO SCENERY. Do not draw a sky, ground, floor, "
+    "horizon, wall, room, landscape, backdrop or panel border. The character and "
+    "its props float on the empty magenta chroma key, which fills every pixel "
+    "that is not the character or a prop and is used nowhere else. Props are "
+    "small discrete objects placed next to or touching the character, drawn as "
+    "white shapes with thin black outlines.\n\n"
+    "NEVER fill a large area with solid black. Black is only for thin outlines, "
+    "{markings}, and small details. Any "
+    "black shape bigger than a few pixels across is wrong - a black night sky, a "
+    "black patch of ground or a black floor mat ruins the sprite. Do not add "
+    "dithering, stippling, speckles or scattered dots anywhere.\n\n"
+    "Compose for a WIDE LANDSCAPE frame and use the full width of the canvas - "
+    "the {pet} does not have to be centred, and props may sit to its left or "
+    "right, but leave no large empty margins."
+)
+
+
+def style() -> str:
+    return STYLE_TEMPLATE.format(pet=PROFILE["noun"], markings=PROFILE["markings"])
+
+
+# Per-frame scene briefs, keyed by "<sequence>_<frame index>". These describe the
+# ACTION, not a pose to copy; the model stages each one itself.
+BADGER_POSES: dict[str, str] = {
+    "badger_idle_0": "Idle. The badger sits upright facing the viewer, calm and content, front paws resting in front of it.",
+    "badger_happy_0": "Delighted. The badger beams, paws up in celebration, with two or three bold chunky red hearts popping around it.",
+    "badger_happy_1": "Delighted, second animation frame: the badger bounces higher with an even bigger grin, hearts scattered on the other side.",
+    "badger_critical_sick_0": "Gravely ill. The badger sits facing the viewer with its eyes screwed shut, a red ice pack balanced on its head and a thermometer sticking out of its mouth. Nothing else in the frame.",
+    "badger_critical_sick_1": "Gravely ill, second animation frame: the same sitting badger shivers, the ice pack slides off its head, and a small bold red thermometer reading spikes beside it.",
+    "badger_critical_tired_0": "Utterly exhausted. The badger sits slumped forward, chin resting on its own paws, tongue lolling out and eyes shut, too tired to move. Nothing else in the frame.",
+    "badger_critical_hungry_0": "Starving. The badger stares mournfully into a completely empty food bowl, ribs showing, a thought bubble full of fat red earthworms above it.",
+    "badger_critical_hungry_1": "Starving, second animation frame: the badger paws desperately at the empty bowl with a huge bold red exclamation mark beside its head.",
+    "badger_critical_drained_0": "Completely out of energy. The badger droops like a deflated balloon, eyes half shut, with a big red battery icon showing empty next to it.",
+    "badger_critical_drained_1": "Completely out of energy, second animation frame: the badger has flopped onto its side, limbs splayed, the empty red battery icon flashing.",
+    "badger_warning_sick_0": "Coming down with something. The badger sits wrapped in a small blanket, red-nosed, sneezing into a tissue.",
+    # These three are normally produced together by `strip badger_tired`, which
+    # draws the whole cycle in one image so the frames match each other. The
+    # briefs below exist so a single frame can still be regenerated on its own.
+    "badger_warning_tired_0": "Sleepy. The badger yawns hugely, one paw rubbing an eye, a nightcap slipping down over its ear.",
+    "badger_warning_tired_1": "Sleepy, second animation frame: the badger's head has nodded forward, eyes half shut, the nightcap slid further down over one ear.",
+    "badger_warning_tired_2": "Sleepy, third animation frame: the badger's head has drooped right down, eyes fully closed, nightcap flopped over, two white Z's rising to one side.",
+    "badger_warning_hungry_0": "Peckish. The badger looks hopefully at the viewer, one paw on a rumbling belly, a thought bubble with a single red earthworm.",
+    "badger_warning_hungry_1": "Peckish, second animation frame: the badger licks its lips and points at the empty bowl, thought bubble now holding a whole bowl of red worms.",
+    "badger_warning_drained_0": "Running low. The badger slumps forward with heavy eyelids, a half-empty red battery icon beside it.",
+    "badger_warning_drained_1": "Running low, second animation frame: the badger sags further, propping itself up on one wobbling paw.",
+    "badger_warning_miserable_0": "Thoroughly miserable. The badger sits hunched and scowling under its own small rain cloud, ears flat.",
+    "badger_feeding_0": "Feeding. The badger tucks happily into a big bowl heaped with fat red earthworms, cheeks bulging, worms dangling from its mouth.",
+    "badger_feeding_1": "Feeding, second animation frame: the bowl is licked clean, the badger sits back with a full round belly and a satisfied grin.",
+    "badger_healing_0": "Being healed. The badger perks up as a bold red medical cross glows above it, a bandage wrapped round one paw.",
+    "badger_healing_1": "Being healed, second animation frame: the badger flexes the newly bandaged paw proudly, the red cross drifting off to one side.",
+    "badger_relaxing_0": "Relaxing. The badger lounges back in a red-and-white striped deck chair, paws behind its head, thoroughly at ease. Nothing else in the frame.",
+    "badger_relaxing_1": "Relaxing, second animation frame: still in the deck chair, sipping a drink, with a couple of bold red hearts floating up.",
+    "badger_relaxing_2": "Relaxing, third animation frame: the badger has slid down the deck chair half asleep, one paw trailing on the ground.",
+    "badger_playing_0": "Playing. The badger's head and face are fully visible and unobstructed, grinning with delight. It bats a bold red ball that flies off to ONE SIDE of its head, clearly clear of the face - the ball must never cover or overlap the head. Motion ticks trail behind the ball. No ground, no scattered soil.",
+    "badger_sleeping_0": "Fast asleep sitting up. The badger sits upright facing the viewer, head tipped forward and drooping, eyes closed as two curved lines, both head stripes clearly visible, three white Z's rising to one side. Nothing else in the frame.",
+    "badger_sleeping_1": "Fast asleep sitting up, second animation frame: the same seated badger has slumped a little further forward, a round white snoring bubble growing at its snout, the Z's drifting higher. Nothing else in the frame.",
+    "badger_sleeping_2": "Fast asleep sitting up, third animation frame: the same seated badger jolts slightly as the snoring bubble pops, head still drooping and eyes closed. Nothing else in the frame.",
+    "badger_leaving_0": "Leaving. The badger stands facing the viewer waving goodbye with one paw, a small bindle on a stick over its shoulder. Nothing else in the frame.",
+    "badger_leaving_1": "Leaving, second animation frame: the badger has turned around and is walking away from the viewer, seen from BEHIND. Its back is towards us, so draw the back of its head with the two black stripes running up over the top of the skull between the ears, a short upright tail, and its rear paws mid-stride. The back is white with the black stripes continuing over the crown - not a blank white shape. It must read clearly as a badger walking off. Nothing else in the frame.",
+    # "almost entirely empty" was read as licence to draw the badger anyway, so the absence is now the subject: a burrow up for rent, tenant long gone.
+    # The badger kept turning up in "an almost empty frame", and a "dark burrow hole" is invisible on a transparent background, so the mound has to be the white
+    # shape and the tunnel the black one.
+    "badger_gone_0": "THE BADGER IS NOT IN THIS FRAME AT ALL - no animal, no head, no paws, no tail, no eyes peeking out of the hole. The pet has moved out and its home is up for rent. Composition, like a signposted but deserted site:\n(1) LEFT AND CENTRE: a solid WHITE bank of earth with a lumpy uneven top edge, sitting along the bottom of the frame. Cut into the face of that bank, low down, is the badger sett entrance: a BLACK hole that is clearly WIDER THAN IT IS TALL - a low, squat, ragged opening, never a tall dome or archway. The bank is white so it stays visible; the hole is the only black shape in it. A few white lumps of dug-out soil are scattered in front of the hole.\n(2) RIGHT FOREGROUND: a wooden signboard on a post leaning at a slight angle, stuck into the ground and standing taller than the bank - a white rectangular plank with the words FOR RENT in black pixel capitals.\n(3) A couple of grass tufts on top of the bank.\nNothing else at all. The sett is empty.",
+    "badger_hibernating_0": "Hibernating. The badger sits tucked up fast asleep with a small blanket round its shoulders, head drooping and eyes closed, a few small white snowflakes drifting around it. Nothing else in the frame.",
+    "badger_hatching_0": "Hatching, first frame: a cracked white egg with the cub's striped snout just breaking through the shell. Nothing else in the frame.",
+    "badger_hatching_1": "Hatching, second frame: the cub's head is out of the broken egg, the top of the shell perched on its head like a cap. Nothing else in the frame.",
+    "badger_hatching_2": "Hatching, third frame: the cub bursts up out of the lower half of the shell, paws in the air, delighted. Nothing else in the frame.",
+    "badger_hatching_3": "Hatching, final frame: the cub is fully hatched and sits upright and pleased with itself, the empty broken eggshell lying beside it. Nothing else in the frame.",
+    # "full body" alone kept returning a torso-up crop; the zoom-out has to be stated as framing (small figure, gap above and below) to actually take.
+    # Four attempts to get a full-length standing pose (explicit "head to toe", zoom-out framing, dropping the word "portrait", low input_fidelity) all came back torso-up and progressively messier. gpt-image-1 renders a chibi animal head-and-torso in a square frame regardless. This is the clean version; the panda's own battle frame is framed much the same way.
+    "battle_badger_stand_0": "Square battle sprite. The badger stands facing the viewer in a bold red headband, front paws raised in big red boxing gloves, face clearly showing its two black head stripes and a determined glare. Nothing else in the frame - no floor, no mat, no arena.",
+    "battle_badger_won_0": "Square battle portrait. The badger celebrates victory facing the viewer, one paw thrust up, wearing its red headband, a bold red medal on its chest. Nothing else in the frame.",
+    # The dizzy-spiral eyes kept overriding the head markings and the face came back blank white, so the stripes are stated first, before the defeat.
+    # Spiral "dizzy" eyes reliably displaced the head stripes - the model drew one or the other, never both - so this frame uses X-shaped KO eyes instead.
+    "battle_badger_lost_0": "Square battle portrait showing the badger's whole body, not a close-up. Head markings exactly as on the character sheet: two thick BLACK STRIPES running from beside the nose up through each eye to the top of the head, a white blaze between them, white cheeks outside them. Each eye is a small white X knocked out of the black stripe. This badger has just lost a fight: it sits slumped, tongue out, red headband askew, three bold red stars circling above. Nothing else in the frame.",
+    "badger_exercising_0": "Working out. In a bold red headband, the badger does a press-up, body angled and tongue out with effort. No mat, no floor.",
+    "badger_exercising_1": "Working out, second animation frame: the badger is at the top of the press-up, or lifting a chunky dumbbell overhead, sweat drops flying.",
+    "badger_medicating_0": "Taking its medicine. The badger eyes a big red pill warily, holding it at arm's length.",
+    "badger_medicating_1": "Taking its medicine, second animation frame: the badger swallows the pill with a grimace and a red cross puffs above its head.",
+    "badger_drinking_0": "Drinking. The badger tips a large bottle up and glugs from it, throat working, a few drops flying.",
+    "badger_ozempic_0": "Comically shrunken. The badger has become absurdly skinny and gaunt, holding an oversized red syringe, its skin hanging loose.",
+    "badger_rehab_0": "In rehab. The badger sits sheepishly on a small stool clutching a red pill bottle, looking guilty.",
+    "badger_rehab_1": "In rehab, second animation frame: the badger throws the red pill bottle away with a determined look, sparkles around it.",
+    # Keep this one plain: the earlier life-drawing gag tripped the image API's
+    # output moderation as sexual content. The joke lives in the sign text.
+    "badger_onlypets_0": "Hamming it up for the camera. The badger sits proudly beaming at a small camera on a tripod, one paw raised in a wave, holding up a sign board with black pixel text reading 'TIP ME IN WORMS'. Nothing else in the frame.",
+}
+
+
+# ---------------------------------------------------------------------------
+# Animation strips
+# ---------------------------------------------------------------------------
+#
+# One request, one image, N panels. Generating each frame of an animation in its
+# own request gives the model no way to see the previous frame, so consecutive
+# frames drift: the props move, the line weight shifts, the pose resets. Asking
+# for the whole cycle in a single image makes the model draw them as a set, and
+# consistency between them comes for free.
+#
+# Panels are stacked vertically because the badge frame is wide (152x75). A
+# 1024x1536 canvas splits into three 1024x512 cells, aspect 2.0 against the
+# frame's 2.03 - so each panel crops to a frame with almost nothing to trim.
+STRIP_SIZE = (1024, 1536)
+
+BADGER_STRIPS: dict[str, dict] = {
+    "badger_tired": {
+        "size": STRIP_SIZE,
+        "targets": [
+            "badger_warning_tired_0",
+            "badger_warning_tired_1",
+            "badger_warning_tired_2",
+        ],
+        "subject": (
+            "the badger getting steadily sleepier - a three-step tired animation "
+            "that loops. In ALL THREE frames the badger stays SITTING UPRIGHT "
+            "facing the viewer with its whole body and both front paws visible, "
+            "its two BLACK HEAD STRIPES clearly drawn exactly as on the character "
+            "sheet, and its nightcap FILLED SOLID RED. It never lies down, never "
+            "collapses into a heap, and never loses its face markings"
+        ),
+        "panels": [
+            "TOP PANEL - frame 1: the badger sits upright and yawns hugely, mouth wide open, one paw rubbing an eye, the solid red nightcap starting to slip down over one ear.",
+            "MIDDLE PANEL - frame 2: the same badger, still sitting upright, same size and same place in its panel, has let its head nod forward, eyes now half shut, the solid red nightcap slid further down over the ear.",
+            # Solid white Z's are invisible on the badge: transparent pixels are
+            # skipped, so the sprite sits on white paper and an unoutlined white
+            # shape has nothing to read against. The panda's Z's are white with a
+            # black outline; these have to be too.
+            "BOTTOM PANEL - frame 3: the same badger, STILL SITTING UPRIGHT, same size and same place in its panel, head drooped forward with eyes fully closed, the solid red nightcap flopped over one ear, and two Z's rising to one side. Draw the Z's as WHITE letters with a THICK BLACK OUTLINE around each one, like the rest of the artwork - never plain white letters with no outline.",
+        ],
+    },
+}
+
+# The cut is a blind slice at exact fractions of the canvas height, so the model
+# has to keep every panel's art inside its own band. Stated as a hard rule and
+# repeated as a margin instruction, because "three panels" alone gets read as
+# licence to overlap them.
+STRIP_STYLE = (
+    "LAYOUT: this single image contains {n} separate animation frames stacked "
+    "vertically, in equal horizontal bands, each exactly {frac} of the image "
+    "height. Band 1 is the top {frac}, band {n} is the bottom {frac}.\n\n"
+    "Each band is one complete WIDE LANDSCAPE frame of the animation. The art in "
+    "a band must stay entirely inside that band: leave a clear magenta margin "
+    "along the top and bottom edge of every band so nothing touches or crosses "
+    "the boundary between two bands. This applies to the LAST band too - the "
+    "bottom of the final frame's artwork must stop well short of the bottom edge "
+    "of the image, never run off it. Every frame must show the whole {pet}, "
+    "uncropped. Do NOT draw panel borders, frames, gutters, "
+    "dividing lines, numbers or labels - the bands are separated by empty "
+    "magenta only.\n\n"
+    "The bands are frames of ONE animation of the SAME {pet}. Keep the {pet} "
+    "the same size, drawn at the same scale, in the same position within its "
+    "band, and with the same line weight in every band. Only what the brief says "
+    "changes between frames may change - everything else must be pixel-identical "
+    "from band to band, so the frames play as a smooth loop."
+)
+
+
+def strip_prompt(key: str) -> str:
+    spec = STRIPS[key]
+    n = len(spec["panels"])
+    panels = "\n".join(spec["panels"])
+    return (
+        f"Draw a {n}-frame animation strip for a pixel-art virtual-pet game.\n\n"
+        f"{IDENTITY}\n\n"
+        f"{STRIP_STYLE.format(n=n, frac=f'1/{n}', pet=PROFILE['noun'])}\n\n"
+        f"The animation shows {spec['subject']}.\n\n"
+        f"{panels}\n\n"
+        f"{FREEDOM}\n\n"
+        f"{style()}"
+    )
+
+
+def badger_anchor_prompt() -> str:
+    """Prompt for the one hand-approved frame every other frame references."""
+    return (
+        "Edit this pixel-art virtual-pet sprite. It currently shows a white "
+        "panda.\n\n"
+        "Change ONLY the face and ear markings so the animal reads as a EUROPEAN "
+        "BADGER (Meles meles) instead of a panda:\n"
+        "- Replace the two big round black eye patches with TWO BLACK STRIPES. "
+        "Each stripe starts beside the nose, runs up through the eye and "
+        "continues to the top of the head, so the head shows a white centre "
+        "blaze between the two stripes and a white cheek outside each stripe.\n"
+        "- The stripes stay INSIDE the head: leave an unbroken SOLID WHITE rim "
+        "around the entire outside edge of the head, so the head still reads as "
+        "one complete white shape.\n"
+        "- The eyes are small black dots sitting inside those stripes.\n"
+        "- Make the ears small, low and rounded, filled white.\n"
+        "- Give it a small black snout at the bottom of the white centre blaze, "
+        "with a narrower, more pointed muzzle than a panda's.\n\n"
+        "Keep EVERYTHING else pixel-for-pixel as it is: the same solid white "
+        "head and body, silhouette, pose, size, placement and red paw pads.\n\n"
+        f"{style()}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sea star
+# ---------------------------------------------------------------------------
+#
+# Unlike the badger, the sea star is not a re-marked panda: the body plan is
+# different, so the panda frame is passed only as a style reference (line
+# weight, palette) at low fidelity and the character comes from the prompt.
+# The look follows a kawaii colouring-page starfish: big glossy eyes, blush
+# cheeks, open smile.
+
+SEASTAR_IDENTITY = (
+    "IMAGE 1 is the CHARACTER SHEET for this game's sea star pet. It defines who "
+    "the character is and must be reproduced exactly: a plump five-armed sea "
+    "star (starfish) with soft rounded arm tips, a solid white body with a thick "
+    "black outline, a short curved black crease line along each arm, two BIG "
+    "round black eyes each with a white highlight dot, a bold red blush oval on "
+    "each cheek, a wide open happy smile with a red tongue, and the line weight. "
+    "Its five arms are its limbs: the top arm is the point of its head, the two "
+    "side arms work as hands and the two lower arms as legs. Anyone must "
+    "recognise it as the same sea star in every frame."
+)
+
+SEASTAR_FREEDOM = (
+    "You are NOT copying image 1's pose. Compose this frame yourself: choose the "
+    "sea star's posture, expression, camera framing and any props that best tell "
+    "the viewer what is happening. Be playful and characterful - this is a "
+    "virtual-pet game, and the scene should read instantly at a glance. "
+    "Seaside props are encouraged where they suit the scene: mussels and clams "
+    "for food, seashells, a strand of seaweed, a rock, a few small round "
+    "bubbles drawn as white circles with a black outline. Only add night-time "
+    "or moon imagery when the scene brief actually calls for it - do not put a "
+    "moon in every frame."
+)
+
+
+def seastar_anchor_prompt() -> str:
+    return (
+        "IMAGE 1 is a sprite from a pixel-art virtual-pet game, showing a white "
+        "panda. Use it ONLY as a style reference - its line weight, pixel scale, "
+        "white-filled shapes with black outlines and small red accents. Do NOT "
+        "draw the panda or anything panda-like.\n\n"
+        "Draw this game's NEW pet instead: a cute kawaii five-armed SEA STAR "
+        "(starfish) standing upright and facing the viewer:\n"
+        "- A plump star shape with soft, rounded arm tips, filled solid white "
+        "with a thick black outline.\n"
+        "- A short curved black crease line along each arm.\n"
+        "- Two BIG round black eyes, each with one white highlight dot.\n"
+        "- A bold red blush oval on each cheek, under the eyes.\n"
+        "- A wide open happy smile showing a red tongue.\n"
+        "- Idle and content: standing on its two lower arms, side arms relaxed.\n"
+        "Nothing else in the frame.\n\n"
+        f"{style()}"
+    )
+
+
+SEASTAR_POSES: dict[str, str] = {
+    "seastar_idle_0": "Idle. The sea star stands upright on its two lower arms facing the viewer, calm and content, side arms relaxed, smiling.",
+    "seastar_happy_0": "Delighted. The sea star beams with its eyes squeezed into happy arcs, side arms thrown up in celebration, two or three bold chunky red hearts popping around it.",
+    "seastar_happy_1": "Delighted, second animation frame: the sea star spins in a happy cartwheel, tilted at a jaunty angle with an even bigger grin, hearts scattered on the other side.",
+    "seastar_critical_sick_0": "Gravely ill. The sea star sits slumped facing the viewer with its eyes screwed shut and its arms hanging limp, a red ice pack balanced on its top arm and a thermometer sticking out of its mouth. Nothing else in the frame.",
+    "seastar_critical_sick_1": "Gravely ill, second animation frame: the same slumped sea star shivers, the ice pack slides off its top arm, and a small bold red thermometer reading spikes beside it.",
+    "seastar_critical_tired_0": "Utterly exhausted. The sea star has toppled over and lies flat on the ground, arms splayed out limp, tongue lolling out and eyes shut, too tired to move. Nothing else in the frame.",
+    "seastar_critical_hungry_0": "Starving. The sea star stares mournfully into a completely empty food bowl, arms wilting, a thought bubble full of plump mussels above it.",
+    "seastar_critical_hungry_1": "Starving, second animation frame: the sea star scrapes desperately at the empty bowl with one arm, a huge bold red exclamation mark beside its head.",
+    "seastar_critical_drained_0": "Completely out of energy. The sea star droops, its arms sagging down like wilted petals, eyes half shut, with a big red battery icon showing empty next to it.",
+    "seastar_critical_drained_1": "Completely out of energy, second animation frame: the sea star has flopped over onto its side, arms splayed, the empty red battery icon flashing.",
+    "seastar_warning_sick_0": "Coming down with something. The sea star sits wrapped in a small blanket, sniffly, sneezing into a tissue held in one arm.",
+    # Normally produced together by `strip seastar_tired`; the briefs let a
+    # single frame be regenerated on its own.
+    "seastar_warning_tired_0": "Sleepy. The sea star yawns hugely, one arm rubbing an eye, a red nightcap slipping down over its top arm.",
+    "seastar_warning_tired_1": "Sleepy, second animation frame: the sea star's top arm has nodded forward, eyes half shut, the nightcap slid further down.",
+    "seastar_warning_tired_2": "Sleepy, third animation frame: the sea star's top arm has drooped right down, eyes fully closed, nightcap flopped over, two Z's rising to one side.",
+    "seastar_warning_hungry_0": "Peckish. The sea star looks hopefully at the viewer, one arm on its rumbling middle, a thought bubble with a single mussel.",
+    "seastar_warning_hungry_1": "Peckish, second animation frame: the sea star licks its lips and points one arm at the empty bowl, the thought bubble now holding a whole pile of mussels.",
+    "seastar_warning_drained_0": "Running low. The sea star slumps with heavy eyelids and drooping arms, a half-empty red battery icon beside it.",
+    "seastar_warning_drained_1": "Running low, second animation frame: the sea star has sagged down sideways, leaning heavily on one bent, wobbling arm, eyes half shut, body tilted at an angle. The SAME red low-battery icon from the previous frame is still beside it.",
+    "seastar_warning_miserable_0": "Thoroughly miserable. The sea star sits hunched and frowning under its own small rain cloud, side arms crossed.",
+    "seastar_feeding_0": "Feeding. The sea star happily hugs a big open mussel shell with its arms and slurps up the red mussel inside, cheeks bulging.",
+    "seastar_feeding_1": "Feeding, second animation frame: the meal is finished. The sea star leans back with a full round middle, eyes closed in a satisfied grin, patting its tummy with one arm. Beside it lies the SAME big mussel shell from the previous frame, now wide open and completely EMPTY - no red mussel left inside. No pile of extra shells.",
+    "seastar_healing_0": "Being healed. The sea star perks up as a bold red medical cross glows above it, a bandage wrapped round the tip of one arm.",
+    "seastar_healing_1": "Being healed, second animation frame: the sea star proudly shows off the bandaged arm, its tip regrown good as new, the red cross drifting off to one side.",
+    "seastar_relaxing_0": "Relaxing. The sea star lounges back in a red-and-white striped deck chair, side arms behind its head, thoroughly at ease. Nothing else in the frame.",
+    "seastar_relaxing_1": "Relaxing, second animation frame: still in the deck chair, sipping a drink through a straw, with a couple of bold red hearts floating up.",
+    "seastar_relaxing_2": "Relaxing, third animation frame: the drink is gone and the sea star has dozed off, slumped far down and sideways in the SAME deck chair as in the previous frame, eyes closed, mouth open, one arm dangling over the side to the ground. The chair's fabric keeps its bold SOLID RED and white stripes.",
+    "seastar_playing_0": "Playing. The sea star's face is fully visible and unobstructed, grinning with delight. It bats a bold red-and-white beach ball that flies off to ONE SIDE, clearly clear of the face - the ball must never cover or overlap the face. Motion ticks trail behind the ball. No ground, no sand.",
+    "seastar_sleeping_0": "Fast asleep. The sea star sits upright facing the viewer, its top arm tipped forward and drooping, eyes closed as two curved lines, three Z's rising to one side, each a white letter with a thick black outline. Nothing else in the frame.",
+    "seastar_sleeping_1": "Fast asleep, second animation frame: the same sitting sea star has slumped a little further forward, a round white snoring bubble growing at its mouth, the Z's drifting higher. Nothing else in the frame.",
+    "seastar_sleeping_2": "Fast asleep, third animation frame: the same sitting sea star jolts slightly as the snoring bubble pops, still drooping with eyes closed. Nothing else in the frame.",
+    "seastar_leaving_0": "Leaving. The sea star stands facing the viewer, sad and disappointed that things did not work out: eyes downcast, a single tear, mouth a small wobbly frown, one arm raised in a half-hearted goodbye wave, a small bindle on a stick over its shoulder. Not smiling. Nothing else in the frame.",
+    "seastar_leaving_1": "Leaving, second animation frame: the sea star has turned away and is cartwheeling off to one side, seen from BEHIND: its back is plain white with a scattering of small round bumps and no face, the bindle swinging from one arm. It must read clearly as the sea star leaving. Nothing else in the frame.",
+    "seastar_gone_0": "THE SEA STAR IS NOT IN THIS FRAME AT ALL - no star, no arms, no face, no eyes peeking out. The pet has moved out and its home is up for rent. Composition, like a signposted but deserted site:\n(1) LEFT AND CENTRE: a solid WHITE rock with a lumpy uneven top, sitting along the bottom of the frame. Low in its face is a BLACK crevice that is clearly WIDER THAN IT IS TALL - the sea star's old home. A couple of white seashells and a strand of seaweed lie beside the rock.\n(2) RIGHT FOREGROUND: a wooden signboard on a post leaning at a slight angle, standing taller than the rock - a white rectangular plank with the words FOR RENT in black pixel capitals.\n(3) Two or three small bubbles rising, white circles with a black outline.\nNothing else at all. The home is empty.",
+    "seastar_hibernating_0": "Hibernating. The sea star sits tucked up fast asleep under a small blanket, eyes closed, a few small white snowflakes drifting around it. Nothing else in the frame.",
+    "seastar_hatching_0": "Hatching, first frame: a cracked white egg with the rounded tip of one sea star arm just poking through the shell. Nothing else in the frame.",
+    "seastar_hatching_1": "Hatching, second frame: the baby sea star's face is out of the broken egg, the top of the shell perched on its top arm like a cap. Nothing else in the frame.",
+    # "the shell" was read as a seashell - this is a sea creature - so the egg has to be named outright.
+    "seastar_hatching_2": "Hatching, third frame: the baby sea star bursts up out of the lower half of a cracked white EGGSHELL - a plain oval bird-style egg with a jagged zigzag broken rim, the same egg as in the earlier hatching frames. It is NOT a seashell, clam, scallop or oyster: no ridges, no fan shape. Arms in the air, delighted. Nothing else in the frame.",
+    "seastar_hatching_3": "Hatching, final frame: the baby sea star is fully hatched and stands pleased with itself. Scattered on the ground around its lower arms lie four or five fragments of broken white eggshell with jagged zigzag edges - no whole egg, no egg cup, no seashells. Nothing else in the frame.",
+    "battle_seastar_stand_0": "Square battle sprite showing the whole sea star. It stands facing the viewer with a bold red headband tied round its top arm, its two side arms raised in big red boxing gloves, its big eyes narrowed in a determined glare. Nothing else in the frame - no floor, no mat, no arena.",
+    "battle_seastar_won_0": "Square battle portrait showing the whole sea star. It celebrates victory facing the viewer, one arm thrust up, wearing its red headband, a bold red medal on its chest. Nothing else in the frame.",
+    "battle_seastar_lost_0": "Square battle portrait showing the sea star's whole body, not a close-up. Its face is as on the character sheet, except each eye is a black X. It has just lost a fight: it sits slumped with its arms drooping, tongue out, red headband askew, three bold red stars circling above. Nothing else in the frame.",
+    "seastar_exercising_0": "Working out. In a bold red headband, the sea star does a star jump, all five arms flung wide, tongue out with effort. No mat, no floor.",
+    "seastar_exercising_1": "Working out, second animation frame: the sea star lifts a chunky dumbbell overhead with both side arms, sweat drops flying.",
+    "seastar_medicating_0": "Taking its medicine. The sea star eyes a big red pill warily, holding it at arm's length.",
+    "seastar_medicating_1": "Taking its medicine, second animation frame: the sea star swallows the pill with a grimace and a red cross puffs above its head.",
+    "seastar_drinking_0": "Drinking. The sea star tips a large bottle up with two arms and glugs from it, a few drops flying.",
+    # The shorts-and-tape-measure version read as mush at 152x75; the before/after outline carries the joke in one shape.
+    "seastar_ozempic_0": "Lost weight on Ozempic. The sea star stands proudly, now SLIM: its arms and middle clearly thinner than on the character sheet. It cheerfully holds up a big chunky red injection pen in one arm. Directly behind it, a DASHED black outline traces its old, much plumper star shape, so the before-and-after weight loss reads instantly. No shorts, no tape measure, no shells, no seaweed - nothing else in the frame.",
+    "seastar_rehab_0": "In rehab. The sea star sits sheepishly on a small stool clutching a red pill bottle, looking guilty.",
+    "seastar_rehab_1": "In rehab, second animation frame: the sea star throws the red pill bottle away with a determined look, sparkles around it.",
+    # Kept innocent on purpose: a racier take tripped the image API's moderation on the badger.
+    "seastar_onlypets_0": "Hamming it up for the camera. The sea star lounges on top of a small bed with a pillow and a blanket, posing coyly for the camera with one arm behind its head and a cheeky grin. Beside the bed, a small camera on a tripod points straight at it, a bold red recording light on. A little sign board leaning on the bed reads 'TIP ME IN MUSSELS' in black pixel text.",
+}
+
+SEASTAR_STRIPS: dict[str, dict] = {
+    "seastar_tired": {
+        "size": STRIP_SIZE,
+        "targets": [
+            "seastar_warning_tired_0",
+            "seastar_warning_tired_1",
+            "seastar_warning_tired_2",
+        ],
+        "subject": (
+            "the sea star getting steadily sleepier - a three-step tired "
+            "animation that loops. In ALL THREE frames the sea star stays "
+            "STANDING UPRIGHT facing the viewer with all five arms visible, its "
+            "big eyes and red cheek blush drawn exactly as on the character "
+            "sheet, and its nightcap FILLED SOLID RED. It never lies down and "
+            "never collapses into a heap"
+        ),
+        "panels": [
+            "TOP PANEL - frame 1: the sea star yawns hugely, mouth wide open, one arm rubbing an eye, the solid red nightcap starting to slip down over its top arm.",
+            "MIDDLE PANEL - frame 2: the same sea star, same size and same place in its panel, has let its top arm nod forward, eyes now half shut, the solid red nightcap slid further down.",
+            "BOTTOM PANEL - frame 3: the same sea star, STILL STANDING UPRIGHT, same size and same place in its panel, top arm drooped forward with eyes fully closed, the solid red nightcap flopped over, and two Z's rising to one side. Draw the Z's as WHITE letters with a THICK BLACK OUTLINE around each one - never plain white letters with no outline.",
+        ],
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Jellyfish (the sea star's friend)
+# ---------------------------------------------------------------------------
+#
+# Same approach as the sea star: the panda is only a style reference. The look
+# follows a kawaii jellyfish: round bell, dot eyes, a small ":3" mouth, blush
+# cheeks, frilly skirt and wavy tentacles.
+
+JELLYFISH_IDENTITY = (
+    "IMAGE 1 is the CHARACTER SHEET for this game's jellyfish pet. It defines "
+    "who the character is and must be reproduced exactly: a round dome-shaped "
+    "bell filled solid white with a thick black outline, a dashed black line "
+    "following just inside the edge of the bell, a small teardrop swirl on top, "
+    "two small round black eyes each with a white highlight dot, a bold red "
+    "blush oval under each eye, a tiny cat-like ':3' mouth, a frilly scalloped "
+    "skirt under the bell, and four wavy white tentacles with black outlines, "
+    "plus the line weight. Its tentacles are its limbs: the two outer ones work "
+    "as arms, the two inner ones dangle below. It floats rather than stands. "
+    "Anyone must recognise it as the same jellyfish in every frame."
+)
+
+JELLYFISH_FREEDOM = (
+    "You are NOT copying image 1's pose. Compose this frame yourself: choose the "
+    "jellyfish's posture, expression, camera framing and any props that best "
+    "tell the viewer what is happening. Be playful and characterful - this is a "
+    "virtual-pet game, and the scene should read instantly at a glance. "
+    "Seaside props are encouraged where they suit the scene: tiny shrimp and "
+    "plankton for food, seashells, a strand of seaweed, a few small round "
+    "bubbles drawn as white circles with a black outline. Only add night-time "
+    "or moon imagery when the scene brief actually calls for it - do not put a "
+    "moon in every frame."
+)
+
+
+def jellyfish_anchor_prompt() -> str:
+    return (
+        "IMAGE 1 is a sprite from a pixel-art virtual-pet game, showing a white "
+        "panda. Use it ONLY as a style reference - its line weight, pixel scale, "
+        "white-filled shapes with black outlines and small red accents. Do NOT "
+        "draw the panda or anything panda-like.\n\n"
+        "Draw this game's NEW pet instead: a cute kawaii JELLYFISH floating "
+        "upright and facing the viewer:\n"
+        "- A round dome-shaped bell filled solid white with a thick black "
+        "outline, and a dashed black line running just inside its edge.\n"
+        "- A small teardrop-shaped swirl drawn in black on top of the bell.\n"
+        "- Two small round black eyes, each with one white highlight dot.\n"
+        "- A bold red blush oval under each eye.\n"
+        "- A tiny cat-like ':3' mouth between the eyes.\n"
+        "- A frilly scalloped skirt along the bottom of the bell.\n"
+        "- Four wavy tentacles hanging below, white with black outlines, the "
+        "two outer ones curling outwards.\n"
+        "Nothing else in the frame.\n\n"
+        f"{style()}"
+    )
+
+
+JELLYFISH_POSES: dict[str, str] = {
+    "jellyfish_idle_0": "Idle. The jellyfish floats upright facing the viewer, calm and content, tentacles drifting gently, a couple of small bubbles rising beside it.",
+    "jellyfish_happy_0": "Delighted. The jellyfish beams with its eyes squeezed into happy arcs, outer tentacles thrown up in celebration, two or three bold chunky red hearts popping around it.",
+    "jellyfish_happy_1": "Delighted, second animation frame: the jellyfish bobs higher with its bell squashed and its tentacles swirling out, hearts scattered on the other side.",
+    "jellyfish_critical_sick_0": "Gravely ill. The jellyfish sags low facing the viewer, eyes screwed shut, tentacles hanging limp, a red ice pack balanced on its bell and a thermometer sticking out of its mouth. Nothing else in the frame.",
+    "jellyfish_critical_sick_1": "Gravely ill, second animation frame: the same sagging jellyfish shivers, the ice pack slides off its bell, and a small bold red thermometer reading spikes beside it.",
+    "jellyfish_critical_tired_0": "Utterly exhausted. The jellyfish has sunk to the bottom and lies flat in a heap, bell tipped over, tentacles in a tangle, eyes shut. Nothing else in the frame.",
+    "jellyfish_critical_hungry_0": "Starving. The jellyfish stares mournfully into a completely empty food bowl, bell deflated, a thought bubble full of tiny shrimp above it.",
+    "jellyfish_critical_hungry_1": "Starving, second animation frame: the jellyfish pokes desperately at the empty bowl with one tentacle, a huge bold red exclamation mark beside its bell.",
+    "jellyfish_critical_drained_0": "Completely out of energy. The jellyfish droops like a deflated balloon, tentacles sagging, eyes half shut, with a big red battery icon showing empty next to it.",
+    "jellyfish_critical_drained_1": "Completely out of energy, second animation frame: the jellyfish has sunk onto its side, tentacles splayed, the empty red battery icon flashing.",
+    "jellyfish_warning_sick_0": "Coming down with something. The jellyfish floats wrapped in a small blanket, sniffly, sneezing into a tissue held in one tentacle.",
+    "jellyfish_warning_tired_0": "Sleepy. The jellyfish yawns hugely, one tentacle rubbing an eye, a red nightcap slipping down over its bell.",
+    "jellyfish_warning_tired_1": "Sleepy, second animation frame: the jellyfish's bell has tipped forward, eyes half shut, the nightcap slid further down.",
+    "jellyfish_warning_tired_2": "Sleepy, third animation frame: the jellyfish's bell has drooped right down, eyes fully closed, nightcap flopped over, two Z's rising to one side.",
+    "jellyfish_warning_hungry_0": "Peckish. The jellyfish looks hopefully at the viewer, one tentacle on its rumbling middle, a thought bubble with a single tiny shrimp.",
+    "jellyfish_warning_hungry_1": "Peckish, second animation frame: the jellyfish licks its lips and points one tentacle at the empty bowl, the thought bubble now holding a whole pile of shrimp.",
+    "jellyfish_warning_drained_0": "Running low. The jellyfish sags with heavy eyelids and drooping tentacles, a half-empty red battery icon beside it.",
+    "jellyfish_warning_drained_1": "Running low, second animation frame: the jellyfish sinks further, propping itself up on one wobbling tentacle.",
+    "jellyfish_warning_miserable_0": "Thoroughly miserable. The jellyfish floats hunched and frowning under its own small rain cloud, tentacles crossed.",
+    "jellyfish_feeding_0": "Feeding. The jellyfish happily scoops a cloud of tiny red shrimp towards its mouth with its tentacles, cheeks bulging.",
+    "jellyfish_feeding_1": "Feeding, second animation frame: the shrimp are gone, and the jellyfish floats back with a round full bell and a satisfied grin.",
+    "jellyfish_healing_0": "Being healed. The jellyfish perks up as a bold red medical cross glows above it, a bandage wrapped round one tentacle.",
+    "jellyfish_healing_1": "Being healed, second animation frame: the jellyfish proudly waves the bandaged tentacle, the red cross drifting off to one side.",
+    "jellyfish_relaxing_0": "Relaxing. The jellyfish lounges back in a red-and-white striped deck chair, tentacles draped over the sides, thoroughly at ease. Nothing else in the frame.",
+    "jellyfish_relaxing_1": "Relaxing, second animation frame: still in the deck chair, sipping a drink through a straw, with a couple of bold red hearts floating up.",
+    "jellyfish_relaxing_2": "Relaxing, third animation frame: the jellyfish has slid down the deck chair half asleep, one tentacle trailing to the ground.",
+    "jellyfish_playing_0": "Playing. The jellyfish's face is fully visible and unobstructed, grinning with delight. It bats a bold red-and-white beach ball with one tentacle; the ball flies off to ONE SIDE, clearly clear of the face - the ball must never cover or overlap the face. Motion ticks trail behind the ball. No ground, no sand.",
+    "jellyfish_sleeping_0": "Fast asleep. The jellyfish floats facing the viewer, bell tipped forward and drooping, eyes closed as two curved lines, three Z's rising to one side, each a white letter with a thick black outline. Nothing else in the frame.",
+    "jellyfish_sleeping_1": "Fast asleep, second animation frame: the same jellyfish has drifted a little lower, a round white snoring bubble growing at its mouth, the Z's drifting higher. Nothing else in the frame.",
+    "jellyfish_sleeping_2": "Fast asleep, third animation frame: the same jellyfish jolts slightly as the snoring bubble pops, still drooping with eyes closed. Nothing else in the frame.",
+    "jellyfish_leaving_0": "Leaving. The jellyfish floats facing the viewer waving goodbye with one tentacle, a small bindle on a stick held in another. Nothing else in the frame.",
+    "jellyfish_leaving_1": "Leaving, second animation frame: the jellyfish has turned away and is pulsing off to one side, seen from BEHIND: the back of its bell is plain white with the dashed rim line and no face, its tentacles trailing behind it and the bindle swinging. It must read clearly as the jellyfish swimming away. Nothing else in the frame.",
+    "jellyfish_gone_0": "THE JELLYFISH IS NOT IN THIS FRAME AT ALL - no bell, no tentacles, no face, no eyes peeking out. The pet has moved out and its home is up for rent. Composition, like a signposted but deserted site:\n(1) LEFT AND CENTRE: a big open WHITE clam shell lying empty on the bottom of the frame, its inside a clean white hollow with a black outline, a strand of seaweed beside it.\n(2) RIGHT FOREGROUND: a wooden signboard on a post leaning at a slight angle, standing taller than the shell - a white rectangular plank with the words FOR RENT in black pixel capitals.\n(3) Two or three small bubbles rising, white circles with a black outline.\nNothing else at all. The home is empty.",
+    "jellyfish_hibernating_0": "Hibernating. The jellyfish floats tucked up fast asleep under a small blanket, eyes closed, a few small white snowflakes drifting around it. Nothing else in the frame.",
+    "jellyfish_hatching_0": "Hatching, first frame: a cracked white egg with the tip of one wavy tentacle just poking through the shell. Nothing else in the frame.",
+    "jellyfish_hatching_1": "Hatching, second frame: the baby jellyfish's bell and face are out of the broken egg, the top of the shell perched on its bell like a cap. Nothing else in the frame.",
+    "jellyfish_hatching_2": "Hatching, third frame: the baby jellyfish floats up out of the lower half of the shell, tentacles in the air, delighted. Nothing else in the frame.",
+    "jellyfish_hatching_3": "Hatching, final frame: the baby jellyfish is fully hatched and floats pleased with itself, the empty broken eggshell lying below it. Nothing else in the frame.",
+    "battle_jellyfish_stand_0": "Square battle sprite showing the whole jellyfish. It floats facing the viewer with a bold red headband round its bell, its two outer tentacles raised in big red boxing gloves, eyes narrowed in a determined glare. Nothing else in the frame - no floor, no mat, no arena.",
+    "battle_jellyfish_won_0": "Square battle portrait showing the whole jellyfish. It celebrates victory facing the viewer, one tentacle thrust up, wearing its red headband, a bold red medal hanging below its bell. Nothing else in the frame.",
+    "battle_jellyfish_lost_0": "Square battle portrait showing the jellyfish's whole body, not a close-up. Its face is as on the character sheet, except each eye is a black X. It has just lost a fight: it has sunk down slumped, tentacles in a tangle, tongue out, red headband askew, three bold red stars circling above. Nothing else in the frame.",
+    "jellyfish_exercising_0": "Working out. In a bold red headband, the jellyfish pumps its bell hard, tentacles flung wide, tongue out with effort. No mat, no floor.",
+    "jellyfish_exercising_1": "Working out, second animation frame: the jellyfish lifts a chunky dumbbell overhead with two tentacles, sweat drops flying.",
+    "jellyfish_medicating_0": "Taking its medicine. The jellyfish eyes a big red pill warily, holding it at tentacle's length.",
+    "jellyfish_medicating_1": "Taking its medicine, second animation frame: the jellyfish swallows the pill with a grimace and a red cross puffs above its bell.",
+    "jellyfish_drinking_0": "Drinking. The jellyfish tips a large bottle up with two tentacles and glugs from it, a few drops flying.",
+    "jellyfish_ozempic_0": "Comically shrunken. The jellyfish has become absurdly skinny, its bell shrivelled small and its tentacles thin as threads, holding an oversized red syringe.",
+    "jellyfish_rehab_0": "In rehab. The jellyfish sits sheepishly on a small stool clutching a red pill bottle, looking guilty.",
+    "jellyfish_rehab_1": "In rehab, second animation frame: the jellyfish throws the red pill bottle away with a determined look, sparkles around it.",
+    "jellyfish_onlypets_0": "Hamming it up for the camera. The jellyfish floats proudly beaming at a small camera on a tripod, one tentacle raised in a wave, holding up a sign board with black pixel text reading 'TIP ME IN SHRIMP'. Nothing else in the frame.",
+}
+
+JELLYFISH_STRIPS: dict[str, dict] = {
+    "jellyfish_tired": {
+        "size": STRIP_SIZE,
+        "targets": [
+            "jellyfish_warning_tired_0",
+            "jellyfish_warning_tired_1",
+            "jellyfish_warning_tired_2",
+        ],
+        "subject": (
+            "the jellyfish getting steadily sleepier - a three-step tired "
+            "animation that loops. In ALL THREE frames the jellyfish stays "
+            "FLOATING UPRIGHT facing the viewer with its whole bell and all four "
+            "tentacles visible, its eyes and red cheek blush drawn exactly as on "
+            "the character sheet, and its nightcap FILLED SOLID RED. It never "
+            "sinks into a heap"
+        ),
+        "panels": [
+            "TOP PANEL - frame 1: the jellyfish yawns hugely, mouth wide open, one tentacle rubbing an eye, the solid red nightcap starting to slip down over its bell.",
+            "MIDDLE PANEL - frame 2: the same jellyfish, same size and same place in its panel, has let its bell tip forward, eyes now half shut, the solid red nightcap slid further down.",
+            "BOTTOM PANEL - frame 3: the same jellyfish, STILL FLOATING UPRIGHT, same size and same place in its panel, bell drooped forward with eyes fully closed, the solid red nightcap flopped over, and two Z's rising to one side. Draw the Z's as WHITE letters with a THICK BLACK OUTLINE around each one - never plain white letters with no outline.",
+        ],
+    },
+}
+# Frames that continue the previous frame of their animation: that frame's raw
+# output is passed as a second reference so props carry over (the shell being
+# eaten, the striped chair, the battery icon) instead of being redrawn fresh.
+SEASTAR_CONTINUES: dict[str, str] = {
+    "seastar_feeding_1": "seastar_feeding_0",
+    "seastar_relaxing_2": "seastar_relaxing_1",
+    "seastar_warning_drained_1": "seastar_warning_drained_0",
+}
+
+
+PROFILES: dict[str, dict] = {
+    "badger": {
+        "noun": "badger",
+        "markings": "the badger's two head stripes, its eyes and snout",
+        "identity": BADGER_IDENTITY,
+        "freedom": BADGER_FREEDOM,
+        "poses": BADGER_POSES,
+        "strips": BADGER_STRIPS,
+        "anchor_prompt": badger_anchor_prompt,
+        # The badger anchor is the panda frame re-marked, so it must track the
+        # reference closely.
+        "anchor_fidelity": "high",
+    },
+    "seastar": {
+        "noun": "sea star",
+        "markings": "its eyes, mouth and arm crease lines",
+        "identity": SEASTAR_IDENTITY,
+        "freedom": SEASTAR_FREEDOM,
+        "poses": SEASTAR_POSES,
+        "strips": SEASTAR_STRIPS,
+        "anchor_prompt": seastar_anchor_prompt,
+        "anchor_fidelity": "low",
+        "continues": SEASTAR_CONTINUES,
+    },
+    "jellyfish": {
+        "noun": "jellyfish",
+        "markings": "its eyes, mouth, the dashed line on its bell and the tentacle outlines",
+        "identity": JELLYFISH_IDENTITY,
+        "freedom": JELLYFISH_FREEDOM,
+        "poses": JELLYFISH_POSES,
+        "strips": JELLYFISH_STRIPS,
+        "anchor_prompt": jellyfish_anchor_prompt,
+        "anchor_fidelity": "low",
+    },
+}
+
+if PET not in PROFILES:
+    sys.exit(f"unknown BORNPETS_PET {PET!r}; known: {', '.join(PROFILES)}")
+PROFILE = PROFILES[PET]
+IDENTITY = PROFILE["identity"]
+FREEDOM = PROFILE["freedom"]
+POSES = PROFILE["poses"]
+STRIPS = PROFILE["strips"]
+CONTINUES: dict[str, str] = PROFILE.get("continues", {})
+
+# gpt-image-2 treats a second reference as something to reproduce, so stated
+# alone ("keep the props") it returns image 2 unchanged. The new moment has to
+# be the explicit demand and the props the constraint.
+CONTINUITY = (
+    "IMAGE 2 is the PREVIOUS animation frame. It is given ONLY so you reuse the "
+    "design of its props - their shapes, stripes, icons and red fills. This "
+    "frame shows a LATER, DIFFERENT moment: redraw the character in the new "
+    "pose and expression the scene brief describes, and change the props' state "
+    "where the brief says so. A result that repeats image 2's pose or "
+    "composition is wrong."
+)
+
+
+def build_prompt(frame_id: str) -> str:
+    """Anchor fixes the character; the brief describes the action to stage.
+
+    `input_fidelity=high` plus the anchor image is what keeps the badger's
+    markings, proportions and line weight identical across 48 independent
+    generations, while the scene itself is composed fresh each time.
+    """
+    return (
+        "Draw one frame of a pixel-art virtual-pet game.\n\n"
+        f"{IDENTITY}\n\n"
+        f"{CONTINUITY + chr(10) + chr(10) if frame_id in CONTINUES else ''}"
+        f"Scene for this frame: {POSES[frame_id]}\n\n"
+        f"{FREEDOM}\n\n"
+        f"{style()}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Frame bookkeeping
+# ---------------------------------------------------------------------------
+
+
+def frame_index() -> dict[str, dict]:
+    """Map pet frame id -> geometry plus the matching panda frame id."""
+    pet = load_sequences(PET_CFG)
+    panda = load_sequences(PANDA_CFG)
+    assert len(pet) == len(panda), "configs must have identical row layout"
+
+    out: dict[str, dict] = {}
+    for bs, ps in zip(pet, panda):
+        if bs.name.startswith("reserved"):
+            continue
+        # Row identity is the position in the list, and frame size has to match
+        # so a panda frame can be used as a reference. Frame COUNT may differ:
+        # the badge derives it from the PCX filenames on flash, so the pet is
+        # free to animate a row the panda draws as a single still.
+        assert (bs.frame_width, bs.frame_height) == (
+            ps.frame_width,
+            ps.frame_height,
+        ), f"frame size mismatch: {bs.name} vs {ps.name}"
+        for i in range(bs.frames):
+            info = {"rect": bs.frame_rect(i)}
+            if i < ps.frames:
+                info["panda_rect"] = ps.frame_rect(i)
+                info["panda_id"] = f"{ps.name}_{i}"
+            out[f"{bs.name}_{i}"] = info
+    return out
+
+
+def panda_frame(rect: tuple[int, int, int, int]) -> Image.Image:
+    x, y, w, h = rect
+    return Image.open(PANDA_SHEET).convert("RGBA").crop((x, y, x + w, y + h))
+
+
+def reference_png(frame: Image.Image, path: Path) -> tuple[int, int]:
+    """Upscale a frame onto the API canvas that best matches its aspect."""
+    cw, ch = gen_size(frame.width, frame.height)
+    scale = min(cw // frame.width, ch // frame.height)
+    up = frame.resize((frame.width * scale, frame.height * scale), Image.NEAREST)
+    # Magenta, not transparency: showing the model the same chroma key it is
+    # asked to produce stops it from rendering "black" as a hole in the alpha.
+    canvas = Image.new("RGBA", (cw, ch), KEY)
+    canvas.paste(up, ((cw - up.width) // 2, (ch - up.height) // 2), up)
+    canvas.save(path)
+    return (cw, ch)
+
+
+# ---------------------------------------------------------------------------
+# Generation
+# ---------------------------------------------------------------------------
+
+
+def api_key() -> str:
+    """The API key, from the environment or a key file.
+
+    An `export` in an interactive shell does not reach a tool that was started
+    before it, so the file fallback is what makes the key reachable without
+    putting it on a command line (argv is world-readable via /proc).
+    """
+    key = os.environ.get("OPENAI_API_KEY")
+    if key:
+        return key.strip()
+
+    path = os.environ.get("OPENAI_API_KEY_FILE")
+    candidates = [Path(path)] if path else [Path.home() / ".config/openai/api-key"]
+    for cand in candidates:
+        if cand.is_file():
+            key = cand.read_text(encoding="utf-8").strip()
+            if key:
+                return key
+
+    sys.exit(
+        "no API key: set OPENAI_API_KEY, or put the key in "
+        f"{candidates[0]} (chmod 600)"
+    )
+
+
+def call_api(
+    refs: list[Path],
+    prompt: str,
+    quality: str,
+    size: tuple[int, int],
+    fidelity: str = "high",
+) -> bytes:
+    key = api_key()
+
+    # The Authorization header goes in via `-K -` (a curl config read from
+    # stdin), never as an argv element: anything on the command line is world
+    # readable in /proc and shows up in `ps` output for every local user.
+    cmd = [
+        "curl", "-sS", "-K", "-", API_URL,
+        "-F", f"model={MODEL}",
+    ]
+    for ref in refs:
+        cmd += ["-F", f"image[]=@{ref};type=image/png"]
+    cmd += [
+        "-F", f"prompt={prompt}",
+        "-F", f"size={size[0]}x{size[1]}",
+        "-F", "output_format=png",
+        "-F", f"quality={quality}",
+        "-F", "n=1",
+    ]
+    # Keeps the model reproducing the reference character instead of
+    # reinterpreting it — the main defence against drift between frames.
+    # It also pins the anchor's framing, so a frame that needs a different
+    # camera distance has to relax it (see FIDELITY_OVERRIDES). Only the
+    # gpt-image-1 family takes it; later models always use the references at
+    # full fidelity and reject the parameter.
+    if MODEL.startswith("gpt-image-1"):
+        cmd += ["-F", f"input_fidelity={fidelity}"]
+    curl_cfg = f'header = "Authorization: Bearer {key}"\n'
+    res = subprocess.run(cmd, input=curl_cfg.encode(), capture_output=True)
+    if res.returncode != 0:
+        raise RuntimeError(f"curl failed ({res.returncode}): {res.stderr.decode()[:400]}")
+    payload = json.loads(res.stdout)
+    if "data" not in payload:
+        raise RuntimeError(f"API error: {json.dumps(payload)[:600]}")
+    return base64.b64decode(payload["data"][0]["b64_json"])
+
+
+def cmd_anchor(args: argparse.Namespace) -> None:
+    """Generate the character sheet every other frame is conditioned on."""
+    idx = frame_index()
+    work = Path(args.work)
+    (work / "ref").mkdir(parents=True, exist_ok=True)
+    ref_path = work / "ref" / f"{ANCHOR_ID}.png"
+    size = reference_png(panda_frame(idx[ANCHOR_ID]["panda_rect"]), ref_path)
+    print(f"{ANCHOR_ID}: generating anchor...", flush=True)
+    anchor_path(work).write_bytes(
+        call_api(
+            [ref_path],
+            PROFILE["anchor_prompt"](),
+            args.quality,
+            size,
+            PROFILE["anchor_fidelity"],
+        )
+    )
+    print(f"wrote {anchor_path(work)}")
+
+
+def cmd_gen(args: argparse.Namespace) -> None:
+    idx = frame_index()
+    # Rows declare spare frame slots; only the ones with a brief get drawn.
+    targets = [t for t in select(idx, args) if args.only or t in POSES]
+    work = Path(args.work)
+    (work / "ref").mkdir(parents=True, exist_ok=True)
+    (work / "raw").mkdir(parents=True, exist_ok=True)
+
+    anchor = anchor_path(work)
+    if not anchor.exists():
+        sys.exit(f"no anchor at {anchor} — run the `anchor` subcommand first")
+
+    failed: list[str] = []
+    for n, fid in enumerate(targets, 1):
+        raw_path = work / "raw" / f"{fid}.png"
+        if raw_path.exists() and not args.force:
+            print(f"[{n}/{len(targets)}] {fid}: cached")
+            continue
+        # Anchor only. Feeding the matching panda frame in as a second
+        # reference made the model trace it, and the badger came out a panda
+        # clone; the scene brief in the prompt carries the action instead.
+        _, _, fw, fh = idx[fid]["rect"]
+        print(f"[{n}/{len(targets)}] {fid}: generating...", flush=True)
+        try:
+            refs = [anchor]
+            if fid in CONTINUES:
+                prev = work / "raw" / f"{CONTINUES[fid]}.png"
+                if not prev.exists():
+                    raise RuntimeError(f"needs {prev.name} generated first")
+                refs.append(prev)
+            raw_path.write_bytes(
+                call_api(
+                    refs,
+                    build_prompt(fid),
+                    args.quality,
+                    gen_size(fw, fh),
+                    FIDELITY_OVERRIDES.get(fid, "high"),
+                )
+            )
+        except RuntimeError as exc:
+            # One rejected or failed frame must not abandon the other 47; the
+            # run reports what is missing at the end so it can be retried.
+            failed.append(fid)
+            print(f"[{n}/{len(targets)}] {fid}: FAILED - {exc}", flush=True)
+
+    if failed:
+        print(f"\n{len(failed)} frame(s) failed: {', '.join(failed)}")
+
+
+# ---------------------------------------------------------------------------
+# Quantisation
+# ---------------------------------------------------------------------------
+
+
+def classify(px: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    """Map an RGBA pixel onto the badge palette (see template.rs::sample_frame)."""
+    r, g, b, a = px
+    if a < 128:
+        return TRANSPARENT
+    if r > 140 and g < 110 and b < 110:
+        return RED
+    return WHITE if (r * 299 + g * 587 + b * 114) // 1000 >= 128 else BLACK
+
+
+def despeckle(img: Image.Image, min_blob: int = 12) -> Image.Image:
+    """Drop opaque islands smaller than `min_blob` pixels.
+
+    The model reliably sneaks a faint shadow or ground line along the bottom
+    edge despite being told not to, and downscaling scatters it into crumbs.
+    Deleting whole small connected components clears that, where a
+    single-pixel filter left the crumbs behind.
+    """
+    w, h = img.size
+    px = img.load()
+    out = img.copy()
+    op = out.load()
+    seen = [[False] * w for _ in range(h)]
+
+    for sy in range(h):
+        for sx in range(w):
+            if seen[sy][sx] or px[sx, sy][3] < 128:
+                continue
+            blob, stack = [], [(sx, sy)]
+            seen[sy][sx] = True
+            while stack:
+                x, y = stack.pop()
+                blob.append((x, y))
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    nx, ny = x + dx, y + dy
+                    if (
+                        0 <= nx < w
+                        and 0 <= ny < h
+                        and not seen[ny][nx]
+                        and px[nx, ny][3] >= 128
+                    ):
+                        seen[ny][nx] = True
+                        stack.append((nx, ny))
+            if len(blob) < min_blob:
+                for x, y in blob:
+                    op[x, y] = TRANSPARENT
+    return out
+
+
+def dekey(img: Image.Image) -> Image.Image:
+    """Punch the magenta chroma key out to transparency."""
+    out = img.copy()
+    px = out.load()
+    w, h = out.size
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            if a < 128 or (r > 120 and b > 120 and g < 110 and abs(r - b) < 90):
+                px[x, y] = TRANSPARENT
+    return out
+
+
+def quantize_one(raw: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """Scale the raw AI art down to one badge frame and palettise it."""
+    raw = dekey(raw)
+    bbox = raw.getbbox()
+    if bbox is None:
+        raise ValueError("AI output is fully transparent")
+    art = raw.crop(bbox)
+
+    # The model stages the whole frame now, so scale its art to the frame
+    # itself rather than to whatever bounding box the panda happened to use.
+    scale = min(size[0] / art.width, size[1] / art.height)
+    art = art.resize(
+        (max(1, round(art.width * scale)), max(1, round(art.height * scale))),
+        Image.LANCZOS,
+    )
+
+    out = Image.new("RGBA", size, TRANSPARENT)
+    out.paste(art, ((size[0] - art.width) // 2, (size[1] - art.height) // 2))
+
+    px = out.load()
+    for y in range(size[1]):
+        for x in range(size[0]):
+            px[x, y] = classify(px[x, y])
+    return despeckle(out)
+
+
+def detect_bands(img: Image.Image, n: int) -> list[tuple[int, int]]:
+    """Find the `n` panel bands of a strip by looking for empty rows.
+
+    The model does not honour exact thirds — it centres each panel on its own
+    art, so a blind slice at n/3 saws a panel's feet off and hands them to the
+    next band. Cutting in the middle of the blank gaps between panels tracks
+    wherever the model actually put them. Falls back to equal bands if the gaps
+    cannot be found, which is what a panel bleeding into its neighbour looks
+    like.
+    """
+    keyed = dekey(img)
+    px = keyed.load()
+    blank = [
+        all(px[x, y][3] < 128 for x in range(keyed.width))
+        for y in range(keyed.height)
+    ]
+
+    gaps: list[tuple[int, int]] = []
+    start = None
+    for y, is_blank in enumerate(blank):
+        if is_blank and start is None:
+            start = y
+        elif not is_blank and start is not None:
+            gaps.append((start, y - 1))
+            start = None
+    if start is not None:
+        gaps.append((start, keyed.height - 1))
+
+    # Interior gaps only: leading and trailing blank space is margin, not a cut.
+    interior = [g for g in gaps if g[0] > 0 and g[1] < keyed.height - 1]
+    interior.sort(key=lambda g: g[1] - g[0], reverse=True)
+    cuts = sorted((g[0] + g[1]) // 2 for g in interior[: n - 1])
+
+    if len(cuts) != n - 1:
+        band = keyed.height // n
+        print(f"  warning: found {len(cuts)} gap(s), expected {n - 1}; using equal bands")
+        cuts = [band * (i + 1) for i in range(n - 1)]
+
+    edges = [0, *cuts, keyed.height]
+    return [(edges[i], edges[i + 1]) for i in range(n)]
+
+
+def outline_white_blobs(img: Image.Image, min_blob: int = 6) -> Image.Image:
+    """Give a black outline to any shape drawn in white alone.
+
+    Transparent pixels are skipped by the badge (sprite_loader.rs), so a sprite
+    sits on bare white paper: an all-white shape with no black in it has nothing
+    to read against and simply disappears. The model does this to sleep Z's and
+    the odd speech bubble. The panda's own Z's are white with a black outline,
+    so this restores what the artwork should have had.
+    """
+    w, h = img.size
+    px = img.load()
+    out = img.copy()
+    op = out.load()
+    seen = [[False] * w for _ in range(h)]
+
+    for sy in range(h):
+        for sx in range(w):
+            if seen[sy][sx] or px[sx, sy][3] < 128:
+                continue
+            blob, stack, has_black = [], [(sx, sy)], False
+            seen[sy][sx] = True
+            while stack:
+                x, y = stack.pop()
+                blob.append((x, y))
+                if px[x, y][:3] == BLACK[:3]:
+                    has_black = True
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < w and 0 <= ny < h and not seen[ny][nx] and px[nx, ny][3] >= 128:
+                        seen[ny][nx] = True
+                        stack.append((nx, ny))
+            if has_black or len(blob) < min_blob:
+                continue
+            for x, y in blob:
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < w and 0 <= ny < h and px[nx, ny][3] < 128:
+                        op[nx, ny] = BLACK
+    return out
+
+
+def quantize_panels(
+    panels: list[Image.Image], size: tuple[int, int]
+) -> list[Image.Image]:
+    """Palettise strip panels through one shared crop and scale.
+
+    Quantising each panel on its own bbox gives each its own scale factor, so
+    the badger visibly changes size from frame to frame. Sharing the union bbox
+    and one scale keeps it still and lets only the animation move.
+    """
+    keyed = [dekey(p) for p in panels]
+    boxes = [k.getbbox() for k in keyed]
+    if all(b is None for b in boxes):
+        raise ValueError("every panel is empty")
+
+    live = [b for b in boxes if b is not None]
+    union = (
+        min(b[0] for b in live),
+        min(b[1] for b in live),
+        max(b[2] for b in live),
+        max(b[3] for b in live),
+    )
+    uw, uh = union[2] - union[0], union[3] - union[1]
+    scale = min(size[0] / uw, size[1] / uh)
+    tw, th = max(1, round(uw * scale)), max(1, round(uh * scale))
+    ox, oy = (size[0] - tw) // 2, (size[1] - th) // 2
+
+    out = []
+    for k in keyed:
+        art = k.crop(union).resize((tw, th), Image.LANCZOS)
+        frame = Image.new("RGBA", size, TRANSPARENT)
+        frame.paste(art, (ox, oy))
+        px = frame.load()
+        for y in range(size[1]):
+            for x in range(size[0]):
+                px[x, y] = classify(px[x, y])
+        out.append(outline_white_blobs(despeckle(frame)))
+    return out
+
+
+def palettise(img: Image.Image) -> Image.Image:
+    """Snap a hand-drawn frame onto the badge palette, at its native size.
+
+    Hand edits come back with a magenta backdrop and slightly-off reds (a paint
+    program's #E10021 rather than #FF0000), which the badge's sampler would
+    misread. No rescale and no despeckle: deliberate one-pixel details are the
+    whole point of a hand fix.
+    """
+    out = dekey(img)
+    px = out.load()
+    for y in range(out.height):
+        for x in range(out.width):
+            px[x, y] = classify(px[x, y])
+    return out
+
+
+def cmd_strip(args: argparse.Namespace) -> None:
+    """Generate one multi-panel image, then cut it into individual frames."""
+    key = args.strip
+    if key not in STRIPS:
+        sys.exit(f"unknown strip {key!r}; known: {', '.join(STRIPS)}")
+    spec = STRIPS[key]
+    n = len(spec["panels"])
+
+    idx = frame_index()
+    targets = spec["targets"]
+    if len(targets) != n:
+        sys.exit(f"{key}: {n} panels but {len(targets)} targets")
+    missing = [t for t in targets if t not in idx]
+    if missing:
+        sys.exit(f"{key}: targets not in the config: {missing}")
+
+    work = Path(args.work)
+    for d in ("raw", "strips", "frames"):
+        (work / d).mkdir(parents=True, exist_ok=True)
+
+    anchor = anchor_path(work)
+    if not anchor.exists():
+        sys.exit(f"no anchor at {anchor} — run the `anchor` subcommand first")
+
+    strip_raw = work / "strips" / f"{key}.strip.png"
+    if args.reslice:
+        if not strip_raw.exists():
+            sys.exit(f"--reslice needs an existing strip at {strip_raw}")
+        print(f"{key}: re-slicing {strip_raw} (no API call)")
+    elif strip_raw.exists() and not args.force:
+        print(f"{key}: cached strip at {strip_raw}")
+    else:
+        print(f"{key}: generating {n}-panel strip...", flush=True)
+        strip_raw.write_bytes(
+            call_api([anchor], strip_prompt(key), args.quality, spec["size"])
+        )
+        print(f"wrote {strip_raw}")
+
+    img = Image.open(strip_raw).convert("RGBA")
+    bands = detect_bands(img, n)
+    panels = [img.crop((0, top, img.width, bot)) for top, bot in bands]
+
+    # Each band becomes that frame's raw art, so a strip panel can be inspected
+    # and re-quantised exactly like a singly-generated frame.
+    for target, panel in zip(targets, panels):
+        panel.save(work / "raw" / f"{target}.png")
+
+    rect = idx[targets[0]]["rect"]
+    frames = quantize_panels(panels, (rect[2], rect[3]))
+    for i, (target, frame) in enumerate(zip(targets, frames)):
+        frame.save(work / "frames" / f"{target}.png")
+        top, bot = bands[i]
+        print(f"  panel {i} (rows {top}-{bot}) -> {target}")
+
+
+def cmd_quantize(args: argparse.Namespace) -> None:
+    idx = frame_index()
+    work = Path(args.work)
+    (work / "frames").mkdir(parents=True, exist_ok=True)
+    for fid in select(idx, args):
+        rect = idx[fid]["rect"]
+        size = (rect[2], rect[3])
+
+        # A hand-fixed frame always wins over the generated one, and survives
+        # re-running gen/quantize.
+        override = work / "overrides" / f"{fid}.png"
+        if override.exists():
+            art = Image.open(override).convert("RGBA")
+            if art.size != size:
+                sys.exit(f"{fid}: override is {art.size}, expected {size}")
+            palettise(art).save(work / "frames" / f"{fid}.png")
+            print(f"{fid}: override")
+            continue
+
+        raw_path = work / "raw" / f"{fid}.png"
+        if not raw_path.exists():
+            print(f"{fid}: no raw output, skipping")
+            continue
+        art = quantize_one(Image.open(raw_path).convert("RGBA"), size)
+        art.save(work / "frames" / f"{fid}.png")
+        print(f"{fid}: quantized")
+
+
+# ---------------------------------------------------------------------------
+# Assembly
+# ---------------------------------------------------------------------------
+
+
+def cmd_assemble(args: argparse.Namespace) -> None:
+    idx = frame_index()
+    work = Path(args.work)
+    sheet = Image.open(PET_SHEET).convert("RGBA")
+    pasted = 0
+    # Honour --only: pasting every frame overwrites hand-edited artwork in rows
+    # that were never regenerated.
+    for fid in select(idx, args):
+        info = idx[fid]
+        path = work / "frames" / f"{fid}.png"
+        if not path.exists():
+            continue
+        x, y, w, h = info["rect"]
+        art = Image.open(path).convert("RGBA")
+        assert art.size == (w, h), f"{fid}: {art.size} != {(w, h)}"
+        # Overwrite the slot outright — paste() with a mask would keep stale art
+        # underneath wherever the new frame is transparent.
+        sheet.paste(art, (x, y))
+        pasted += 1
+    sheet.save(PET_SHEET)
+    print(f"wrote {PET_SHEET} ({pasted} frames)")
+
+
+# ---------------------------------------------------------------------------
+
+
+def select(idx: dict, args: argparse.Namespace) -> list[str]:
+    if not args.only:
+        return list(idx)
+    names = [f.strip() for f in args.only.split(",") if f.strip()]
+    missing = [f for f in names if f not in idx]
+    if missing:
+        sys.exit(f"unknown frame ids: {missing}")
+    return names
+
+
+def main() -> None:
+    default_work = os.environ.get("BORNPETS_WORK", str(REPO / f"target/{PET}-gen"))
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--work", default=default_work, help="working directory")
+    p.add_argument("--only", help="comma-separated frame ids to process")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    a = sub.add_parser("anchor")
+    a.add_argument("--quality", default="medium", choices=["low", "medium", "high"])
+    a.set_defaults(func=cmd_anchor)
+
+    g = sub.add_parser("gen")
+    g.add_argument("--quality", default="medium", choices=["low", "medium", "high"])
+    g.add_argument("--force", action="store_true", help="regenerate cached frames")
+    g.set_defaults(func=cmd_gen)
+
+    s = sub.add_parser("strip", help="one request -> N-panel image -> N frames")
+    s.add_argument("strip", choices=sorted(STRIPS))
+    s.add_argument("--quality", default="medium", choices=["low", "medium", "high"])
+    s.add_argument("--force", action="store_true", help="regenerate a cached strip")
+    s.add_argument("--reslice", action="store_true", help="re-cut a cached strip, no API call")
+    s.set_defaults(func=cmd_strip)
+
+    sub.add_parser("quantize").set_defaults(func=cmd_quantize)
+    sub.add_parser("assemble").set_defaults(func=cmd_assemble)
+    sub.add_parser("list").set_defaults(func=lambda a: print("\n".join(frame_index())))
+
+    args = p.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

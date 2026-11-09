@@ -24,11 +24,11 @@ pub const NAME_CAP: usize = 16;
 pub const RESERVED_PREFIXES: [u8; 2] = [3, 4];
 
 /// Exclusive upper bound on a pet's sprite prefix.  The shipped roster uses
-/// `0..=2` and `5..=6`; `3`/`4` are reserved.  Must stay in sync with
+/// `0..=2` and `5..=8`; `3`/`4` are reserved.  Must stay in sync with
 /// `sprite_loader::PP_MAX` so the frame catalogue covers every pet.  Kept
 /// small deliberately — every extra prefix grows the catalogue table, and
 /// the debug build is RAM-tight.
-pub const MAX_PET_PREFIX: u8 = 8;
+pub const MAX_PET_PREFIX: u8 = 9;
 
 /// Whether `id` is usable as a pet's sprite prefix (in range, not reserved).
 pub fn is_pet_prefix(id: u8) -> bool {
