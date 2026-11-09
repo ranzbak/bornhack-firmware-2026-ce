@@ -1991,7 +1991,13 @@ static BORNAGOTCHI_ITEMS: [MenuItem; 7] = [
             prompt: "Reset pet?",
             action: || {
                 #[cfg(feature = "game")]
-                crate::game::pet_select::open_new_generation();
+                {
+                    crate::game::pet_select::open_new_generation();
+                    // The picker only renders on the game screen, so jump
+                    // there — otherwise it sits open and invisible behind
+                    // the settings menu and eats the next button press.
+                    request_screen(crate::SCREEN_GAME);
+                }
             },
         },
     },
