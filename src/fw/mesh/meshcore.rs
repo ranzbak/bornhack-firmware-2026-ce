@@ -1523,7 +1523,10 @@ async fn dispatch_tx(
         crate::TxRequest::Advert(mode) => {
             let mut name_buf = [0u8; settings::MAX_NODE_NAME];
             let name_len = settings::get_node_name(&mut name_buf).await;
-            send_advert(lora, identity, &name_buf[..name_len], 0, mode).await;
+            // Upstream nodes drop an advert whose timestamp is not newer than
+            // the last one they kept from us (replay check), so it must move.
+            let timestamp = crate::unix_now_unique().unwrap_or(0);
+            send_advert(lora, identity, &name_buf[..name_len], timestamp, mode).await;
         }
         crate::TxRequest::RawFrame { data, len } => {
             if let Err(e) = lora.send_message(&data[..len]).await {
