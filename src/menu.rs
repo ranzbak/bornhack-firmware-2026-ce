@@ -1366,25 +1366,33 @@ fn action_lora_toggle() {
 
 fn fmt_timezone(buf: &mut heapless::String<24>) {
     use core::fmt::Write;
-    let offset = crate::TIMEZONE_OFFSET
+    let qh = crate::TZ_OFFSET_QH
         .load(Ordering::Relaxed)
-        .clamp(-12, 14);
-    let _ = write!(buf, "UTC{:+}", offset);
+        .clamp(crate::TZ_OFFSET_QH_MIN, crate::TZ_OFFSET_QH_MAX);
+    let sign = if qh < 0 { '-' } else { '+' };
+    let (h, m) = (qh.unsigned_abs() / 4, qh.unsigned_abs() % 4 * 15);
+    if m == 0 {
+        let _ = write!(buf, "UTC{}{}", sign, h);
+    } else {
+        let _ = write!(buf, "UTC{}{}:{:02}", sign, h, m);
+    }
 }
 
 fn action_tz_inc() {
-    let v = crate::TIMEZONE_OFFSET.load(Ordering::Relaxed);
-    if v < 14 {
-        crate::TIMEZONE_OFFSET.store(v + 1, Ordering::Relaxed);
+    // Whole-hour steps; a half- or quarter-hour zone set over the CLI keeps
+    // its minutes.
+    let v = crate::TZ_OFFSET_QH.load(Ordering::Relaxed);
+    if v + 4 <= crate::TZ_OFFSET_QH_MAX {
+        crate::TZ_OFFSET_QH.store(v + 4, Ordering::Relaxed);
         #[cfg(feature = "embassy-core")]
         crate::TZ_CHANGED_SIGNAL.signal(());
     }
 }
 
 fn action_tz_dec() {
-    let v = crate::TIMEZONE_OFFSET.load(Ordering::Relaxed);
-    if v > -12 {
-        crate::TIMEZONE_OFFSET.store(v - 1, Ordering::Relaxed);
+    let v = crate::TZ_OFFSET_QH.load(Ordering::Relaxed);
+    if v - 4 >= crate::TZ_OFFSET_QH_MIN {
+        crate::TZ_OFFSET_QH.store(v - 4, Ordering::Relaxed);
         #[cfg(feature = "embassy-core")]
         crate::TZ_CHANGED_SIGNAL.signal(());
     }

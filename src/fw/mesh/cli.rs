@@ -11,7 +11,7 @@
 //! | `set radio <MHz>,<kHz>,<sf>,<cr>`| `OK`, `Error, invalid radio params`|
 //! | `get freq`                       | `> <MHz>`                          |
 //! | `get tx` / `set tx <dBm>`        | `> <dBm>` / `OK`                   |
-//! | `get tz.offset` / `set tz.offset`| `> <h>` / `OK`                     |
+//! | `get tz.offset` / `set tz.offset`| `> <h.h>` / `OK` (quarter hours)   |
 //! | `ver`, `board`                   | version / model string             |
 //! | `reboot`                         | reboots after the reply            |
 //! | `poweroff`, `shutdown`           | `Error: unsupported` (no System OFF)|
@@ -49,7 +49,8 @@ pub struct Settings<'a> {
     pub sf: u8,
     pub cr: u8,
     pub tx_power: i8,
-    pub tz_offset: i8,
+    /// UTC offset in quarter hours (`TZ_OFFSET_QH`).
+    pub tz_offset_qh: i8,
 }
 
 /// Side effect for the caller to apply after the reply is sent.
@@ -65,6 +66,7 @@ pub enum Action<'a> {
         cr: u8,
     },
     SetTxPower(i8),
+    /// New UTC offset in quarter hours.
     SetTzOffset(i8),
     Reboot,
 }
@@ -167,15 +169,20 @@ fn handle<'a>(cmd: &'a [u8], cur: &Settings, reply: &mut Reply) -> Option<Action
             }
         }
     } else if cmd == b"get tz.offset" {
-        let _ = write!(reply, "> {}", cur.tz_offset);
+        // Reference (MeshCore 1.18 dev): `float tz_offset`, printed "%.2f"
+        // for an odd quarter hour and "%.1f" otherwise.
+        let qh = cur.tz_offset_qh;
+        let sign = if qh < 0 { "-" } else { "" };
+        let frac = [".0", ".25", ".5", ".75"][(qh.unsigned_abs() % 4) as usize];
+        let _ = write!(reply, "> {}{}{}", sign, qh.unsigned_abs() / 4, frac);
         Action::None
     } else if let Some(arg) = cmd.strip_prefix(b"set tz.offset ") {
-        // Reference: `int8_t tz = atof(...)`, so a fraction truncates.
-        let whole = arg.split(|&b| b == b'.').next().unwrap_or(arg);
-        match parse_int(whole) {
-            Some(tz @ -12..=14) => {
+        // Reference: `float tz = atof(...)` in -12..=14. The badge keeps
+        // quarter hours, so the value rounds to the nearest one.
+        match parse_hundredths(arg) {
+            Some(h100 @ -1200..=1400) => {
                 let _ = reply.push_str("OK");
-                Action::SetTzOffset(tz as i8)
+                Action::SetTzOffset(((h100 + h100.signum() * 12) / 25) as i8)
             }
             _ => {
                 let _ = reply.push_str("Error, must be from -12 to +14");
@@ -245,6 +252,18 @@ fn parse_fixed(s: &[u8], frac_digits: u32) -> Option<u64> {
     Some(v)
 }
 
+/// Parse a signed decimal such as `"-5.75"` as hundredths (`-575`).
+fn parse_hundredths(s: &[u8]) -> Option<i32> {
+    let s = trim(s);
+    let (neg, digits) = match s {
+        [b'-', rest @ ..] => (true, rest),
+        [b'+', rest @ ..] => (false, rest),
+        _ => (false, s),
+    };
+    let v = i32::try_from(parse_fixed(digits, 2)?).ok()?;
+    Some(if neg { -v } else { v })
+}
+
 /// Parse a signed decimal integer, ignoring surrounding spaces.
 fn parse_int(s: &[u8]) -> Option<i32> {
     core::str::from_utf8(trim(s)).ok()?.parse().ok()
@@ -281,7 +300,7 @@ mod tests {
         sf: 8,
         cr: 8,
         tx_power: 22,
-        tz_offset: 2,
+        tz_offset_qh: 8,
     };
 
     fn exec(line: &str) -> (Reply, Action<'_>) {
@@ -296,7 +315,7 @@ mod tests {
         assert_eq!(exec("get radio").0.as_str(), "> 869.618,62.5,8,8");
         assert_eq!(exec("get freq").0.as_str(), "> 869.618");
         assert_eq!(exec("get tx").0.as_str(), "> 22");
-        assert_eq!(exec("get tz.offset").0.as_str(), "> 2");
+        assert_eq!(exec("get tz.offset").0.as_str(), "> 2.0");
     }
 
     #[test]
@@ -337,12 +356,36 @@ mod tests {
     fn set_tx_and_tz() {
         assert_eq!(exec("set tx 14").1, Action::SetTxPower(14));
         assert_eq!(exec("set tx 30").0.as_str(), "Error, must be -9 to 22");
-        assert_eq!(exec("set tz.offset -5").1, Action::SetTzOffset(-5));
-        assert_eq!(exec("set tz.offset 5.5").1, Action::SetTzOffset(5));
+        assert_eq!(exec("set tz.offset -5").1, Action::SetTzOffset(-20));
+        assert_eq!(exec("set tz.offset 5.5").1, Action::SetTzOffset(22));
+        assert_eq!(exec("set tz.offset 5.75").1, Action::SetTzOffset(23));
+        assert_eq!(exec("set tz.offset -3.5").1, Action::SetTzOffset(-14));
+        assert_eq!(exec("set tz.offset 14").1, Action::SetTzOffset(56));
+        assert_eq!(exec("set tz.offset -12").1, Action::SetTzOffset(-48));
+        assert_eq!(exec("set tz.offset 1.1").1, Action::SetTzOffset(4));
+        assert_eq!(
+            exec("set tz.offset -12.5").0.as_str(),
+            "Error, must be from -12 to +14"
+        );
         assert_eq!(
             exec("set tz.offset 15").0.as_str(),
             "Error, must be from -12 to +14"
         );
+    }
+
+    #[test]
+    fn get_tz_offset_prints_quarter_hours_like_upstream() {
+        let get = |qh| {
+            let cur = Settings { tz_offset_qh: qh, ..CUR };
+            let mut r = Reply::new();
+            run(b"get tz.offset", &cur, &mut r);
+            r
+        };
+        assert_eq!(get(22).as_str(), "> 5.5");
+        assert_eq!(get(23).as_str(), "> 5.75");
+        assert_eq!(get(-2).as_str(), "> -0.5");
+        assert_eq!(get(-48).as_str(), "> -12.0");
+        assert_eq!(get(0).as_str(), "> 0.0");
     }
 
     #[test]

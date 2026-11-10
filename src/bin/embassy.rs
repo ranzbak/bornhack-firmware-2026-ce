@@ -447,9 +447,9 @@ async fn main(spawner: Spawner) {
         // reads them starts rendering. Previously the load lived inside the
         // BLE task's init block, which races against the display task: on a
         // quick reboot the display could draw a frame using the static
-        // default (TIMEZONE_OFFSET = 0 → UTC) before the BLE task had a
+        // default (TZ_OFFSET_QH = 0 → UTC) before the BLE task had a
         // chance to load the persisted offset.
-        bornhack_aegg::TIMEZONE_OFFSET.store(
+        bornhack_aegg::TZ_OFFSET_QH.store(
             settings::get_timezone().await,
             core::sync::atomic::Ordering::Relaxed,
         );

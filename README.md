@@ -333,7 +333,7 @@ reporting `FIRMWARE_VER_CODE` 14 / `v1.18.0` (MeshCore 1.18).
 The app's Command Line screen talks to the badge itself. Supported:
 `get name`, `set name <name>`, `get radio`, `set radio <MHz>,<kHz>,<sf>,<cr>`,
 `get freq`, `get tx`, `set tx <dBm>` (-9..22), `get tz.offset`,
-`set tz.offset <h>` (-12..14), `ver`, `board`, `reboot`. `poweroff` /
+`set tz.offset <h>` (-12..14, in quarter hours such as `5.5` or `5.75`), `ver`, `board`, `reboot`. `poweroff` /
 `shutdown` answer `Error: unsupported` (no System OFF on the badge); anything
 else answers `Unknown command`. Radio changes apply live, no reboot needed.
 
@@ -374,7 +374,7 @@ A standalone watch screen — accessible from the main icon grid via Left/Right 
 
 The screen redraws on every minute boundary via the shared `MINUTE_TICK` signal — no second hand and no per-second redraws, since the e-paper refresh is too slow for that anyway.
 
-The watch reads `unix_now()` (set via the MeshCore companion `SET_DEVICE_TIME` 0x06 command) and applies `TIMEZONE_OFFSET` (configured under Settings → Timezone). When the clock has not yet been synced the screen shows "Clock not set".
+The watch reads `unix_now()` (set via the MeshCore companion `SET_DEVICE_TIME` 0x06 command) and applies `TZ_OFFSET_QH` (configured under Settings → Timezone). When the clock has not yet been synced the screen shows "Clock not set".
 
 #### Watch buttons
 
@@ -524,7 +524,7 @@ The main menu contains a **Settings** submenu with:
 - **Bluetooth** — view BLE device name, enable/disable BLE, clear stored pairings (with confirmation)
 - **LoRa** — enable/disable LoRa radio, boost RX gain, radio preset picker (community presets), TX power
 - **MeshCore** — set node name, client repeat (with confirmation), adverts (on/off, interval), telemetry sharing (3-state: **No** / **Contacts** / **Yes** — mirrors the MeshCore companion app's "Allow Telemetry Requests" setting; `Contacts` only responds to peers with `Contact.flags` bit 1 set), multi-ACK, path hash length, reset channels, reset contacts
-- **Timezone** — UTC offset stepper
+- **Timezone** — UTC offset stepper (whole hours; `set tz.offset` sets half and quarter hours)
 - **Factory reset** — wipes all settings and reboots (with confirmation)
 
 Destructive actions (reset channels, reset contacts, factory reset, clear pairings) show a full-screen "Are you sure?" confirmation dialog. The client-repeat toggle also shows a warning when enabling.

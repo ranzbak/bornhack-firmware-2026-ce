@@ -552,7 +552,7 @@ async fn nus_peripheral_loop<C>(
     };
     crate::update_node_name(&node_name[..node_name_len]);
 
-    // Note: the persisted `TIMEZONE_OFFSET` and `BOOSTED_RX_GAIN` atomics are
+    // Note: the persisted `TZ_OFFSET_QH` and `BOOSTED_RX_GAIN` atomics are
     // loaded from flash in the top-level `embassy.rs` boot sequence before any
     // task is spawned, so by the time we get here they already hold the
     // correct values. Don't duplicate the load — we'd just redo the flash
@@ -2080,7 +2080,7 @@ async fn nus_peripheral_loop<C>(
                                         sf: radio_params.sf,
                                         cr: radio_params.cr,
                                         tx_power: radio_params.tx_power,
-                                        tz_offset: crate::TIMEZONE_OFFSET.load(Ordering::Relaxed),
+                                        tz_offset_qh: crate::TZ_OFFSET_QH.load(Ordering::Relaxed),
                                     };
                                     match cli::run(line, &cur, &mut cli_reply) {
                                         cli::Action::None => {}
@@ -2110,7 +2110,7 @@ async fn nus_peripheral_loop<C>(
                                             });
                                         }
                                         cli::Action::SetTzOffset(tz) => {
-                                            crate::TIMEZONE_OFFSET.store(tz, Ordering::Relaxed);
+                                            crate::TZ_OFFSET_QH.store(tz, Ordering::Relaxed);
                                             crate::TZ_CHANGED_SIGNAL.signal(());
                                         }
                                         cli::Action::Reboot => pending_reboot = true,

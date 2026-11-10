@@ -229,9 +229,21 @@ pub static BOOSTED_RX_GAIN: AtomicBool = AtomicBool::new(true);
 /// User can override via Settings → Timezone; the kv-stored value loads
 /// at boot and shadows this default, so changing this only affects fresh
 /// badges that have never had a timezone set.
-pub static TIMEZONE_OFFSET: core::sync::atomic::AtomicI8 = core::sync::atomic::AtomicI8::new(2);
+///
+/// Stored in quarter hours (UTC+2 = 8, UTC+5:30 = 22) so the half- and
+/// quarter-hour zones MeshCore's `set tz.offset` accepts since 1.18 fit.
+pub static TZ_OFFSET_QH: core::sync::atomic::AtomicI8 = core::sync::atomic::AtomicI8::new(8);
+/// Lowest offset, UTC-12, in quarter hours.
+pub const TZ_OFFSET_QH_MIN: i8 = -48;
+/// Highest offset, UTC+14, in quarter hours.
+pub const TZ_OFFSET_QH_MAX: i8 = 56;
 
-/// Fired when `TIMEZONE_OFFSET` changes so the BLE task can persist it.
+/// The local-time offset from UTC in seconds.
+pub fn tz_offset_secs() -> i64 {
+    TZ_OFFSET_QH.load(core::sync::atomic::Ordering::Relaxed) as i64 * 900
+}
+
+/// Fired when `TZ_OFFSET_QH` changes so the BLE task can persist it.
 #[cfg(feature = "embassy-core")]
 pub static TZ_CHANGED_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
@@ -1072,7 +1084,7 @@ where
             }
         });
         if let Some(unix) = unix_now() {
-            let offset_secs = TIMEZONE_OFFSET.load(Ordering::Relaxed) as i64 * 3600;
+            let offset_secs = tz_offset_secs();
             let local = (unix as i64 + offset_secs) as u32;
             let h = (local % 86400) / 3600;
             let m = (local % 3600) / 60;

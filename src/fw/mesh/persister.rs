@@ -152,9 +152,9 @@ async fn dispatch(which: Which) {
     use core::sync::atomic::Ordering::Relaxed;
     match which {
         Which::Tz => {
-            let offset = crate::TIMEZONE_OFFSET.load(Relaxed);
+            let offset = crate::TZ_OFFSET_QH.load(Relaxed);
             match settings::set_timezone(offset).await {
-                Ok(()) => defmt::debug!("settings: timezone={} persisted", offset),
+                Ok(()) => defmt::debug!("settings: timezone={} qh persisted", offset),
                 Err(e) => defmt::warn!("settings: timezone persist failed: {:?}", e),
             }
         }
