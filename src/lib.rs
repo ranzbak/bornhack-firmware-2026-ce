@@ -344,7 +344,7 @@ pub static ADVERT_CHANGED_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::
 pub static LORA_RADIO_CHANGED_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// Fired by `persister::lora_radio_loop` after a successful flash write
-/// of the new radio params.  Consumed by `meshcore::run_meshcore_listener`,
+/// of the new radio params or the boost-RX flag.  Consumed by `meshcore::run_meshcore_listener`,
 /// which puts the SX1262 into standby, calls `reconfigure_radio`, and
 /// resumes RX.  Decoupling this from `LORA_RADIO_CHANGED_SIGNAL` is
 /// required because `embassy_sync::signal::Signal` only wakes a single

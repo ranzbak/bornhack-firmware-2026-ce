@@ -164,6 +164,10 @@ async fn dispatch(which: Which) {
                 Ok(()) => defmt::debug!("settings: boost_rx={} persisted", enabled),
                 Err(e) => defmt::warn!("settings: boost_rx persist failed: {:?}", e),
             }
+            // The RxGain register is only rewritten when RX is re-armed, so
+            // without this the toggle waited for the next TX. A live
+            // reconfigure ends in `resume_rx`, which applies the new gain.
+            crate::LORA_RADIO_APPLY_SIGNAL.signal(());
         }
         Which::LoraRadio => {
             let mut rp = settings::get_radio_params_or_default().await;

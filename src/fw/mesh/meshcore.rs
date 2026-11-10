@@ -170,8 +170,10 @@ pub enum AdvertMode {
 /// stored in `LAST_LORA_MSG`; node advertisements are logged; all other types
 /// are logged as raw hex.
 ///
-/// Radio parameters updated via the companion app take effect on the **next
-/// reboot** — reinitialisation while in RX is not yet implemented.
+/// Radio parameters (frequency, bandwidth, SF, CR, TX power) and the boost-RX
+/// toggle, changed from the menu, the companion app or its CLI, are applied
+/// live: the persister signals `LORA_RADIO_APPLY_SIGNAL` and the loop below
+/// reprograms the SX1262 without a reboot.
 pub async fn run_meshcore_listener<'a>(
     spi: Peri<'a, peripherals::SPI2>,
     sck_pin: Peri<'a, AnyPin>,
