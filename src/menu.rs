@@ -2011,7 +2011,13 @@ static BORNAGOTCHI_ITEMS: [MenuItem; 7] = [
             prompt: "Reset pet?",
             action: || {
                 #[cfg(feature = "game")]
-                crate::game::pet_select::open_new_generation();
+                {
+                    crate::game::pet_select::open_new_generation();
+                    // The picker only renders on the game screen, so jump
+                    // there — otherwise it sits open and invisible behind
+                    // the settings menu and eats the next button press.
+                    request_screen(crate::SCREEN_GAME);
+                }
             },
         },
     },
@@ -2384,17 +2390,24 @@ pub static DISPLAY_STATE: DisplayMutex = DisplayMutex::new(RefCell::new(DisplayS
 
 /// Geometry constants for the 152×152 display.
 ///
-/// The menu occupies y = 38..106, leaving room for the header (dots, battery,
-/// device ID) above and the status banner below.
+/// The menu occupies y = 38..128, leaving room for the header (dots, battery,
+/// device ID) above and the footer below — `draw_frame` puts its divider at
+/// y = 138, so the box clears it by 10 px.
 const MENU_X: i32 = 4;
 const MENU_Y: i32 = 38;
 const MENU_W: u32 = 144;
 const ROW_H: i32 = 22;
-const NUM_ROWS: usize = 3; // one above, center, one below
+/// Rows drawn per page. Four fills the space between header and footer; the
+/// selection no longer sits in the geometric middle, see [`SELECTED_ROW`].
+const NUM_ROWS: usize = 4;
+/// Which row carries the selection: one item above it, two below. Keeping it at
+/// row 1 preserves the previous look — the highlight stays where it was and the
+/// extra row appears underneath, rather than shifting the whole list up.
+const SELECTED_ROW: usize = 1;
 
-/// Draw a scrolling 3-item menu centered on `pos`.
+/// Draw a scrolling menu of [`NUM_ROWS`] items with `pos` on [`SELECTED_ROW`].
 ///
-/// - Center row: black background, white text (inverted).
+/// - Selected row: black background, white text (inverted).
 /// - Adjacent rows (if items exist): black text on white background.
 /// - A 1 px border frames the entire menu area.
 /// - Submenu items have " >" appended to their label.
@@ -2420,10 +2433,10 @@ where
 
     for row in 0..NUM_ROWS {
         // item_idx: negative means "before the list" (no item to show).
-        let item_idx = (pos as isize) + (row as isize) - 1;
+        let item_idx = (pos as isize) + (row as isize) - SELECTED_ROW as isize;
         let row_y = MENU_Y + 1 + row as i32 * ROW_H;
         let text_y = row_y + ROW_H / 2;
-        let is_center = row == 1;
+        let is_center = row == SELECTED_ROW;
 
         if is_center {
             Rectangle::new(

@@ -4,8 +4,9 @@
 //! # Filename format
 //!
 //! Each sprite file is named `PPAAFF.PCX` where:
-//!   - `PP` = pet kind prefix (hex): `00` = Bartholomeus (formerly "Snail"),
-//!     `01` = Cat, `02` = Slug, ...
+//!   - `PP` = pet kind prefix (hex): which prefixes are pets is declared by
+//!     `PETS.CFG`, not by this code — `03` and `04` are reserved (sponsors,
+//!     menu icons), everything else below `MAX_PET_PREFIX` is available.
 //!   - `AA` = animation ID (hex): `01` = Idle, `02` = Happy, ...
 //!   - `FF` = frame number (hex): `00`, `01`, `02`, ...
 //!
@@ -14,8 +15,7 @@
 //!
 //! The shared start screen uses `PP=00, AA=00, FF=00` (`000000  PCX`).
 //! The hatching egg animation uses `AA=14` with the pet-specific prefix
-//! (e.g. `001400  PCX` for Bartholomeus egg, `011400  PCX` for cat
-//! egg, `021400  PCX` for slug egg).
+//! (e.g. `001400  PCX` for pet 0's egg, `051400  PCX` for pet 5's egg).
 
 use super::PetKind;
 use super::to_display::DisplayAnim;

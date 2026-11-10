@@ -1,14 +1,15 @@
 //! Runtime pet roster.
 //!
-//! The three built-in pets (Bartholomeus, Cat, Slug) are always present;
-//! additional pets can be installed at boot from a `PETS.CFG` manifest on the
-//! USB-MSC partition — no firmware reflash.  See [`crate::fw::pets_cfg`].
+//! The roster comes entirely from the `PETS.CFG` manifest on the USB-MSC
+//! partition — there are no built-in pets.  See [`crate::fw::pets_cfg`].
+//! A badge whose `PETS.CFG` is missing, empty or unreadable has an empty
+//! roster and no pet can be selected until the file is restored.
 //!
 //! A pet is a pure cosmetic skin: a sprite-prefix byte plus a display name.
 //! All game behaviour (stats, decay, traits, animations) is identical across
-//! pets, so a new pet needs only its `PPAAFF.PCX` sprites at the matching
-//! prefix and one manifest line.  Frame counts are auto-discovered from the
-//! FAT directory catalogue, so no per-pet code is required.
+//! pets, so a pet needs only its `PPAAFF.PCX` sprites at the matching prefix
+//! and one manifest line.  Frame counts are auto-discovered from the FAT
+//! directory catalogue, so no per-pet code is required.
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -22,12 +23,12 @@ pub const NAME_CAP: usize = 16;
 /// `4` menu icons.  Everything else `< MAX_PET_PREFIX` is a pet.
 pub const RESERVED_PREFIXES: [u8; 2] = [3, 4];
 
-/// Exclusive upper bound on a pet's sprite prefix.  Built-ins live at
-/// `0..=2`; custom pets use `5..7`.  Must stay in sync with
+/// Exclusive upper bound on a pet's sprite prefix.  The shipped roster uses
+/// `0..=2` and `5..=8`; `3`/`4` are reserved.  Must stay in sync with
 /// `sprite_loader::PP_MAX` so the frame catalogue covers every pet.  Kept
 /// small deliberately — every extra prefix grows the catalogue table, and
 /// the debug build is RAM-tight.
-pub const MAX_PET_PREFIX: u8 = 8;
+pub const MAX_PET_PREFIX: u8 = 9;
 
 /// Whether `id` is usable as a pet's sprite prefix (in range, not reserved).
 pub fn is_pet_prefix(id: u8) -> bool {
@@ -46,17 +47,9 @@ struct Registry {
     ids: heapless::Vec<PetKind, MAX_PETS>,
 }
 
-/// Built-in roster — used before (or instead of) an install.
-static BUILTIN_IDS: [PetKind; 3] = [PetKind::Bartholomeus, PetKind::Cat, PetKind::Slug];
-
-fn builtin_name(id: u8) -> &'static str {
-    match id {
-        0 => "Bartholomeus",
-        1 => "Cat",
-        2 => "Slug",
-        _ => "Pet",
-    }
-}
+/// Shown for an id that isn't in the roster — a save whose pet was dropped
+/// from `PETS.CFG`, or any lookup before the manifest has been installed.
+const UNKNOWN_NAME: &str = "Pet";
 
 // Single global roster, populated once at boot.  `heapless` collections are
 // const-constructible, so this needs no allocator or `StaticCell` (keeping
@@ -79,13 +72,14 @@ fn current() -> Option<&'static Registry> {
     }
 }
 
-/// Install the roster: the three built-ins first (always present), then any
-/// manifest `entries` — a built-in id renames that pet, a new valid prefix
-/// appends a pet.  Reserved / out-of-range / overflow entries are dropped.
+/// Install the roster from the manifest `entries`, in file order.  Reserved /
+/// out-of-range ids, duplicates and overflow past [`MAX_PETS`] are dropped; a
+/// repeated id renames the earlier entry rather than listing the pet twice.
 ///
 /// Call once at boot (see [`crate::fw::pets_cfg::load_and_install`]).  A
-/// second call is ignored, so the built-in roster stays stable if the
-/// manifest is absent.
+/// second call is ignored.  There is no built-in roster: installing an empty
+/// slice — which is what a missing or unreadable `PETS.CFG` produces — leaves
+/// the badge with no selectable pets.
 pub fn install(entries: &[PetDef]) {
     if INSTALLED.load(Ordering::Acquire) {
         return; // already installed — ignore
@@ -95,23 +89,12 @@ pub fn install(entries: &[PetDef]) {
     // and the `INSTALLED` guard above prevents a second populate.
     let reg = unsafe { &mut *core::ptr::addr_of_mut!(REGISTRY) };
 
-    // Built-ins first, in canonical order.
-    for &k in &BUILTIN_IDS {
-        let mut name = heapless::String::new();
-        let _ = name.push_str(builtin_name(k.0));
-        let _ = reg.defs.push(PetDef { id: k.0, name });
-        let _ = reg.ids.push(k);
-    }
-
-    // Apply manifest entries: an id matching a built-in renames it in place;
-    // a new valid pet prefix is appended.  Reserved / out-of-range ids and
-    // roster overflow are dropped.
     for e in entries {
         if !is_pet_prefix(e.id) {
             continue;
         }
         if let Some(d) = reg.defs.iter_mut().find(|d| d.id == e.id) {
-            d.name = e.name.clone(); // rename existing (built-in or duplicate)
+            d.name = e.name.clone(); // duplicate id — last name wins
             continue;
         }
         if reg.defs.push(e.clone()).is_err() {
@@ -123,8 +106,8 @@ pub fn install(entries: &[PetDef]) {
     INSTALLED.store(true, Ordering::Release);
 }
 
-/// Display name for a pet id.  Falls back to the built-in names (and
-/// `"Pet"` for an unknown id) before an install or for a missing entry.
+/// Display name for a pet id, or [`UNKNOWN_NAME`] when the id isn't in the
+/// installed roster (or nothing has been installed yet).
 pub fn name_of(id: u8) -> &'static str {
     if let Some(reg) = current() {
         for d in &reg.defs {
@@ -133,15 +116,15 @@ pub fn name_of(id: u8) -> &'static str {
             }
         }
     }
-    builtin_name(id)
+    UNKNOWN_NAME
 }
 
-/// Selectable pet kinds, in roster order — built-ins plus installed customs.
-/// Falls back to the three built-ins before an install.
+/// Selectable pet kinds, in `PETS.CFG` order.  Empty before an install and
+/// when the manifest declared no usable pet.
 pub fn roster() -> &'static [PetKind] {
     match current() {
         Some(reg) => reg.ids.as_slice(),
-        None => &BUILTIN_IDS,
+        None => &[],
     }
 }
 

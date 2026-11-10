@@ -685,7 +685,16 @@ pub fn award_inspiration(game: super::engine::MiniGame) {
 pub fn new_generation(kind: super::engine::PetKind, money_enabled: bool, hard_mode: bool) {
     use super::engine::Phase;
     let state = unsafe { (*GAME.get()).as_mut() };
-    if let Some(s) = state {
+    let Some(s) = state else {
+        // Nothing to succeed — "Reset Pet" can be confirmed on a badge
+        // that never started a game (or was reset earlier). This used to
+        // be a silent no-op: the selection screen closed and left the
+        // player back on the start screen with no game started, so the
+        // pet had to be picked a second time.
+        start_new_game(kind, money_enabled, hard_mode);
+        return;
+    };
+    {
         // Record the departing pet exactly once.
         //   - Hatching: never lived, nothing to record.
         //   - Gone: the natural-death path already handles it. If `realm_pending`
@@ -724,12 +733,12 @@ pub fn new_generation(kind: super::engine::PetKind, money_enabled: bool, hard_mo
     }
 }
 
-/// Get the current pet's kind (defaults to Bartholomeus if no game).
+/// Get the current pet's kind (defaults to sprite prefix 0 if no game).
 pub fn pet_kind() -> super::engine::PetKind {
     let state = unsafe { (*GAME.get()).as_ref() };
     match state {
         Some(s) => s.pet_kind,
-        None => super::engine::PetKind::Bartholomeus,
+        None => super::engine::PetKind::DEFAULT,
     }
 }
 

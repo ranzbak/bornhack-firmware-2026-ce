@@ -497,11 +497,14 @@ where
         return bornjeweled::draw(display);
     }
 
-    // Battery icon — top-right.
+    // Battery — a slim segmented bar flush against the right edge, not the
+    // full icon. The 24 px-wide icon crowded the game menu icon on this
+    // screen; the bar is 4 px, leaving that row clear.
     #[cfg(feature = "embassy-core")]
     {
         let pct = crate::fw::battery::read_pct();
-        crate::draw_battery_icon(display, 128, 2, pct)?;
+        let x = 152 - crate::BATTERY_BAR_W as i32;
+        crate::draw_battery_bar(display, x, 2, pct)?;
     }
 
     // HAX balance — top-right, below the battery icon + menu icon row

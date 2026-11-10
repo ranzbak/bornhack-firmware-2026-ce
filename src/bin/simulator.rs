@@ -57,8 +57,27 @@ fn key_to_button(k: Keycode) -> Option<ButtonId> {
     }
 }
 
+/// The badge reads `PETS.CFG` off its FAT12 partition at boot; the simulator
+/// has no such partition, so it compiles the repo's copy in and installs the
+/// same roster from it. Not a fallback for the firmware — that deliberately
+/// has none — just the sim's stand-in for the USB volume, kept pointed at the
+/// one file so a pet added there shows up in both.
+#[cfg(feature = "game")]
+fn install_pets_from_repo_cfg() {
+    use bornhack_aegg::game::pet_registry::{self, MAX_PETS, PetDef};
+
+    const CFG: &[u8] = include_bytes!("../../assets/to-badge/PETS.CFG");
+
+    let mut pets: heapless::Vec<PetDef, MAX_PETS> = heapless::Vec::new();
+    bornhack_aegg::fw::pets_cfg::parse(CFG, &mut pets);
+    pet_registry::install(&pets);
+}
+
 fn main() -> Result<(), core::convert::Infallible> {
     use std::time::{Duration, Instant};
+
+    #[cfg(feature = "game")]
+    install_pets_from_repo_cfg();
 
     let mut display: SimulatorDisplay<Rgb888> = SimulatorDisplay::new(Size::new(152, 152));
     let mut window = Window::new("BornPets simulator", &OutputSettings::default());

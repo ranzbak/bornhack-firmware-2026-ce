@@ -61,17 +61,17 @@ pub fn dispatch(btn: ButtonId) -> bool {
         return true;
     }
 
-    // ── Not started: Fire opens pet selection ────────────────────────
+    // ── Not started: Fire or Execute opens pet selection ─────────────
+    // Execute used to be swallowed here without doing anything, which
+    // left the start screen looking frozen for anyone reaching for the
+    // button the rest of the UI uses to confirm.
     if !lifecycle::is_started() {
-        if btn == ButtonId::Fire {
+        if btn == ButtonId::Fire || btn == ButtonId::Execute {
             super::pet_select::open_new_game();
             return true;
         }
         // Let Left/Right pass through to switch screens.
-        return matches!(
-            btn,
-            ButtonId::Up | ButtonId::Down | ButtonId::Cancel | ButtonId::Execute
-        );
+        return matches!(btn, ButtonId::Up | ButtonId::Down | ButtonId::Cancel);
     }
 
     // ── Hatching: block game input but allow screen navigation ─────

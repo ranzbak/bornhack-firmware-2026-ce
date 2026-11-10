@@ -101,6 +101,15 @@ pub mod fw {
     #[path = "mesh/cli.rs"]
     pub mod cli;
 
+    /// `PETS.CFG` parser — the real firmware module. Only its `parse` half
+    /// compiles here (`load_and_install` is `embassy-core`-gated, and there
+    /// is no FAT12 partition off-badge), which is what the simulator needs to
+    /// install a roster from the repo's `assets/to-badge/PETS.CFG`. Without
+    /// it the sim would have no pets at all, since none are built in.
+    #[cfg(feature = "game")]
+    #[path = "pets_cfg.rs"]
+    pub mod pets_cfg;
+
     /// Host-simulator stubs for the shared settings menu, which reads these EPD
     /// tuning atomics/consts (`menu.rs`). The host has no e-paper panel, so the
     /// state is inert — the menu's adjust actions still update the live value
@@ -885,6 +894,53 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     draw_frame(display, Some((title, bat_prc)), None)?;
+    Ok(())
+}
+
+/// Width of the [`draw_battery_bar`] indicator, in pixels.
+pub const BATTERY_BAR_W: u32 = 4;
+/// Height of the [`draw_battery_bar`] indicator, in pixels.
+///
+/// Four segments of 3 px separated by three single-pixel gaps: `4*3 + 3 = 15`.
+pub const BATTERY_BAR_H: u32 = 15;
+/// Number of charge segments in [`draw_battery_bar`].
+const BATTERY_BAR_SEGMENTS: u32 = 4;
+
+/// Draw a compact vertical battery bar with its top-left corner at `(x, y)`.
+///
+/// [`BATTERY_BAR_W`]×[`BATTERY_BAR_H`] px, split into [`BATTERY_BAR_SEGMENTS`]
+/// segments that fill from the bottom up — one segment per 25 %. Any charge at
+/// all lights the first segment, so a live battery never reads as empty.
+///
+/// This is the game screen's indicator: the full [`draw_battery_icon`] is 24 px
+/// wide and crowds the game menu icon, so the game screen uses this and hugs
+/// the right edge instead.
+///
+/// Below 5 % the segments are drawn in red, matching [`draw_battery_icon`].
+///
+/// Unlit segments are left blank rather than outlined — at 4×3 px an outline
+/// leaves a 2×1 interior and reads as noise. There is also no charging
+/// indicator: the bolt [`draw_battery_icon`] draws needs more width than this
+/// has.
+pub fn draw_battery_bar<D>(display: &mut D, x: i32, y: i32, pct: u8) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    let color = if pct < 5 { RED } else { BLACK };
+    // Segment height, derived so segments + 1 px gaps exactly fill the bar.
+    let gaps = BATTERY_BAR_SEGMENTS - 1;
+    let seg_h = (BATTERY_BAR_H - gaps) / BATTERY_BAR_SEGMENTS;
+
+    // Round up, so 1 % lights one segment and only 0 % reads as empty.
+    let lit = (pct.min(100) as u32 * BATTERY_BAR_SEGMENTS).div_ceil(100);
+
+    for seg in 0..lit {
+        // seg 0 is the bottom segment; walk upward from the bar's base.
+        let seg_y = y + (BATTERY_BAR_H - (seg + 1) * seg_h - seg) as i32;
+        Rectangle::new(Point::new(x, seg_y), Size::new(BATTERY_BAR_W, seg_h))
+            .into_styled(PrimitiveStyle::with_fill(color))
+            .draw(display)?;
+    }
     Ok(())
 }
 

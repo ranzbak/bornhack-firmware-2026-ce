@@ -38,15 +38,16 @@ const PCX_HEADER_SIZE: usize = 128;
 // than caching every filename — at 4 × 21 × 4 = 336 bytes it accepts
 // any number of sprite files without a hardcoded cap.
 
-/// Pet/category-prefix range covered by the catalogue.  `PP=0` Bartholomeus,
-/// `1` Cat, `2` Slug, `3` sponsors, `4` menu icons, `5..7` custom pets from
-/// `PETS.CFG`.  Sized to cover every valid pet prefix so custom pets get
+/// Pet/category-prefix range covered by the catalogue.  `PP=3` is the sponsor
+/// slideshow and `4` the menu icons; every other prefix is a pet slot, filled
+/// by whatever `PETS.CFG` declares.  Sized to cover every valid pet prefix so
+/// pets get
 /// per-animation frame counts from the same scan — keep in sync with
 /// [`crate::game::pet_registry::MAX_PET_PREFIX`].  Kept small (paired with a
 /// u16 presence cell below) because the debug build is RAM-tight — growing
 /// this table overflows the stack and corrupts adjacent statics.
 #[cfg(feature = "embassy-core")]
-const PP_MAX: usize = 8;
+const PP_MAX: usize = 9;
 /// Anim-id range covered.  Anim ids go 0x00..=0x14 (start screen + 20
 /// lifecycle anims), plus 0x23-0x28 (Exercising/Medicating/Drinking/
 /// Ozempic/Rehab/OnlyPets — picked starting at 0x20 to land clear of
@@ -66,7 +67,7 @@ const AA_MAX: usize = 41;
 #[cfg(feature = "embassy-core")]
 const FF_MAX: u8 = 16;
 
-// AtomicU16 (not U32): 8×41×2 B keeps the table small so the RAM-tight
+// AtomicU16 (not U32): 9×41×2 B keeps the table small so the RAM-tight
 // debug build doesn't overflow the stack into adjacent statics.
 #[cfg(feature = "embassy-core")]
 static ANIM_PRESENCE: [[core::sync::atomic::AtomicU16; AA_MAX]; PP_MAX] =
