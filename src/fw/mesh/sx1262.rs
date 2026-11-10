@@ -717,6 +717,9 @@ impl<'a> SimpleLoRa<'a> {
                     "LoRa CRC error {=i16}dBm — header decoded OK (SF/BW/CR/syncword match) but payload bytes corrupted",
                     rssi
                 );
+                crate::PACKET_STATS
+                    .recv_errors
+                    .fetch_add(1, Ordering::Relaxed);
                 None
             } else if irq.rx_done() {
                 let pkt = match buf {
@@ -971,6 +974,7 @@ impl<'a> SimpleLoRa<'a> {
         self.rearm_rx();
 
         if tx_done {
+            crate::PACKET_STATS.count_sent(message[0]);
             Ok(())
         } else {
             Err(LoraError::Timeout)

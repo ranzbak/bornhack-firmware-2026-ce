@@ -376,6 +376,9 @@ pub async fn run_meshcore_listener<'a>(
             }
 
             Ok(Some((len, rssi, snr_x4))) => {
+                if len > 0 {
+                    crate::PACKET_STATS.count_recv(raw[0]);
+                }
                 // Update radio stats snapshot for CMD_GET_STATS / STATS_TYPE_RADIO.
                 {
                     let noise_floor = (rssi as i32 - (snr_x4 as i32 / 4)).clamp(-128, 0) as i16;
@@ -1925,42 +1928,12 @@ pub async fn send_advert(
     timestamp: u32,
     mode: AdvertMode,
 ) {
+    use meshcore::MAX_TRANS_UNIT;
     use meshcore::packet::{Message, PayloadType, RouteType};
-    use meshcore::payload::advert::{Advert, DeviceRole, serialize};
-    use meshcore::{MAX_PAYLOAD_SIZE, MAX_TRANS_UNIT};
 
-    let mut advert = Advert {
-        pub_key: identity.pub_key,
-        timestamp,
-        signature: [0u8; meshcore::SIGNATURE_SIZE],
-        role: DeviceRole::ChatNode,
-        name: {
-            let mut v = heapless::Vec::new();
-            let _ = v.extend_from_slice(&name[..name.len().min(32)]);
-            if v.is_empty() { None } else { Some(v) }
-        },
-        position: None,
-        extra1: None,
-        extra2: None,
+    let Some(msg_payload) = self_advert_payload(&identity.sec_key, name, timestamp) else {
+        return;
     };
-
-    if let Err(e) = meshcore::identity::sign_advert(&identity.sec_key, &mut advert) {
-        defmt::warn!("send_advert: signing failed: {:?}", defmt::Debug2Format(&e));
-        return;
-    }
-
-    let mut payload_buf = [0u8; MAX_PAYLOAD_SIZE];
-    let mut payload_len = 0usize;
-    if let Err(e) = serialize(&advert, &mut payload_buf, &mut payload_len) {
-        defmt::warn!(
-            "send_advert: serialize failed: {:?}",
-            defmt::Debug2Format(&e)
-        );
-        return;
-    }
-
-    let mut msg_payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
-    let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
     let (route, transport_code) = match mode {
         AdvertMode::Flood => flood_route(PayloadType::Advert.to_u8(), &msg_payload),
@@ -2002,6 +1975,71 @@ pub async fn send_advert(
             );
         }
     }
+}
+
+/// Our signed advert payload: pub_key, timestamp, signature and app data
+/// (chat-node role and `name`, at most 32 bytes). `None` if signing or
+/// serialising fails, which is logged.
+fn self_advert_payload(
+    sec_key: &[u8; meshcore::PRV_KEY_SIZE],
+    name: &[u8],
+    timestamp: u32,
+) -> Option<heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }>> {
+    use meshcore::MAX_PAYLOAD_SIZE;
+    use meshcore::payload::advert::{Advert, DeviceRole, serialize};
+
+    let mut advert = Advert {
+        // Filled in from the secret key by `sign_advert`.
+        pub_key: [0u8; meshcore::PUB_KEY_SIZE],
+        timestamp,
+        signature: [0u8; meshcore::SIGNATURE_SIZE],
+        role: DeviceRole::ChatNode,
+        name: {
+            let mut v = heapless::Vec::new();
+            let _ = v.extend_from_slice(&name[..name.len().min(32)]);
+            if v.is_empty() { None } else { Some(v) }
+        },
+        position: None,
+        extra1: None,
+        extra2: None,
+    };
+
+    if let Err(e) = meshcore::identity::sign_advert(sec_key, &mut advert) {
+        defmt::warn!("advert: signing failed: {:?}", defmt::Debug2Format(&e));
+        return None;
+    }
+
+    let mut payload_buf = [0u8; MAX_PAYLOAD_SIZE];
+    let mut payload_len = 0usize;
+    if let Err(e) = serialize(&advert, &mut payload_buf, &mut payload_len) {
+        defmt::warn!("advert: serialize failed: {:?}", defmt::Debug2Format(&e));
+        return None;
+    }
+    heapless::Vec::from_slice(&payload_buf[..payload_len]).ok()
+}
+
+/// Our advert as a whole packet, the form `CMD_EXPORT_CONTACT` answers with
+/// (upstream `createSelfAdvert` with `ROUTE_TYPE_FLOOD`, never sent, so no
+/// transport codes and an empty path). Returns the length written to `out`.
+pub fn export_self_advert(
+    sec_key: &[u8; meshcore::PRV_KEY_SIZE],
+    name: &[u8],
+    timestamp: u32,
+    out: &mut [u8; meshcore::MAX_TRANS_UNIT],
+) -> Option<usize> {
+    use meshcore::packet::{Message, PayloadType, RouteType};
+
+    let msg = Message {
+        payload_type: PayloadType::Advert,
+        route: RouteType::Flood,
+        version: 0,
+        transport_code: 0,
+        transport_code_2: 0,
+        path_len_byte: 0,
+        path: heapless::Vec::new(),
+        payload: self_advert_payload(sec_key, name, timestamp)?,
+    };
+    meshcore::packet::serialize(&msg, out).ok()
 }
 
 // ---------------------------------------------------------------------------

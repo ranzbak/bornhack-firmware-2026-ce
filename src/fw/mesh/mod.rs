@@ -245,6 +245,65 @@ pub static DEFAULT_SCOPE_KEY: Mutex<CriticalSectionRawMutex, core::cell::Cell<Op
 // Radio stats
 // ---------------------------------------------------------------------------
 
+/// Packet counters for `CMD_GET_STATS` / `STATS_TYPE_PACKETS`, counted the
+/// way upstream's Dispatcher does: every packet the radio sends or receives
+/// intact, split flood/direct by its route type, plus CRC failures. Counts
+/// wrap at `u32` like upstream's.
+pub struct PacketStats {
+    pub recv: core::sync::atomic::AtomicU32,
+    pub sent: core::sync::atomic::AtomicU32,
+    pub sent_flood: core::sync::atomic::AtomicU32,
+    pub sent_direct: core::sync::atomic::AtomicU32,
+    pub recv_flood: core::sync::atomic::AtomicU32,
+    pub recv_direct: core::sync::atomic::AtomicU32,
+    pub recv_errors: core::sync::atomic::AtomicU32,
+}
+
+impl PacketStats {
+    const fn new() -> Self {
+        use core::sync::atomic::AtomicU32;
+        Self {
+            recv: AtomicU32::new(0),
+            sent: AtomicU32::new(0),
+            sent_flood: AtomicU32::new(0),
+            sent_direct: AtomicU32::new(0),
+            recv_flood: AtomicU32::new(0),
+            recv_direct: AtomicU32::new(0),
+            recv_errors: AtomicU32::new(0),
+        }
+    }
+
+    /// `true` for the two flood route types (bits 0-1 of the header byte:
+    /// 0 = transport flood, 1 = flood).
+    fn is_flood(header: u8) -> bool {
+        header & 0x03 <= 1
+    }
+
+    /// Count one packet sent; `header` is its first byte.
+    pub fn count_sent(&self, header: u8) {
+        use core::sync::atomic::Ordering::Relaxed;
+        self.sent.fetch_add(1, Relaxed);
+        if Self::is_flood(header) {
+            self.sent_flood.fetch_add(1, Relaxed);
+        } else {
+            self.sent_direct.fetch_add(1, Relaxed);
+        }
+    }
+
+    /// Count one packet received intact; `header` is its first byte.
+    pub fn count_recv(&self, header: u8) {
+        use core::sync::atomic::Ordering::Relaxed;
+        self.recv.fetch_add(1, Relaxed);
+        if Self::is_flood(header) {
+            self.recv_flood.fetch_add(1, Relaxed);
+        } else {
+            self.recv_direct.fetch_add(1, Relaxed);
+        }
+    }
+}
+
+pub static PACKET_STATS: PacketStats = PacketStats::new();
+
 #[derive(Clone, Copy)]
 pub struct RadioStats {
     pub noise_floor: i16,

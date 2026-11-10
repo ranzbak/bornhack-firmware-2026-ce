@@ -556,6 +556,7 @@ async fn main(spawner: Spawner) {
                 sdc,
                 CompanionContext {
                     pub_key: identity.pub_key,
+                    sec_key: identity.sec_key,
                 },
                 ble_prng_seed,
             ));

@@ -221,7 +221,14 @@ pub struct NusServer {
 pub struct CompanionContext {
     /// Ed25519 public key (32 bytes).
     pub pub_key: [u8; 32],
+    /// Ed25519 secret key (seed || public key). Used only to sign our own
+    /// advert for `CMD_EXPORT_CONTACT` and data for `CMD_SIGN_FINISH`; it is
+    /// never sent.
+    pub sec_key: [u8; ::meshcore::PRV_KEY_SIZE],
 }
+
+/// Largest `CMD_SIGN_DATA` total accepted, upstream's `MAX_SIGN_DATA_LEN`.
+const SIGN_DATA_MAX: usize = 8 * 1024;
 
 /// Outbox capacity for pending BLE notifications.
 ///
@@ -562,6 +569,10 @@ async fn nus_peripheral_loop<C>(
     // Load the persisted radio parameters (set via CMD_SET_RADIO_PARAMS 0x0B /
     // CMD_SET_RADIO_TX_POWER 0x0C).  Falls back to EU/UK narrow band defaults.
     let mut radio_params = settings::get_radio_params_or_default().await;
+
+    // CMD_SIGN_START … CMD_SIGN_FINISH buffer; `None` outside such a run,
+    // like upstream's `sign_data` pointer.
+    let mut sign_data: Option<heapless::Vec<u8, SIGN_DATA_MAX>> = None;
 
     // Load the persisted GPS position (set via CMD_SET_ADVERT_LATLON 0x0E).
     // Falls back to (0, 0) on first boot (meaning "no position set").
@@ -922,6 +933,10 @@ async fn nus_peripheral_loop<C>(
                             let mut self_telem_lpp: [u8; 8] = [0u8; 8];
                             let mut self_telem_lpp_len: usize;
                             let mut self_telem_prefix: [u8; 6] = [0u8; 6];
+                            // CMD_EXPORT_CONTACT packet / CMD_SIGN_FINISH signature,
+                            // borrowed by the encoded response.
+                            let mut export_buf = [0u8; ::meshcore::MAX_TRANS_UNIT];
+                            let mut signature = [0u8; ::meshcore::SIGNATURE_SIZE];
                             let response = match companion::cmd::parse(data) {
                                 Err(_) => {
                                     defmt::warn!("companion: empty write");
@@ -2384,17 +2399,26 @@ async fn nus_peripheral_loop<C>(
                                                 rx_air_secs: s.rx_air_secs,
                                             }
                                         }
-                                        // EXCEPTION: STATS_TYPE_CORE (0) / PACKETS (2)
-                                        // exist upstream; the badge keeps no such
-                                        // counters and answers UNSUPPORTED_CMD.
-                                        0x00 | 0x02 => {
-                                            defmt::warn!(
-                                                "companion: GET_STATS type={=u8:#04x} not implemented",
-                                                stats_type
-                                            );
-                                            companion::Response::Error(
-                                                companion::ErrorCode::UnsupportedCmd,
-                                            )
+                                        0x00 => companion::Response::StatsCore {
+                                            battery_mv: crate::fw::battery::read_mv(),
+                                            uptime_secs: embassy_time::Instant::now().as_secs()
+                                                as u32,
+                                            // Upstream `_err_flags`; the badge raises none.
+                                            err_flags: 0,
+                                            queue_len: crate::TX_CHANNEL.len() as u8,
+                                        },
+                                        0x02 => {
+                                            use core::sync::atomic::Ordering::Relaxed;
+                                            let p = &crate::PACKET_STATS;
+                                            companion::Response::StatsPackets {
+                                                recv: p.recv.load(Relaxed),
+                                                sent: p.sent.load(Relaxed),
+                                                sent_flood: p.sent_flood.load(Relaxed),
+                                                sent_direct: p.sent_direct.load(Relaxed),
+                                                recv_flood: p.recv_flood.load(Relaxed),
+                                                recv_direct: p.recv_direct.load(Relaxed),
+                                                recv_errors: p.recv_errors.load(Relaxed),
+                                            }
                                         }
                                         // Upstream: unknown stats type → ILLEGAL_ARG.
                                         other => {
@@ -2421,6 +2445,67 @@ async fn nus_peripheral_loop<C>(
                                         crate::TxControlData { payload: v },
                                     ));
                                     companion::Response::Ok
+                                }
+
+                                Ok(companion::cmd::Command::ExportContact(None)) => {
+                                    match super::meshcore::export_self_advert(
+                                        &ctx.sec_key,
+                                        &node_name[..node_name_len],
+                                        crate::unix_now_unique().unwrap_or(0),
+                                        &mut export_buf,
+                                    ) {
+                                        Some(n) => companion::Response::ExportContact(&export_buf[..n]),
+                                        // Upstream: createSelfAdvert failed → TABLE_FULL.
+                                        None => companion::Response::Error(
+                                            companion::ErrorCode::TableFull,
+                                        ),
+                                    }
+                                }
+                                // The badge keeps no received advert packets, which is
+                                // what upstream exports for another contact, so this is
+                                // its "no exportable advert" answer.
+                                Ok(companion::cmd::Command::ExportContact(Some(_))) => {
+                                    companion::Response::Error(companion::ErrorCode::NotFound)
+                                }
+
+                                // The badge holds no keep-alive connections, so there is
+                                // never one to report or drop.
+                                Ok(companion::cmd::Command::HasConnection(_)) => {
+                                    companion::Response::Error(companion::ErrorCode::NotFound)
+                                }
+                                Ok(companion::cmd::Command::Logout(_)) => companion::Response::Ok,
+
+                                Ok(companion::cmd::Command::SignStart) => {
+                                    sign_data = Some(heapless::Vec::new());
+                                    companion::Response::SignStart { max_len: SIGN_DATA_MAX as u32 }
+                                }
+                                Ok(companion::cmd::Command::SignData(chunk)) => match sign_data {
+                                    None => companion::Response::Error(companion::ErrorCode::BadState),
+                                    Some(ref mut buf) => match buf.extend_from_slice(chunk) {
+                                        Ok(()) => companion::Response::Ok,
+                                        Err(_) => companion::Response::Error(
+                                            companion::ErrorCode::TableFull,
+                                        ),
+                                    },
+                                },
+                                Ok(companion::cmd::Command::SignFinish) => match sign_data.take() {
+                                    None => companion::Response::Error(companion::ErrorCode::BadState),
+                                    Some(buf) => {
+                                        match ed25519_compact::SecretKey::from_slice(&ctx.sec_key) {
+                                            Ok(sk) => {
+                                                signature.copy_from_slice(sk.sign(&buf, None).as_ref());
+                                                companion::Response::Signature(&signature)
+                                            }
+                                            Err(_) => companion::Response::Error(
+                                                companion::ErrorCode::BadState,
+                                            ),
+                                        }
+                                    }
+                                },
+
+                                // No sensors, so no settings: an empty `name:value` list.
+                                Ok(companion::cmd::Command::GetCustomVars) => {
+                                    companion::Response::CustomVars(&[])
                                 }
 
                                 Ok(companion::cmd::Command::Unknown(b)) => {
