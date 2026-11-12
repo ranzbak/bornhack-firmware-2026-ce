@@ -1483,6 +1483,79 @@ fn flood_path_len_byte() -> u8 {
     code << 6
 }
 
+/// Everything the packet header needs to know about how a packet leaves us:
+/// route type, the `path_len_byte` and path bytes, and the transport code.
+///
+/// The transport code depends on the final payload (it is an HMAC over it),
+/// so build a `Route` only after the payload is complete.
+struct Route {
+    route: meshcore::packet::RouteType,
+    path_len_byte: u8,
+    path: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }>,
+    transport_code: u16,
+}
+
+impl Route {
+    /// Flood with the app-controlled flood scope (`TransportFlood` when one is
+    /// set, plain `Flood` otherwise), empty path, 0 hops.
+    fn flood(ptype: meshcore::packet::PayloadType, payload: &[u8]) -> Self {
+        let (route, transport_code) = flood_route(ptype.to_u8(), payload);
+        Self {
+            route,
+            path_len_byte: flood_path_len_byte(),
+            path: heapless::Vec::new(),
+            transport_code,
+        }
+    }
+
+    /// Flood scoped to an explicit region key (a channel's region), empty
+    /// path, 0 hops.
+    fn flood_scoped(
+        key: Option<[u8; 16]>,
+        ptype: meshcore::packet::PayloadType,
+        payload: &[u8],
+    ) -> Self {
+        let (route, transport_code) = scoped_flood_route(key, ptype.to_u8(), payload);
+        Self {
+            route,
+            path_len_byte: flood_path_len_byte(),
+            path: heapless::Vec::new(),
+            transport_code,
+        }
+    }
+
+    /// Direct along an explicit, already-encoded path; no transport code.
+    fn direct(path_len_byte: u8, path: &[u8]) -> Self {
+        let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
+        let _ = pv.extend_from_slice(path);
+        Self {
+            route: meshcore::packet::RouteType::Direct,
+            path_len_byte,
+            path: pv,
+            transport_code: 0,
+        }
+    }
+
+    /// Direct along `c`'s stored out-path. Only valid when the path is known
+    /// (`out_path_len != OUT_PATH_UNKNOWN`).
+    fn direct_to(c: &contacts::Contact) -> Self {
+        Self::direct(c.out_path_len, &c.out_path[..c.path_actual_bytes()])
+    }
+}
+
+/// Route to a contact: direct along its stored path when one is known,
+/// otherwise flood. Run it after `payload` is final (see [`Route`]).
+fn route_for_contact(
+    contact: Option<&contacts::Contact>,
+    ptype: meshcore::packet::PayloadType,
+    payload: &[u8],
+) -> Route {
+    match contact {
+        Some(c) if c.out_path_len != contacts::OUT_PATH_UNKNOWN => Route::direct_to(c),
+        _ => Route::flood(ptype, payload),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Channel message transmission
 // ---------------------------------------------------------------------------
@@ -1604,16 +1677,20 @@ async fn send_grp_txt(
     let mut msg_payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
     let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
-    let (route, transport_code) =
-        scoped_flood_route(scope, PayloadType::GrpTxt.to_u8(), &msg_payload);
+    let Route {
+        route,
+        path_len_byte,
+        path,
+        transport_code,
+    } = Route::flood_scoped(scope, PayloadType::GrpTxt, &msg_payload);
     let msg = Message {
         payload_type: PayloadType::GrpTxt,
         route,
         version: 0,
         transport_code,
         transport_code_2: 0,
-        path_len_byte: flood_path_len_byte(),
-        path: heapless::Vec::new(),
+        path_len_byte,
+        path,
         payload: msg_payload,
     };
 
@@ -1723,17 +1800,18 @@ async fn send_grp_data(
     let mut msg_payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
     let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
-    let (route, path_len_byte, path_bytes, transport_code) =
-        if req.path_len == contacts::OUT_PATH_UNKNOWN {
-            let (r, code) = flood_route(PayloadType::GrpData.to_u8(), &msg_payload);
-            (r, flood_path_len_byte(), heapless::Vec::new(), code)
-        } else {
-            // `path_len` is the encoded byte ((hash_size-1)<<6 | hops), not a
-            // byte count; the parser already cut `path` to hops * hash_size.
-            let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
-            let _ = pv.extend_from_slice(&req.path);
-            (RouteType::Direct, req.path_len, pv, 0u16)
-        };
+    let Route {
+        route,
+        path_len_byte,
+        path: path_bytes,
+        transport_code,
+    } = if req.path_len == contacts::OUT_PATH_UNKNOWN {
+        Route::flood(PayloadType::GrpData, &msg_payload)
+    } else {
+        // `path_len` is the encoded byte ((hash_size-1)<<6 | hops), not a
+        // byte count; the parser already cut `path` to hops * hash_size.
+        Route::direct(req.path_len, &req.path)
+    };
 
     let msg = Message {
         payload_type: PayloadType::GrpData,
@@ -1801,20 +1879,6 @@ async fn send_txt_msg(
         .find_by_key(&req.recipient_pub_key)
         .await;
 
-    let (route, path_len_byte, path_bytes) = match contact {
-        Some(ref c) if c.out_path_len != contacts::OUT_PATH_UNKNOWN => {
-            let actual = c.path_actual_bytes();
-            let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
-            let _ = pv.extend_from_slice(&c.out_path[..actual]);
-            (RouteType::Direct, c.out_path_len, pv)
-        }
-        _ => (
-            RouteType::Flood,
-            flood_path_len_byte(),
-            heapless::Vec::new(),
-        ),
-    };
-
     let (encrypted, expected_ack) = match txt_msg::encrypt(
         &identity.sec_key,
         &identity.pub_key,
@@ -1847,10 +1911,12 @@ async fn send_txt_msg(
     let mut msg_payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
     let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
-    let (route, transport_code) = match route {
-        RouteType::Flood => flood_route(PayloadType::TxtMsg.to_u8(), &msg_payload),
-        r => (r, 0),
-    };
+    let Route {
+        route,
+        path_len_byte,
+        path: path_bytes,
+        transport_code,
+    } = route_for_contact(contact.as_ref(), PayloadType::TxtMsg, &msg_payload);
     let msg = Message {
         payload_type: PayloadType::TxtMsg,
         route,
@@ -1930,9 +1996,21 @@ pub async fn send_advert(
         return;
     };
 
-    let (route, transport_code) = match mode {
-        AdvertMode::Flood => flood_route(PayloadType::Advert.to_u8(), &msg_payload),
-        AdvertMode::ZeroHop => (RouteType::Direct, 0u16), // path_len=0 → zero-hop direct
+    // Both modes carry `flood_path_len_byte()` and an empty path (0 hops);
+    // zero-hop only differs in the route type and having no transport code.
+    let Route {
+        route,
+        path_len_byte,
+        path,
+        transport_code,
+    } = match mode {
+        AdvertMode::Flood => Route::flood(PayloadType::Advert, &msg_payload),
+        AdvertMode::ZeroHop => Route {
+            route: RouteType::Direct, // path_len=0 → zero-hop direct
+            path_len_byte: flood_path_len_byte(),
+            path: heapless::Vec::new(),
+            transport_code: 0,
+        },
     };
 
     let msg = Message {
@@ -1941,8 +2019,8 @@ pub async fn send_advert(
         version: 0,
         transport_code,
         transport_code_2: 0,
-        path_len_byte: flood_path_len_byte(),
-        path: heapless::Vec::new(),
+        path_len_byte,
+        path,
         payload: msg_payload,
     };
 
@@ -2087,15 +2165,20 @@ pub async fn send_pm(
 
     // TxtMsg uses Direct route so the full path to the recipient is embedded.
     // For now we send as Flood — the recipient will filter on dest_pub_key.
-    let (route, transport_code) = flood_route(PayloadType::TxtMsg.to_u8(), &msg_payload);
+    let Route {
+        route,
+        path_len_byte,
+        path,
+        transport_code,
+    } = Route::flood(PayloadType::TxtMsg, &msg_payload);
     let packet = Message {
         payload_type: PayloadType::TxtMsg,
         route,
         version: 0,
         transport_code,
         transport_code_2: 0,
-        path_len_byte: flood_path_len_byte(),
-        path: heapless::Vec::new(),
+        path_len_byte,
+        path,
         payload: msg_payload,
     };
 
@@ -2134,7 +2217,7 @@ async fn send_ack(
     ack: &[u8],
 ) {
     use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType, RouteType};
+    use meshcore::packet::{Message, PayloadType};
 
     // The first four bytes are the ACK hash; receivers match on those only.
     let ack_hash = u32::from_le_bytes([ack[0], ack[1], ack[2], ack[3]]);
@@ -2144,23 +2227,12 @@ async fn send_ack(
 
     // Route: Direct if we have a stored path, Flood otherwise.
     let contact = contacts::ContactStore::new().find_by_key(sender_pk).await;
-    let (route, path_len_byte, path_bytes) = match contact {
-        Some(ref c) if c.out_path_len != contacts::OUT_PATH_UNKNOWN => {
-            let actual = c.path_actual_bytes();
-            let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
-            let _ = pv.extend_from_slice(&c.out_path[..actual]);
-            (RouteType::Direct, c.out_path_len, pv)
-        }
-        _ => (
-            RouteType::Flood,
-            flood_path_len_byte(),
-            heapless::Vec::new(),
-        ),
-    };
-    let (route, transport_code) = match route {
-        RouteType::Flood => flood_route(PayloadType::Ack.to_u8(), &payload),
-        r => (r, 0),
-    };
+    let Route {
+        route,
+        path_len_byte,
+        path: path_bytes,
+        transport_code,
+    } = route_for_contact(contact.as_ref(), PayloadType::Ack, &payload);
 
     let msg = Message {
         payload_type: PayloadType::Ack,
@@ -2305,7 +2377,7 @@ async fn send_trace(lora: &mut SimpleLoRa<'_>, req: crate::TxTracePath) {
 /// OUT_PATH_UNKNOWN`.
 async fn send_login(lora: &mut SimpleLoRa<'_>, req: crate::TxLogin, identity: &DeviceIdentity) {
     use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType, RouteType};
+    use meshcore::packet::{Message, PayloadType};
 
     // Hint for the RX fast path so we skip the 300-slot contact scan.
     crate::LAST_REQ_TARGET.lock(|cell| cell.set(Some(req.pub_key)));
@@ -2366,24 +2438,12 @@ async fn send_login(lora: &mut SimpleLoRa<'_>, req: crate::TxLogin, identity: &D
     };
 
     // Flood when no path is known; direct when a stored path exists.
-    let (route, path_len_byte, path_bytes) = match contact {
-        Some(ref c) if c.out_path_len != contacts::OUT_PATH_UNKNOWN => {
-            let actual = c.path_actual_bytes();
-            let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
-            let _ = pv.extend_from_slice(&c.out_path[..actual]);
-            (RouteType::Direct, c.out_path_len, pv)
-        }
-        _ => (
-            RouteType::Flood,
-            flood_path_len_byte(),
-            heapless::Vec::new(),
-        ),
-    };
-
-    let (route, transport_code) = match route {
-        RouteType::Flood => flood_route(PayloadType::AnonReq.to_u8(), &payload),
-        r => (r, 0),
-    };
+    let Route {
+        route,
+        path_len_byte,
+        path: path_bytes,
+        transport_code,
+    } = route_for_contact(contact.as_ref(), PayloadType::AnonReq, &payload);
     let msg = Message {
         payload_type: PayloadType::AnonReq,
         route,
@@ -2446,7 +2506,7 @@ async fn send_telem_request(
     identity: &DeviceIdentity,
 ) {
     use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType, RouteType};
+    use meshcore::packet::{Message, PayloadType};
 
     crate::LAST_REQ_TARGET.lock(|cell| cell.set(Some(req.pub_key)));
 
@@ -2492,27 +2552,15 @@ async fn send_telem_request(
     let contact = contacts::ContactStore::new()
         .find_by_key(&req.pub_key)
         .await;
-    let (route, path_len_byte, path_bytes) = match contact {
-        Some(ref c) if c.out_path_len != contacts::OUT_PATH_UNKNOWN => {
-            let actual = c.path_actual_bytes();
-            let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
-            let _ = pv.extend_from_slice(&c.out_path[..actual]);
-            (RouteType::Direct, c.out_path_len, pv)
-        }
-        _ => (
-            RouteType::Flood,
-            flood_path_len_byte(),
-            heapless::Vec::new(),
-        ),
-    };
-
     let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
     let _ = payload_vec.extend_from_slice(&payload_buf[..payload_len]);
 
-    let (route, transport_code) = match route {
-        RouteType::Flood => flood_route(PayloadType::Req.to_u8(), &payload_vec),
-        r => (r, 0),
-    };
+    let Route {
+        route,
+        path_len_byte,
+        path: path_bytes,
+        transport_code,
+    } = route_for_contact(contact.as_ref(), PayloadType::Req, &payload_vec);
     let msg = Message {
         payload_type: PayloadType::Req,
         route,
@@ -2624,7 +2672,7 @@ async fn send_admin_status_request(
     identity: &DeviceIdentity,
 ) {
     use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType, RouteType};
+    use meshcore::packet::{Message, PayloadType};
     use meshcore::payload::txt_msg;
 
     const REQ_TYPE_GET_STATUS: u8 = 0x01;
@@ -2664,27 +2712,15 @@ async fn send_admin_status_request(
     let contact = contacts::ContactStore::new()
         .find_by_key(&req.pub_key)
         .await;
-    let (route, path_len_byte, path_bytes) = match contact {
-        Some(ref c) if c.out_path_len != contacts::OUT_PATH_UNKNOWN => {
-            let actual = c.path_actual_bytes();
-            let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
-            let _ = pv.extend_from_slice(&c.out_path[..actual]);
-            (RouteType::Direct, c.out_path_len, pv)
-        }
-        _ => (
-            RouteType::Flood,
-            flood_path_len_byte(),
-            heapless::Vec::new(),
-        ),
-    };
-
     let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
     let _ = payload_vec.extend_from_slice(&payload_buf[..payload_len]);
 
-    let (route, transport_code) = match route {
-        RouteType::Flood => flood_route(PayloadType::Req.to_u8(), &payload_vec),
-        r => (r, 0),
-    };
+    let Route {
+        route,
+        path_len_byte,
+        path: path_bytes,
+        transport_code,
+    } = route_for_contact(contact.as_ref(), PayloadType::Req, &payload_vec);
     let msg = Message {
         payload_type: PayloadType::Req,
         route,
@@ -2790,23 +2826,25 @@ async fn send_anon_request(
         }
     };
 
+    let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
+    let _ = payload_vec.push(req.pub_key[0]);
+    let _ = payload_vec.extend_from_slice(&identity.pub_key);
+    let _ = payload_vec.extend_from_slice(&mac);
+    let _ = payload_vec.extend_from_slice(&cipher[..cipher_len]);
+
     // Route like the reference: a stored path goes direct, a contact without
     // one floods, and a non-contact (FIRMWARE_VER_CODE 13 transient contact,
-    // `out_path_len = 0`) goes zero-hop direct.
+    // `out_path_len = 0`) goes zero-hop direct. (This is the one request that
+    // does not flood for an unknown contact.)
     let contact = contacts::ContactStore::new().find_by_key(&req.pub_key).await;
-    let (route, path_len_byte, path_bytes) = match contact {
-        Some(ref c) if c.out_path_len != contacts::OUT_PATH_UNKNOWN => {
-            let actual = c.path_actual_bytes();
-            let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
-            let _ = pv.extend_from_slice(&c.out_path[..actual]);
-            (RouteType::Direct, c.out_path_len, pv)
-        }
-        Some(_) => (
-            RouteType::Flood,
-            flood_path_len_byte(),
-            heapless::Vec::new(),
-        ),
-        None => (RouteType::Direct, 0, heapless::Vec::new()),
+    let Route {
+        route,
+        path_len_byte,
+        path: path_bytes,
+        transport_code,
+    } = match contact {
+        None => Route::direct(0, &[]),
+        Some(ref c) => route_for_contact(Some(c), PayloadType::AnonReq, &payload_vec),
     };
 
     // The repeater gates ANON_REQ_TYPE_REGIONS (and OWNER/BASIC) on
@@ -2822,16 +2860,6 @@ async fn send_anon_request(
         );
     }
 
-    let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
-    let _ = payload_vec.push(req.pub_key[0]);
-    let _ = payload_vec.extend_from_slice(&identity.pub_key);
-    let _ = payload_vec.extend_from_slice(&mac);
-    let _ = payload_vec.extend_from_slice(&cipher[..cipher_len]);
-
-    let (route, transport_code) = match route {
-        RouteType::Flood => flood_route(PayloadType::AnonReq.to_u8(), &payload_vec),
-        r => (r, 0),
-    };
     let msg = Message {
         payload_type: PayloadType::AnonReq,
         route,
@@ -2896,7 +2924,7 @@ async fn send_binary_request(
     identity: &DeviceIdentity,
 ) {
     use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType, RouteType};
+    use meshcore::packet::{Message, PayloadType};
     use meshcore::payload::txt_msg;
 
     if req.req_data.is_empty() {
@@ -2943,27 +2971,15 @@ async fn send_binary_request(
     let contact = contacts::ContactStore::new()
         .find_by_key(&req.pub_key)
         .await;
-    let (route, path_len_byte, path_bytes) = match contact {
-        Some(ref c) if c.out_path_len != contacts::OUT_PATH_UNKNOWN => {
-            let actual = c.path_actual_bytes();
-            let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
-            let _ = pv.extend_from_slice(&c.out_path[..actual]);
-            (RouteType::Direct, c.out_path_len, pv)
-        }
-        _ => (
-            RouteType::Flood,
-            flood_path_len_byte(),
-            heapless::Vec::new(),
-        ),
-    };
-
     let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
     let _ = payload_vec.extend_from_slice(&payload_buf[..payload_len]);
 
-    let (route, transport_code) = match route {
-        RouteType::Flood => flood_route(PayloadType::Req.to_u8(), &payload_vec),
-        r => (r, 0),
-    };
+    let Route {
+        route,
+        path_len_byte,
+        path: path_bytes,
+        transport_code,
+    } = route_for_contact(contact.as_ref(), PayloadType::Req, &payload_vec);
     let msg = Message {
         payload_type: PayloadType::Req,
         route,
@@ -3072,15 +3088,20 @@ async fn send_discovery_request(
     let _ = payload_vec.extend_from_slice(&payload_buf[..payload_len]);
 
     // Always flood for discovery — the whole point is to find new paths.
-    let (route, transport_code) = flood_route(PayloadType::Req.to_u8(), &payload_vec);
+    let Route {
+        route,
+        path_len_byte,
+        path,
+        transport_code,
+    } = Route::flood(PayloadType::Req, &payload_vec);
     let msg = Message {
         payload_type: PayloadType::Req,
         route,
         version: 0,
         transport_code,
         transport_code_2: 0,
-        path_len_byte: flood_path_len_byte(),
-        path: heapless::Vec::new(),
+        path_len_byte,
+        path,
         payload: payload_vec,
     };
 
@@ -3995,16 +4016,12 @@ async fn handle_telem_request_recv(
     let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
     // Route: prefer Direct with the sender's stored out_path; else flood.
-    let (route, path_len_byte, path_bytes, transport_code) =
-        if sender.out_path_len != contacts::OUT_PATH_UNKNOWN {
-            let actual = sender.path_actual_bytes();
-            let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
-            let _ = pv.extend_from_slice(&sender.out_path[..actual]);
-            (RouteType::Direct, sender.out_path_len, pv, 0u16)
-        } else {
-            let (r, code) = flood_route(PayloadType::Response.to_u8(), &msg_payload);
-            (r, flood_path_len_byte(), heapless::Vec::new(), code)
-        };
+    let Route {
+        route,
+        path_len_byte,
+        path: path_bytes,
+        transport_code,
+    } = route_for_contact(Some(sender), PayloadType::Response, &msg_payload);
 
     let msg = Message {
         payload_type: PayloadType::Response,
