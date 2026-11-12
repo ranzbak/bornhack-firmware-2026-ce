@@ -60,23 +60,8 @@ pub async fn load_and_install() {
 pub fn parse(data: &[u8], out: &mut heapless::Vec<PetDef, MAX_PETS>) -> u32 {
     let mut added = 0u32;
 
-    for line in data.split(|&b| b == b'\n') {
-        let line = trim(strip_comment(strip_cr(line)));
-        if line.is_empty() {
-            continue;
-        }
-
-        let Some(eq) = line.iter().position(|&b| b == b'=') else {
-            continue;
-        };
-        let (key, rest) = line.split_at(eq);
-        let key = trim(key);
-        let value = trim(&rest[1..]);
-        if key.is_empty() || value.is_empty() {
-            continue;
-        }
-
-        let Some(id) = parse_u8(key) else {
+    for (key, value) in crate::cfg_text::kv_lines(data, true) {
+        let Some(id) = crate::cfg_text::parse_dec_u32(key).and_then(|v| u8::try_from(v).ok()) else {
             continue;
         };
         if !pet_registry::is_pet_prefix(id) {
@@ -101,50 +86,6 @@ pub fn parse(data: &[u8], out: &mut heapless::Vec<PetDef, MAX_PETS>) -> u32 {
     }
 
     added
-}
-
-fn strip_cr(line: &[u8]) -> &[u8] {
-    if line.last() == Some(&b'\r') {
-        &line[..line.len() - 1]
-    } else {
-        line
-    }
-}
-
-fn strip_comment(line: &[u8]) -> &[u8] {
-    match line.iter().position(|&b| b == b'#') {
-        Some(i) => &line[..i],
-        None => line,
-    }
-}
-
-fn trim(s: &[u8]) -> &[u8] {
-    let mut start = 0;
-    let mut end = s.len();
-    while start < end && (s[start] == b' ' || s[start] == b'\t') {
-        start += 1;
-    }
-    while end > start && (s[end - 1] == b' ' || s[end - 1] == b'\t') {
-        end -= 1;
-    }
-    &s[start..end]
-}
-
-fn parse_u8(s: &[u8]) -> Option<u8> {
-    if s.is_empty() {
-        return None;
-    }
-    let mut acc: u16 = 0;
-    for &b in s {
-        if !b.is_ascii_digit() {
-            return None;
-        }
-        acc = acc.checked_mul(10)?.checked_add((b - b'0') as u16)?;
-        if acc > 255 {
-            return None;
-        }
-    }
-    Some(acc as u8)
 }
 
 #[cfg(all(test, not(feature = "embassy-core")))]

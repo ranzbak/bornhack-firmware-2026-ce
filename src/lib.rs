@@ -110,6 +110,13 @@ pub mod fw {
     #[path = "pets_cfg.rs"]
     pub mod pets_cfg;
 
+    /// `BORNPETS.CFG` overrides — the real firmware module; only the
+    /// `apply_overrides` half compiles here, which lets its unit tests run on
+    /// the host.
+    #[cfg(feature = "game")]
+    #[path = "bornpets_cfg.rs"]
+    pub mod bornpets_cfg;
+
     /// Host-simulator stubs for the shared settings menu, which reads these EPD
     /// tuning atomics/consts (`menu.rs`). The host has no e-paper panel, so the
     /// state is inert — the menu's adjust actions still update the live value
@@ -154,6 +161,7 @@ pub mod color;
 #[cfg(feature = "embassy-core")]
 pub mod epd_driver;
 pub mod button_seq;
+pub mod cfg_text;
 pub mod display_flush;
 pub mod hex;
 pub mod menu;

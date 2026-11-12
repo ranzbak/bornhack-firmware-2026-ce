@@ -263,14 +263,9 @@ where
 // ---------------------------------------------------------------------------
 
 /// Split one line into `(key, value)`, or `None` for comments / blanks /
-/// lines without `=`.
+/// lines without `=`. `#` only starts a comment at the start of a line here.
 fn kv_of_line(line: &[u8]) -> Option<(&[u8], &[u8])> {
-    let line = trim(line);
-    if line.is_empty() || line[0] == b'#' {
-        return None;
-    }
-    let eq = line.iter().position(|&b| b == b'=')?;
-    Some((trim(&line[..eq]), trim(&line[eq + 1..])))
+    crate::cfg_text::kv_of_line(line, false)
 }
 
 fn parse_variant(val: &[u8]) -> Result<LutVariant, LutCfgError> {
@@ -297,21 +292,7 @@ fn decode_exact(src: &[u8], dst: &mut [u8]) -> Result<(), LutCfgError> {
     Ok(())
 }
 
-/// Parse a non-empty ASCII decimal into a `u32`, or `None` on any
-/// non-digit / empty / overflow.
-fn parse_dec(s: &[u8]) -> Option<u32> {
-    if s.is_empty() {
-        return None;
-    }
-    let mut v: u32 = 0;
-    for &c in s {
-        if !c.is_ascii_digit() {
-            return None;
-        }
-        v = v.checked_mul(10)?.checked_add((c - b'0') as u32)?;
-    }
-    Some(v)
-}
+use crate::cfg_text::parse_dec_u32 as parse_dec;
 
 fn u8_in_range(v: u32) -> Option<u8> {
     (v <= 255).then_some(v as u8)
@@ -324,25 +305,6 @@ fn strip_prefix_ci<'a>(s: &'a [u8], prefix: &[u8]) -> Option<&'a [u8]> {
     } else {
         None
     }
-}
-
-/// Trim leading/trailing ASCII whitespace (incl. a trailing `\r`).
-fn trim(mut s: &[u8]) -> &[u8] {
-    while let [first, rest @ ..] = s {
-        if first.is_ascii_whitespace() {
-            s = rest;
-        } else {
-            break;
-        }
-    }
-    while let [rest @ .., last] = s {
-        if last.is_ascii_whitespace() {
-            s = rest;
-        } else {
-            break;
-        }
-    }
-    s
 }
 
 #[cfg(test)]

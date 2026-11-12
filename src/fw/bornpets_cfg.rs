@@ -15,8 +15,11 @@
 //! and after `fat12::format_if_needed()`, but **before** the game engine
 //! creates any [`crate::game::engine::GameState`].
 
-use crate::game::engine::thresholds::{self, BORNPETS_CFG_KEYS, Mode, Thresholds};
+#[cfg(feature = "embassy-core")]
+use crate::game::engine::thresholds::{self, Mode};
+use crate::game::engine::thresholds::{BORNPETS_CFG_KEYS, Thresholds};
 
+#[cfg(feature = "embassy-core")]
 const READ_BUF_LEN: usize = 2048;
 
 /// Pick the active preset, optionally overlay `BORNPETS.CFG`, install
@@ -64,28 +67,11 @@ pub async fn load_and_install(mode: Mode) -> (Mode, bool) {
 pub fn apply_overrides(values: &mut Thresholds, data: &[u8]) -> u32 {
     let mut applied = 0u32;
 
-    for line in data.split(|&b| b == b'\n') {
-        let line = strip_cr(line);
-        let line = strip_comment(line);
-        let line = trim_ascii(line);
-        if line.is_empty() {
-            continue;
-        }
-
-        let Some(eq) = line.iter().position(|&b| b == b'=') else {
-            continue;
-        };
-        let (key, rest) = line.split_at(eq);
-        let key = trim_ascii(key);
-        let value = trim_ascii(&rest[1..]);
-        if key.is_empty() || value.is_empty() {
-            continue;
-        }
-
+    for (key, value) in crate::cfg_text::kv_lines(data, true) {
         let Ok(key_str) = core::str::from_utf8(key) else {
             continue;
         };
-        let Some(value_num) = parse_u32(value) else {
+        let Some(value_num) = crate::cfg_text::parse_dec_u32(value) else {
             #[cfg(feature = "embassy-core")]
             defmt::warn!("BORNPETS.CFG: cannot parse value for key");
             continue;
@@ -107,47 +93,6 @@ pub fn apply_overrides(values: &mut Thresholds, data: &[u8]) -> u32 {
     }
 
     applied
-}
-
-fn strip_cr(line: &[u8]) -> &[u8] {
-    if line.last() == Some(&b'\r') {
-        &line[..line.len() - 1]
-    } else {
-        line
-    }
-}
-
-fn strip_comment(line: &[u8]) -> &[u8] {
-    match line.iter().position(|&b| b == b'#') {
-        Some(i) => &line[..i],
-        None => line,
-    }
-}
-
-fn trim_ascii(s: &[u8]) -> &[u8] {
-    let mut start = 0;
-    let mut end = s.len();
-    while start < end && (s[start] == b' ' || s[start] == b'\t') {
-        start += 1;
-    }
-    while end > start && (s[end - 1] == b' ' || s[end - 1] == b'\t') {
-        end -= 1;
-    }
-    &s[start..end]
-}
-
-fn parse_u32(s: &[u8]) -> Option<u32> {
-    if s.is_empty() {
-        return None;
-    }
-    let mut acc: u32 = 0;
-    for &b in s {
-        if !b.is_ascii_digit() {
-            return None;
-        }
-        acc = acc.checked_mul(10)?.checked_add((b - b'0') as u32)?;
-    }
-    Some(acc)
 }
 
 #[cfg(all(test, not(feature = "embassy-core")))]

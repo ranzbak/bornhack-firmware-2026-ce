@@ -110,7 +110,7 @@ fn station_step(
 /// Returns `None` if the trimmed text is empty, non-ASCII, or longer
 /// than 32 bytes (the longest station phrase is 17 bytes).
 fn normalize(text: &[u8]) -> Option<heapless::Vec<u8, 32>> {
-    let trimmed = trim_ascii(text);
+    let trimmed = text.trim_ascii();
     if trimmed.is_empty() || trimmed.len() > 32 {
         return None;
     }
@@ -123,16 +123,4 @@ fn normalize(text: &[u8]) -> Option<heapless::Vec<u8, 32>> {
         out.push(lower).ok()?;
     }
     Some(out)
-}
-
-fn trim_ascii(text: &[u8]) -> &[u8] {
-    let mut start = 0;
-    let mut end = text.len();
-    while start < end && text[start].is_ascii_whitespace() {
-        start += 1;
-    }
-    while end > start && text[end - 1].is_ascii_whitespace() {
-        end -= 1;
-    }
-    &text[start..end]
 }
