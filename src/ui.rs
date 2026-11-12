@@ -185,6 +185,22 @@ where
     Ok(())
 }
 
+/// Full-screen double border: a 2 px black outer frame with a red inner frame
+/// of `inner_red_w` px just inside it. Used by the About / LoRa-info /
+/// confirmation screens.
+pub fn draw_screen_border<D>(display: &mut D, inner_red_w: u32) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    Rectangle::new(Point::new(0, 0), Size::new(152, 152))
+        .into_styled(PrimitiveStyle::with_stroke(BLACK, 2))
+        .draw(display)?;
+    Rectangle::new(Point::new(2, 2), Size::new(148, 148))
+        .into_styled(PrimitiveStyle::with_stroke(RED, inner_red_w))
+        .draw(display)?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Full-screen clear
 // ---------------------------------------------------------------------------

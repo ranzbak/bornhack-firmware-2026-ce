@@ -6,7 +6,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 
-use crate::{BLACK, RED, TriColor, WHITE};
+use crate::{BLACK, TriColor, WHITE};
 
 // ── Boilerplate macros ──────────────────────────────────────────────────────
 
@@ -2506,12 +2506,7 @@ where
     let x = 76; // center
 
     // Border
-    Rectangle::new(Point::new(0, 0), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_stroke(BLACK, 2))
-        .draw(display)?;
-    Rectangle::new(Point::new(2, 2), Size::new(148, 148))
-        .into_styled(PrimitiveStyle::with_stroke(RED, 1))
-        .draw(display)?;
+    crate::ui::draw_screen_border(display, 1)?;
 
     // Title area — same on every page
     let mut y = 12;
@@ -2645,12 +2640,7 @@ where
     let x = 76;
 
     // Borders
-    Rectangle::new(Point::new(0, 0), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_stroke(BLACK, 2))
-        .draw(display)?;
-    Rectangle::new(Point::new(2, 2), Size::new(148, 148))
-        .into_styled(PrimitiveStyle::with_stroke(RED, 1))
-        .draw(display)?;
+    crate::ui::draw_screen_border(display, 1)?;
 
     // Title
     let mut y = 8;
@@ -2761,12 +2751,7 @@ where
     let x = 76;
 
     // Full-screen border — red inner frame to signal a destructive action.
-    Rectangle::new(Point::new(0, 0), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_stroke(BLACK, 2))
-        .draw(display)?;
-    Rectangle::new(Point::new(2, 2), Size::new(148, 148))
-        .into_styled(PrimitiveStyle::with_stroke(RED, 2))
-        .draw(display)?;
+    crate::ui::draw_screen_border(display, 2)?;
 
     Text::with_text_style("Are you sure?", Point::new(x, 24), font, center).draw(display)?;
 
