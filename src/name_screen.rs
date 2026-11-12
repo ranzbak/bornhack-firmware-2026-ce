@@ -31,7 +31,7 @@
 use embedded_graphics::mono_font::{MonoFont, MonoTextStyle, iso_8859_1};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 use profont::{PROFONT_14_POINT, PROFONT_18_POINT, PROFONT_24_POINT};
 use u8g2_fonts::FontRenderer;
 use u8g2_fonts::fonts::u8g2_font_fub42_tf;
@@ -82,10 +82,7 @@ where
         .into_styled(PrimitiveStyle::with_fill(RED))
         .draw(display)?;
 
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
 
     // "HELLO" — big and centered
     Text::with_text_style(

@@ -529,7 +529,6 @@ pub async fn run_first_boot_interactive(hw: &HardwareInfo, display: &mut crate::
     use embedded_graphics::geometry::Point;
     use embedded_graphics::mono_font::MonoTextStyle;
     use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
-    use embedded_graphics::text::{Baseline, TextStyleBuilder};
     use ssd1675::UpdateMode;
     use ssd1675::graphics::Color;
 
@@ -537,7 +536,7 @@ pub async fn run_first_boot_interactive(hw: &HardwareInfo, display: &mut crate::
     defmt::info!("hwtest:   hardware seen at first boot: {:?}", hw);
 
     let font = MonoTextStyle::new(&FONT_7X13_BOLD, Color::Black);
-    let style = TextStyleBuilder::new().baseline(Baseline::Top).build();
+    let style = crate::ui::TOP_LEFT;
 
     // Use the fastest patched-LUT timing for the per-test partial
     // refreshes — at the `EPD_LUT_SPEED_MIN` scale the waveform
@@ -692,15 +691,12 @@ async fn draw_ship_image(display: &mut crate::fw::epd::EpdGfx<'_>, lut_speed: u8
     use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
     use embedded_graphics::primitives::StyledDrawable;
     use embedded_graphics::geometry::Size;
-    use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+    use embedded_graphics::text::{Text};
     use ssd1675::graphics::Color;
 
     display.clear(Color::White);
 
-    let centered = TextStyleBuilder::new()
-        .alignment(Alignment::Center)
-        .baseline(Baseline::Top)
-        .build();
+    let centered = crate::ui::CENTERED_TOP;
     let big = MonoTextStyle::new(&FONT_10X20, Color::Black);
     let small = MonoTextStyle::new(&FONT_7X13_BOLD, Color::Black);
 

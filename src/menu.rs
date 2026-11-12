@@ -5,7 +5,7 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::{BLACK, RED, TriColor, WHITE};
 
@@ -2428,10 +2428,7 @@ pub fn draw_menu<D>(
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let text_style = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let text_style = crate::ui::CENTERED;
     let menu_h = ROW_H * NUM_ROWS as i32 + 2;
 
     // Outer border
@@ -2527,10 +2524,7 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
-    let center = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
+    let center = crate::ui::CENTERED_TOP;
 
     let x = 76; // center
 
@@ -2668,14 +2662,8 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     let font_bold = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
-    let center = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
-    let left = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Left)
-        .build();
+    let center = crate::ui::CENTERED_TOP;
+    let left = crate::ui::TOP_LEFT;
 
     let x = 76;
 
@@ -2792,10 +2780,7 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
-    let center = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
+    let center = crate::ui::CENTERED_TOP;
     let x = 76;
 
     // Full-screen border — red inner frame to signal a destructive action.

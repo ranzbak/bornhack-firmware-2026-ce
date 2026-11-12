@@ -440,10 +440,7 @@ where
         &mut buf,
         format_args!("{} {}", MONTH_ABBR[mon_idx], cursor.0),
     );
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
     Text::with_text_style(
         &buf,
         Point::new(76, MONTH_LABEL_Y),
@@ -539,10 +536,7 @@ where
         .filter(|ev| ev.year == cursor.0 && ev.month == cursor.1 && ev.day == cursor.2)
         .collect();
 
-    let left = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Left)
-        .build();
+    let left = crate::ui::MIDDLE_LEFT;
     if cursor_evs.is_empty() {
         draw_bold(
             display,
@@ -635,10 +629,7 @@ where
             .into_styled(PrimitiveStyle::with_fill(RED))
             .draw(display)?;
     }
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
     let header_fg = if is_today { WHITE } else { RED };
     Text::with_text_style(
         &buf,
@@ -735,10 +726,7 @@ where
         h += 1;
     }
 
-    let inside_left = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Left)
-        .build();
+    let inside_left = crate::ui::MIDDLE_LEFT;
 
     // Wall-clock-now in day-minutes, but only when the cursor day is
     // actually today — otherwise there's nothing to highlight as
@@ -893,10 +881,7 @@ where
             .into_styled(PrimitiveStyle::with_fill(RED))
             .draw(display)?;
     }
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
     let header_fg = if is_today { WHITE } else { RED };
     Text::with_text_style(
         &buf,
@@ -938,10 +923,7 @@ where
     DAY_LIST_SCROLL.store(scroll as u8, Ordering::Relaxed);
 
     let row_style = MonoTextStyle::new(&FONT_6X13_BOLD, BLACK);
-    let left_align = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Left)
-        .build();
+    let left_align = crate::ui::MIDDLE_LEFT;
 
     for r in 0..ROWS_VISIBLE {
         let idx = scroll + r;

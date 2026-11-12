@@ -7,7 +7,7 @@ use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_BLACK};
 use crate::{BLACK, TriColor, WHITE};
@@ -73,7 +73,7 @@ where
     }
 
     // Show up to 4 pets per screen.
-    let left = TextStyleBuilder::new().baseline(Baseline::Top).build();
+    let left = crate::ui::TOP_LEFT;
 
     let visible = 4usize.min(count as usize - scroll);
     for i in 0..visible {
@@ -127,10 +127,7 @@ where
         let mut indicator: heapless::String<8> = heapless::String::new();
         let _ =
             core::fmt::Write::write_fmt(&mut indicator, format_args!("{}/{}", scroll + 1, count));
-        let right = TextStyleBuilder::new()
-            .baseline(Baseline::Bottom)
-            .alignment(embedded_graphics::text::Alignment::Right)
-            .build();
+        let right = crate::ui::BOTTOM_RIGHT;
         Text::with_text_style(indicator.as_str(), Point::new(148, 150), TEXT_BLACK, right)
             .draw(display)?;
     }

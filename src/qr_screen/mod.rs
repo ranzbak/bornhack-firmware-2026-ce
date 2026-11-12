@@ -144,11 +144,8 @@ where
     // If the pub key hasn't been populated yet (boot race, or built
     // without `mesh`), show a placeholder instead of a useless QR.
     if pub_key == [0u8; 32] {
-        use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
-        let centered = TextStyleBuilder::new()
-            .baseline(Baseline::Middle)
-            .alignment(Alignment::Center)
-            .build();
+        use embedded_graphics::text::{Text};
+        let centered = crate::ui::CENTERED;
         Text::with_text_style(
             "(key not ready)",
             Point::new(76, 84),

@@ -416,7 +416,7 @@ where
 {
     use embedded_graphics::mono_font::MonoTextStyle;
     use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
-    use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+    use embedded_graphics::text::{Text};
     use engine::to_display::DisplayAnim;
 
     // `nav` only drives the simulator's in-line icon blit (firmware
@@ -425,10 +425,7 @@ where
     #[cfg(not(feature = "simulator"))]
     let _ = &nav;
 
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
     let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
     // Red style for pet status prompts (the "gone / new egg" screen) so they
     // stand out from the black countdown timer / labels.
@@ -511,10 +508,7 @@ where
     // (y=33 clears the icons; y=16 overlapped them). Larger bold font.
     // Hidden entirely when money mode is disabled for this pet.
     if lifecycle::money_enabled() {
-        let right_style = TextStyleBuilder::new()
-            .baseline(Baseline::Top)
-            .alignment(Alignment::Right)
-            .build();
+        let right_style = crate::ui::TOP_RIGHT;
         let mut money_buf: heapless::String<12> = heapless::String::new();
         let _ = core::fmt::Write::write_fmt(
             &mut money_buf,
@@ -673,8 +667,8 @@ where
         if !msg.is_empty() {
             use embedded_graphics::mono_font::MonoTextStyle;
             use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
-            use embedded_graphics::text::{Baseline, Text, TextStyleBuilder};
-            let style = TextStyleBuilder::new().baseline(Baseline::Top).build();
+            use embedded_graphics::text::{Text};
+            let style = crate::ui::TOP_LEFT;
             Text::with_text_style(
                 msg,
                 Point::new(2, SEP_TOP + 2),
@@ -704,11 +698,8 @@ where
     {
         use embedded_graphics::mono_font::MonoTextStyle;
         use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
-        use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
-        let style = TextStyleBuilder::new()
-            .baseline(Baseline::Top)
-            .alignment(Alignment::Right)
-            .build();
+        use embedded_graphics::text::{Text};
+        let style = crate::ui::TOP_RIGHT;
         let font = MonoTextStyle::new(&FONT_7X13_BOLD, RED);
         let banners = [
             (lifecycle::is_diabetic_unmedicated(), "NEEDS MEDS"),
@@ -818,7 +809,7 @@ where
     if !has_sprite && lifecycle::is_started() {
         use embedded_graphics::mono_font::MonoTextStyle;
         use embedded_graphics::mono_font::iso_8859_1::FONT_7X13;
-        use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+        use embedded_graphics::text::{Text};
         use crate::EpdColor as Color;
 
         let anim = lifecycle::display_anim();
@@ -847,10 +838,7 @@ where
             DisplayAnim::Happy => "HAPPY",
             DisplayAnim::Idle => "IDLE",
         };
-        let style = TextStyleBuilder::new()
-            .baseline(Baseline::Top)
-            .alignment(Alignment::Right)
-            .build();
+        let style = crate::ui::TOP_RIGHT;
         let _ = Text::with_text_style(
             anim_name,
             Point::new(150, 36),

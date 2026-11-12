@@ -28,7 +28,7 @@ use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 use heapless::format;
 
 use super::contacts::{Contact, ContactStore, FLAG_FAVORITE, MAX_CONTACTS, OUT_PATH_UNKNOWN};
@@ -1022,11 +1022,8 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     let list_top: i32 = ui::TITLE_BAR_H as i32 + 2;
-    let bottom = TextStyleBuilder::new().baseline(Baseline::Bottom).build();
-    let right = TextStyleBuilder::new()
-        .baseline(Baseline::Bottom)
-        .alignment(Alignment::Right)
-        .build();
+    let bottom = crate::ui::BOTTOM_LEFT;
+    let right = crate::ui::BOTTOM_RIGHT;
 
     CACHED_CONTACTS.lock(|c| -> Result<(), D::Error> {
         let list = c.borrow();
@@ -1159,7 +1156,7 @@ where
     .into_styled(PrimitiveStyle::with_fill(WHITE))
     .draw(display)?;
 
-    let bottom = TextStyleBuilder::new().baseline(Baseline::Bottom).build();
+    let bottom = crate::ui::BOTTOM_LEFT;
     let style_bold = ui::TEXT_BOLD_BLACK;
     let style_small = ui::TEXT_BLACK;
 

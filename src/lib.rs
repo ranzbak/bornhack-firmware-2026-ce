@@ -178,7 +178,7 @@ use core::sync::atomic::{AtomicBool, AtomicI8, AtomicU8, AtomicU32};
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 #[cfg(feature = "embassy-core")]
 use heapless::format;
 pub use menu::{DISPLAY_STATE, DisplayState, MenuItem, MenuItemKind, ScreenState, draw_menu};
@@ -812,10 +812,7 @@ where
     if passkey_val == u32::MAX {
         return Ok(());
     }
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
     Rectangle::new(Point::new(20, 48), Size::new(112, 62))
         .into_styled(PrimitiveStyle::with_fill(WHITE))
         .draw(display)?;
@@ -862,7 +859,7 @@ pub fn draw_frame<D>(
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let bottom = TextStyleBuilder::new().baseline(Baseline::Bottom).build();
+    let bottom = crate::ui::BOTTOM_LEFT;
 
     let body_start = if let Some((title, bat_prc)) = header {
         Text::with_text_style(title, Point::new(4, 14), ui::TEXT_BOLD_BLACK, bottom)
@@ -885,10 +882,7 @@ where
             text,
             Point::new(76, footer_y + 5),
             ui::TEXT_BOLD_BLACK,
-            TextStyleBuilder::new()
-                .baseline(Baseline::Middle)
-                .alignment(Alignment::Center)
-                .build(),
+            crate::ui::CENTERED,
         )
         .draw(display)?;
         footer_y - 4
@@ -1143,10 +1137,7 @@ fn draw_screen_lora<D>(display: &mut D, _bat_prc: &u8) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let center = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let center = crate::ui::CENTERED;
     Text::with_text_style(
         "Channels (no mesh)",
         Point::new(76, 76),

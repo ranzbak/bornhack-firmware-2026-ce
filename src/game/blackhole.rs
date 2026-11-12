@@ -18,7 +18,7 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::{BLACK, TriColor, WHITE, ui};
 
@@ -545,10 +545,7 @@ where
     }
 
     // Status line(s).
-    let centred_top = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
+    let centred_top = crate::ui::CENTERED_TOP;
     let footer_font = MonoTextStyle::new(&FONT_6X10, BLACK);
 
     let sa = SCORE_A.load(Ordering::Relaxed);
@@ -637,10 +634,7 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     let style = MonoTextStyle::new(&FONT_6X10, color);
-    let centred = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centred = crate::ui::CENTERED;
     Text::with_text_style(s, p, style, centred).draw(display)?;
     Text::with_text_style(s, Point::new(p.x + 1, p.y), style, centred).draw(display)?;
     Ok(())

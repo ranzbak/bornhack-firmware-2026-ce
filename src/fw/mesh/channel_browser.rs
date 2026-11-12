@@ -14,7 +14,7 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use super::meshcore::truncate_bytes;
 use crate::menu::ButtonId;
@@ -380,10 +380,7 @@ fn draw_ble_connected<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let center = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let center = crate::ui::CENTERED;
     Text::with_text_style("Messages unavailable", Point::new(76, 60), FONT, center)
         .draw(display)?;
     Text::with_text_style("BLE client connected", Point::new(76, 80), FONT, center)
@@ -395,14 +392,8 @@ fn draw_channel_list<D>(display: &mut D, cursor: u8, bat_prc: &u8) -> Result<(),
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let center = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
-    let left = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Left)
-        .build();
+    let center = crate::ui::CENTERED_TOP;
+    let left = crate::ui::TOP_LEFT;
 
     crate::draw_header(display, "Channels", bat_prc)?;
 
@@ -474,14 +465,8 @@ fn draw_channel_view<D>(
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let center = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
-    let left = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Left)
-        .build();
+    let center = crate::ui::CENTERED_TOP;
+    let left = crate::ui::TOP_LEFT;
 
     // Channel name header
     let ch_name = crate::CACHED_CHANNELS.lock(|c| {

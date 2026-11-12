@@ -7,7 +7,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle, Triangle};
-use embedded_graphics::text::{Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::ui::{self, TEXT_BOLD_BLACK};
 use crate::{RED, TriColor, WHITE};
@@ -99,7 +99,7 @@ where
     // Title bar.
     ui::draw_title_bar(display, "Health Status", Point::zero(), 152)?;
 
-    let left = TextStyleBuilder::new().baseline(Baseline::Top).build();
+    let left = crate::ui::TOP_LEFT;
 
     let Some(stats) = super::lifecycle::cycle() else {
         ui::draw_centered_message(display, "No pet yet", Point::new(76, 85))?;
@@ -134,7 +134,7 @@ where
             value,
             Point::new(ROW_X + 100, y),
             value_style,
-            TextStyleBuilder::new().baseline(Baseline::Top).build(),
+            crate::ui::TOP_LEFT,
         )
         .draw(display)?;
 

@@ -23,6 +23,52 @@ use crate::{BLACK, RED, TriColor, WHITE};
 // scattered across the game's render code.  Use the constant rather
 // than re-creating the style at each call site.
 
+// Alignment / baseline pairs.  Named `<horizontal>_<vertical>` for the
+// centred variants and `<vertical>_<horizontal>` for the edge-anchored
+// ones, matching how the call sites read ("centred, top baseline").
+
+/// Centred on both axes (`Alignment::Center` + `Baseline::Middle`).
+pub const CENTERED: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Middle)
+    .alignment(Alignment::Center)
+    .build();
+
+/// Horizontally centred, `Baseline::Top`.
+pub const CENTERED_TOP: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Top)
+    .alignment(Alignment::Center)
+    .build();
+
+/// Horizontally centred, `Baseline::Bottom`.
+pub const CENTERED_BOTTOM: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Bottom)
+    .alignment(Alignment::Center)
+    .build();
+
+/// Left-aligned, `Baseline::Top`.
+pub const TOP_LEFT: TextStyle = TextStyleBuilder::new().baseline(Baseline::Top).build();
+
+/// Right-aligned, `Baseline::Top`.
+pub const TOP_RIGHT: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Top)
+    .alignment(Alignment::Right)
+    .build();
+
+/// Left-aligned, `Baseline::Middle`.
+pub const MIDDLE_LEFT: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Middle)
+    .alignment(Alignment::Left)
+    .build();
+
+/// Left-aligned, `Baseline::Bottom`.
+pub const BOTTOM_LEFT: TextStyle = TextStyleBuilder::new().baseline(Baseline::Bottom).build();
+
+/// Right-aligned, `Baseline::Bottom`.
+pub const BOTTOM_RIGHT: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Bottom)
+    .alignment(Alignment::Right)
+    .build();
+
 /// 7×13 regular weight, drawn in `BLACK` — body text on white.
 pub const TEXT_BLACK: MonoTextStyle<'static, TriColor> = MonoTextStyle::new(&FONT_7X13, BLACK);
 
@@ -66,10 +112,7 @@ where
         .into_styled(PrimitiveStyle::with_fill(BLACK))
         .draw(display)?;
 
-    let style = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let style = CENTERED;
     Text::with_text_style(
         title,
         Point::new(
@@ -121,10 +164,7 @@ pub fn draw_centered_message<D>(display: &mut D, text: &str, pos: Point) -> Resu
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let style = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let style = CENTERED;
     Text::with_text_style(text, pos, TEXT_BLACK, style).draw(display)?;
     Ok(())
 }
@@ -210,10 +250,7 @@ where
     draw_title_bar(display, title, Point::new(inner_x, inner_y), inner_w)?;
 
     let list_y = inner_y + title_h + PADDING_BELOW_TITLE;
-    let left_style = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Left)
-        .build();
+    let left_style = MIDDLE_LEFT;
 
     for (row, label) in items[scroll..end].iter().enumerate() {
         let abs_idx = scroll + row;
