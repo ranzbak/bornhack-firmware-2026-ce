@@ -65,7 +65,14 @@ fn anim_id(anim: DisplayAnim) -> u8 {
 
 // ── Filename generation ──────────────────────────────────────────────────────
 
-const HEX: &[u8; 16] = b"0123456789ABCDEF";
+/// The one 8.3 PCX file-name builder: `"PPAAFF  PCX"`, each of the three
+/// fields as two uppercase hex digits.
+pub const fn pcx_name(pp: u8, aa: u8, ff: u8) -> [u8; 11] {
+    let [p0, p1] = crate::hex::byte_upper(pp);
+    let [a0, a1] = crate::hex::byte_upper(aa);
+    let [f0, f1] = crate::hex::byte_upper(ff);
+    [p0, p1, a0, a1, f0, f1, b' ', b' ', b'P', b'C', b'X']
+}
 
 /// Build the FAT12 8.3 filename for a given pet, animation, and frame.
 ///
@@ -73,20 +80,7 @@ const HEX: &[u8; 16] = b"0123456789ABCDEF";
 pub fn build_filename(kind: PetKind, anim: DisplayAnim, frame: u8) -> [u8; 11] {
     let pp = kind.0;
     let aa = anim_id(anim);
-    let ff = frame;
-    [
-        HEX[(pp >> 4) as usize],
-        HEX[(pp & 0xF) as usize],
-        HEX[(aa >> 4) as usize],
-        HEX[(aa & 0xF) as usize],
-        HEX[(ff >> 4) as usize],
-        HEX[(ff & 0xF) as usize],
-        b' ',
-        b' ',
-        b'P',
-        b'C',
-        b'X',
-    ]
+    pcx_name(pp, aa, frame)
 }
 
 /// Build the FAT12 8.3 filename for the start screen.
@@ -106,19 +100,7 @@ pub const BATTLE_AA_LOST: u8 = 0x22;
 /// `BATTLE_AA_*` codes. Bypasses the `PetKind`/`DisplayAnim` mapping because
 /// battle poses are fixed single frames addressed by raw prefix.
 pub fn battle_filename(pp: u8, aa: u8) -> [u8; 11] {
-    [
-        HEX[(pp >> 4) as usize],
-        HEX[(pp & 0xF) as usize],
-        HEX[(aa >> 4) as usize],
-        HEX[(aa & 0xF) as usize],
-        b'0',
-        b'0',
-        b' ',
-        b' ',
-        b'P',
-        b'C',
-        b'X',
-    ]
+    pcx_name(pp, aa, 0)
 }
 
 /// Eight menu icons live under prefix `0x04`, one sequence per icon:
@@ -146,19 +128,7 @@ pub fn battle_filename(pp: u8, aa: u8) -> [u8; 11] {
 pub fn menu_icon_filename(slot: u8, selected: bool) -> [u8; 11] {
     let aa = slot;
     let ff: u8 = if selected { 1 } else { 0 };
-    [
-        b'0',
-        b'4',
-        HEX[(aa >> 4) as usize],
-        HEX[(aa & 0xF) as usize],
-        HEX[(ff >> 4) as usize],
-        HEX[(ff & 0xF) as usize],
-        b' ',
-        b' ',
-        b'P',
-        b'C',
-        b'X',
-    ]
+    pcx_name(0x04, aa, ff)
 }
 
 /// Number of menu-icon slots (top-row 4 + bottom-row 4).
@@ -199,13 +169,7 @@ pub fn anim_id_for(anim: DisplayAnim) -> u8 {
 pub fn frame_count(kind: PetKind, anim: DisplayAnim) -> u8 {
     let pp = kind.0;
     let aa = anim_id(anim);
-    let prefix = [
-        HEX[(pp >> 4) as usize],
-        HEX[(pp & 0xF) as usize],
-        HEX[(aa >> 4) as usize],
-        HEX[(aa & 0xF) as usize],
-    ];
-    super::super::sprite_loader::count_anim_frames(&prefix)
+    super::super::sprite_loader::count_anim_frames(pp, aa)
 }
 
 /// Get the 8.3 filename for animation `anim` at frame `frame_index`.
@@ -215,4 +179,23 @@ pub fn anim_filename(kind: PetKind, anim: DisplayAnim, frame_index: u8) -> [u8; 
     let count = frame_count(kind, anim);
     let frame = if count > 0 { frame_index % count } else { 0 };
     build_filename(kind, anim, frame)
+}
+
+#[cfg(test)]
+mod pcx_name_tests {
+    use super::*;
+
+    #[test]
+    fn builds_uppercase_8_3_names() {
+        assert_eq!(pcx_name(0x05, 0x1A, 0x0F), *b"051A0F  PCX");
+        assert_eq!(pcx_name(0, 0, 0), *b"000000  PCX");
+        assert_eq!(start_screen_filename(), pcx_name(0, 0, 0));
+    }
+
+    #[test]
+    fn wrappers_match() {
+        assert_eq!(battle_filename(0x05, BATTLE_AA_WON), *b"052100  PCX");
+        assert_eq!(menu_icon_filename(7, true), *b"040701  PCX");
+        assert_eq!(menu_icon_filename(2, false), *b"040200  PCX");
+    }
 }

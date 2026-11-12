@@ -156,47 +156,30 @@ pub fn frame_count() -> u8 {
 }
 
 /// Count the contiguous run of frames available for an animation,
-/// starting at frame `00`.  `prefix` is the 4-byte `PPAA` portion of
-/// the FAT12 8.3 filename.
+/// starting at frame `00`.  `pp` / `aa` are the pet-prefix and animation
+/// bytes of the `PPAAFF` FAT12 8.3 filename.
 ///
 /// Firmware: read directly from the `ANIM_PRESENCE` bitmap built at
 /// boot.  Simulator: probes `assets/to-badge/` directly.
 ///
 /// Frame `00` missing → returns 0 (no animation available).
-pub fn count_anim_frames(prefix: &[u8; 4]) -> u8 {
+pub fn count_anim_frames(pp: u8, aa: u8) -> u8 {
     #[cfg(feature = "embassy-core")]
     {
-        let pp = match parse_hex_pair(prefix[0], prefix[1]) {
-            Some(v) if (v as usize) < PP_MAX => v as usize,
-            _ => return 0,
-        };
-        let aa = match parse_hex_pair(prefix[2], prefix[3]) {
-            Some(v) if (v as usize) < AA_MAX => v as usize,
-            _ => return 0,
-        };
+        let (pp, aa) = (pp as usize, aa as usize);
+        if pp >= PP_MAX || aa >= AA_MAX {
+            return 0;
+        }
         let bitmap = ANIM_PRESENCE[pp][aa].load(core::sync::atomic::Ordering::Relaxed);
         bitmap.trailing_ones().min(FF_MAX as u32) as u8
     }
     #[cfg(all(feature = "simulator", not(feature = "embassy-core")))]
     {
-        const HEX_DIGITS: &[u8; 16] = b"0123456789ABCDEF";
         const MAX_ANIM_FRAMES: u8 = 32;
         use std::path::Path;
         let mut count = 0u8;
         while count < MAX_ANIM_FRAMES {
-            let name: [u8; 11] = [
-                prefix[0],
-                prefix[1],
-                prefix[2],
-                prefix[3],
-                HEX_DIGITS[(count >> 4) as usize],
-                HEX_DIGITS[(count & 0xF) as usize],
-                b' ',
-                b' ',
-                b'P',
-                b'C',
-                b'X',
-            ];
+            let name = super::engine::anim_files::pcx_name(pp, aa, count);
             let path = std::format!("{}{}", SIM_ASSET_DIR, fat_name_to_dotted(&name));
             if !Path::new(&path).exists() {
                 break;
@@ -207,7 +190,7 @@ pub fn count_anim_frames(prefix: &[u8; 4]) -> u8 {
     }
     #[cfg(not(any(feature = "embassy-core", feature = "simulator")))]
     {
-        let _ = prefix;
+        let _ = (pp, aa);
         0
     }
 }
