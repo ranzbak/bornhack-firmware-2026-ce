@@ -58,6 +58,7 @@ macro_rules! atomic_stepper {
             }
         }
 
+        #[allow(unused_comparisons)] // `min = 0` on an unsigned atomic
         fn $dec() {
             let v = $atomic.load(Ordering::Relaxed);
             if let Some(n) = v.checked_sub($step).filter(|&n| n >= $min) {
@@ -895,29 +896,23 @@ fn label_path_hash() -> &'static str {
     "Path Hash: 1B"
 }
 
-fn action_path_hash_inc() {
-    #[cfg(feature = "mesh")]
-    {
-        let v = crate::fw::mesh::PATH_HASH_MODE.load(Ordering::Relaxed);
-        if v < 2 {
-            crate::fw::mesh::PATH_HASH_MODE.store(v + 1, Ordering::Relaxed);
-            #[cfg(feature = "embassy-core")]
-            crate::PATH_HASH_CHANGED_SIGNAL.signal(());
-        }
-    }
-}
+#[cfg(feature = "mesh")]
+atomic_stepper!(
+    action_path_hash_inc,
+    action_path_hash_dec,
+    crate::fw::mesh::PATH_HASH_MODE,
+    min = 0,
+    max = 2,
+    step = 1,
+    signal = crate::PATH_HASH_CHANGED_SIGNAL,
+    cfg = feature = "embassy-core"
+);
 
-fn action_path_hash_dec() {
-    #[cfg(feature = "mesh")]
-    {
-        let v = crate::fw::mesh::PATH_HASH_MODE.load(Ordering::Relaxed);
-        if v > 0 {
-            crate::fw::mesh::PATH_HASH_MODE.store(v - 1, Ordering::Relaxed);
-            #[cfg(feature = "embassy-core")]
-            crate::PATH_HASH_CHANGED_SIGNAL.signal(());
-        }
-    }
-}
+#[cfg(not(feature = "mesh"))]
+fn action_path_hash_inc() {}
+
+#[cfg(not(feature = "mesh"))]
+fn action_path_hash_dec() {}
 
 // ── EPD LUT speed stepper ─────────────────────────────────────────────────
 //
