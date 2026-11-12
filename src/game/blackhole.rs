@@ -628,10 +628,9 @@ where
     Ok(())
 }
 
-/// Render a number with a fake-bold effect (FONT_6X10 has no bold
-/// variant in `mono_font::ascii`).  Draws the digit twice, second pass
-/// shifted 1 px right, so vertical strokes thicken — easier to read on
-/// a low-contrast EPD.
+/// Render a number in FONT_6X10 with the shared fake-bold effect
+/// ([`crate::ui::draw_text_fake_bold`]) — easier to read on a
+/// low-contrast EPD.
 fn draw_bold_number<D>(display: &mut D, s: &str, p: Point, color: TriColor) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
@@ -641,7 +640,5 @@ where
         .baseline(Baseline::Middle)
         .alignment(Alignment::Center)
         .build();
-    Text::with_text_style(s, p, style, centred).draw(display)?;
-    Text::with_text_style(s, Point::new(p.x + 1, p.y), style, centred).draw(display)?;
-    Ok(())
+    crate::ui::draw_text_fake_bold(display, s, p, style, centred)
 }

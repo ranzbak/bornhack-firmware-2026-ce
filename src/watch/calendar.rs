@@ -35,45 +35,14 @@ use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::mono_font::iso_8859_1::{FONT_6X13_BOLD, FONT_7X13_BOLD};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyle, TextStyleBuilder};
-
-// ───────────────────────────────────────────────────────────────────────────
-// Fake-bold helper
-// ───────────────────────────────────────────────────────────────────────────
-//
-// embedded-graphics' iso_8859_1 catalogue stops at FONT_6X13_BOLD — there is
-// no FONT_6X10_BOLD.  Going up to 6×13 would force the calendar grid layout
-// to grow by 3 px per row; bumping COL_W is similarly disruptive elsewhere.
-// Instead, draw every 6×10 glyph twice — once at the requested point, once
-// at point.x + 1 — which doubles the stroke width without changing layout.
-// On the e-ink panel that's the difference between a 1-pixel-thin stroke and
-// a 2-pixel one, which is the readability win we're after.
-fn draw_bold<D>(
-    display: &mut D,
-    text: &str,
-    position: Point,
-    character_style: MonoTextStyle<'_, TriColor>,
-    text_style: TextStyle,
-) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = TriColor>,
-{
-    Text::with_text_style(text, position, character_style, text_style).draw(display)?;
-    Text::with_text_style(
-        text,
-        Point::new(position.x + 1, position.y),
-        character_style,
-        text_style,
-    )
-    .draw(display)?;
-    Ok(())
-}
+use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
 
 use super::alarm::{
     N_ALARMS, alarm_day_n, alarm_enabled_n, alarm_end_hour_n, alarm_end_minute_n, alarm_hour_n,
     alarm_is_one_shot_n, alarm_minute_n, alarm_month_n, alarm_summary_n, alarm_year_n,
 };
 use crate::menu::ButtonId;
+use crate::ui;
 use crate::{BLACK, RED, TriColor, WHITE, draw_frame};
 
 // ── State ───────────────────────────────────────────────────────────────────
@@ -456,7 +425,7 @@ where
     let weekday_style = MonoTextStyle::new(&FONT_6X10, BLACK);
     for (col, name) in DAY_NAMES_SHORT.iter().enumerate() {
         let cx = GRID_LEFT_X + col as i32 * COL_W + COL_W / 2;
-        draw_bold(
+        ui::draw_text_fake_bold(
             display,
             name,
             Point::new(cx, WEEKDAY_STRIP_Y),
@@ -502,7 +471,7 @@ where
                 let fg = if is_today { WHITE } else { BLACK };
                 let mut nbuf: heapless::String<3> = heapless::String::new();
                 let _ = core::fmt::write(&mut nbuf, format_args!("{}", cell_date.2));
-                draw_bold(
+                ui::draw_text_fake_bold(
                     display,
                     &nbuf,
                     Point::new(cell_x + COL_W / 2, cell_y + ROW_H / 2 + 1),
@@ -544,7 +513,7 @@ where
         .alignment(Alignment::Left)
         .build();
     if cursor_evs.is_empty() {
-        draw_bold(
+        ui::draw_text_fake_bold(
             display,
             "(no events)",
             Point::new(76, FOOTER_Y),
@@ -559,7 +528,7 @@ where
             &mut row,
             format_args!("{:02}:{:02} {}", ev0.hour, ev0.minute, summary.as_str()),
         );
-        draw_bold(
+        ui::draw_text_fake_bold(
             display,
             &row,
             Point::new(4, FOOTER_Y),
@@ -570,7 +539,7 @@ where
         if cursor_evs.len() > 1 {
             let mut more: heapless::String<24> = heapless::String::new();
             let _ = core::fmt::write(&mut more, format_args!("+ {} more", cursor_evs.len() - 1));
-            draw_bold(
+            ui::draw_text_fake_bold(
                 display,
                 &more,
                 Point::new(4, FOOTER_Y_2),
@@ -845,10 +814,10 @@ where
         .iter()
         .any(|ev| (ev.hour as i32 * 60 + ev.minute as i32) >= (tl_start_hour + HOURS_VISIBLE) * 60);
     if above {
-        draw_bold(display, "^", Point::new(146, TL_TOP_Y + 4), arrow_style, centered)?;
+        ui::draw_text_fake_bold(display, "^", Point::new(146, TL_TOP_Y + 4), arrow_style, centered)?;
     }
     if below {
-        draw_bold(display, "v", Point::new(146, TL_BOT_Y - 4), arrow_style, centered)?;
+        ui::draw_text_fake_bold(display, "v", Point::new(146, TL_BOT_Y - 4), arrow_style, centered)?;
     }
 
     if day_evs.is_empty() {
@@ -971,10 +940,10 @@ where
     // v if rows hidden below.
     let arrow_style = MonoTextStyle::new(&FONT_6X10, BLACK);
     if scroll > 0 {
-        draw_bold(display, "^", Point::new(146, ROW_TOP_Y + 4), arrow_style, centered)?;
+        ui::draw_text_fake_bold(display, "^", Point::new(146, ROW_TOP_Y + 4), arrow_style, centered)?;
     }
     if (scroll + ROWS_VISIBLE) < day_evs.len() as i32 {
-        draw_bold(display, "v", Point::new(146, ROW_BOT_Y - 4), arrow_style, centered)?;
+        ui::draw_text_fake_bold(display, "v", Point::new(146, ROW_BOT_Y - 4), arrow_style, centered)?;
     }
 
     Ok(())

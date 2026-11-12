@@ -111,6 +111,38 @@ where
 }
 
 // ---------------------------------------------------------------------------
+// Fake-bold text
+// ---------------------------------------------------------------------------
+
+/// Draw `text` with a fake-bold effect for fonts that have no bold
+/// variant (e.g. the 6×10 face — embedded-graphics' `iso_8859_1`
+/// catalogue stops at `FONT_6X13_BOLD`, and moving up to 6×13 would
+/// disturb the layouts built around the 6×10 cell).  The text is drawn
+/// twice, the second pass shifted 1 px right, which doubles the vertical
+/// stroke width without changing layout — the difference between a 1 px
+/// and a 2 px stroke on the e-ink panel.
+pub fn draw_text_fake_bold<D>(
+    display: &mut D,
+    text: &str,
+    position: Point,
+    character_style: MonoTextStyle<'_, TriColor>,
+    text_style: TextStyle,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    Text::with_text_style(text, position, character_style, text_style).draw(display)?;
+    Text::with_text_style(
+        text,
+        Point::new(position.x + 1, position.y),
+        character_style,
+        text_style,
+    )
+    .draw(display)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // "No data" placeholder
 // ---------------------------------------------------------------------------
 
