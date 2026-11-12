@@ -1073,6 +1073,25 @@ async fn display_loop_1680<D>(
     let mut last_anim_id: u8 = 0xFF;
 
     loop {
+        // ── Battle animation takeover ──────────────────────────────────
+        // Same two-stage takeover as the SSD1675 loop: standing, then the
+        // won/lost poses, each one uninterrupted refresh held ~5 s, before the
+        // screen underneath (the battle result card) is drawn again.
+        #[cfg(feature = "game")]
+        if bornhack_aegg::game::battle_anim_active() {
+            for stage in [
+                bornhack_aegg::game::BattleStage::Standing,
+                bornhack_aegg::game::BattleStage::Result,
+            ] {
+                let _ = display.clear(bornhack_aegg::color::EpdColor::White);
+                bornhack_aegg::game::battle_view::render_anim(display, stage).await;
+                let _ = display.refresh(RefreshMode::Fast).await;
+                Timer::after_millis(5_000).await;
+            }
+            bornhack_aegg::game::clear_battle_anim();
+            continue;
+        }
+
         let _ = display.clear(bornhack_aegg::color::EpdColor::White);
         let active_screen = DISPLAY_STATE.lock(|f| f.borrow().active_screen());
 

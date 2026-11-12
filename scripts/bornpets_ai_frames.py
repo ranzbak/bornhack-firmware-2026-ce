@@ -90,12 +90,22 @@ def anchor_path(work: Path) -> Path:
 # its own read on the same action, so the badger does too.
 BADGER_IDENTITY = (
     "IMAGE 1 is the CHARACTER SHEET for this game's badger pet. It defines who "
-    "the character is and must be reproduced exactly: the round white head, the "
-    "two black stripes running from beside the nose up through each eye to the "
-    "top of the head, the white centre blaze between them, the white cheeks, "
-    "the small rounded ears, the small black snout, the small black dot eyes, "
-    "the white body, the red paw pads, and the line weight. Anyone must "
-    "recognise it as the same badger in every frame."
+    "the character is and must be reproduced exactly: a kawaii chibi European "
+    "badger with an oversized white head that tapers to a pointed muzzle with a "
+    "small black nose; two broad BLACK STRIPES that start beside the nose, run "
+    "up over each eye and continue back over the crown to the ears, with a "
+    "white blaze between them and white cheeks outside them; big round shiny "
+    "eyes inside the stripes, each ringed in white with a white highlight dot; "
+    "plain white cheeks with NO red blush - nothing red on the face; small "
+    "rounded black ears with white "
+    "rims; a stocky SOLID BLACK body and short legs with a WHITE belly patch; "
+    "a short bushy tail; and the line weight. The EYES always sit INSIDE the "
+    "black stripes and must always be visible there: an open eye has a white "
+    "ring around its black pupil, and a closed, squinting or sleeping eye is "
+    "drawn as a bold WHITE curved line or white X on the black stripe - never "
+    "black on black, and never moved out onto the white cheeks. It must never look like a panda: "
+    "no round black eye patches, no white body. Anyone must recognise it as "
+    "the same badger in every frame."
 )
 
 BADGER_FREEDOM = (
@@ -132,7 +142,9 @@ STYLE_TEMPLATE = (
     "{markings}, and small details. Any "
     "black shape bigger than a few pixels across is wrong - a black night sky, a "
     "black patch of ground or a black floor mat ruins the sprite. Do not add "
-    "dithering, stippling, speckles or scattered dots anywhere.\n\n"
+    "dithering, stippling, speckles or scattered dots anywhere. This rule is "
+    "about scenery and props; a black area the character sheet itself has is "
+    "part of the character and stays black.\n\n"
     "Compose for a WIDE LANDSCAPE frame and use the full width of the canvas - "
     "the {pet} does not have to be centred, and props may sit to its left or "
     "right, but leave no large empty margins."
@@ -147,40 +159,41 @@ def style() -> str:
 # ACTION, not a pose to copy; the model stages each one itself.
 BADGER_POSES: dict[str, str] = {
     "badger_idle_0": "Idle. The badger sits upright facing the viewer, calm and content, front paws resting in front of it.",
-    "badger_happy_0": "Delighted. The badger beams, paws up in celebration, with two or three bold chunky red hearts popping around it.",
-    "badger_happy_1": "Delighted, second animation frame: the badger bounces higher with an even bigger grin, hearts scattered on the other side.",
-    "badger_critical_sick_0": "Gravely ill. The badger sits facing the viewer with its eyes screwed shut, a red ice pack balanced on its head and a thermometer sticking out of its mouth. Nothing else in the frame.",
-    "badger_critical_sick_1": "Gravely ill, second animation frame: the same sitting badger shivers, the ice pack slides off its head, and a small bold red thermometer reading spikes beside it.",
-    "badger_critical_tired_0": "Utterly exhausted. The badger sits slumped forward, chin resting on its own paws, tongue lolling out and eyes shut, too tired to move. Nothing else in the frame.",
+    "badger_happy_0": "Delighted, at its own little party. The badger beams, paws up in celebration. Above it hangs a string of bunting - little triangle flags alternating SOLID RED and white - and a few bold red hearts and chunky confetti squares pop around it.",
+    "badger_happy_1": "Delighted, second animation frame: the badger bounces higher with an even bigger grin under the SAME red-and-white bunting from the previous frame, the hearts and confetti scattered to the other side.",
+    "badger_critical_sick_0": "Gravely ill. The badger sits facing the viewer with its eyes screwed shut - each shut eye a bold WHITE squiggle on its black stripe so it shows clearly - a red ice pack balanced on its head and a thermometer sticking out of its mouth. Nothing else in the frame.",
+    "badger_critical_sick_1": "Gravely ill, second animation frame: the same sitting badger shivers, eyes screwed shut as white squiggles on its black stripes. The SAME SOLID RED ice pack from the previous frame is sliding off its head. A thermometer sticks out of the corner of its MOUTH, with a bold red bulb at the end. A few small shiver lines beside it. Nothing else in the frame.",
+    "badger_critical_tired_0": "Utterly exhausted and SLEEPY - not sad, not crying, not depressed. The badger sits slumped, swaying on the spot, mouth wide open in a huge yawn, heavy drooping eyelids drawn as white lines on its black stripes, one paw propping up its heavy head. A single Z floats beside it. Nothing else in the frame.",
     "badger_critical_hungry_0": "Starving. The badger stares mournfully into a completely empty food bowl, ribs showing, a thought bubble full of fat red earthworms above it.",
-    "badger_critical_hungry_1": "Starving, second animation frame: the badger paws desperately at the empty bowl with a huge bold red exclamation mark beside its head.",
+    "badger_critical_hungry_1": "Starving, second animation frame: the badger paws desperately at the empty bowl with a huge bold red exclamation mark beside its head. The bowl is the SAME as in the previous frame: a plain round WHITE bowl with a thick black outline and one black paw print on its front, completely empty.",
     "badger_critical_drained_0": "Completely out of energy. The badger droops like a deflated balloon, eyes half shut, with a big red battery icon showing empty next to it.",
-    "badger_critical_drained_1": "Completely out of energy, second animation frame: the badger has flopped onto its side, limbs splayed, the empty red battery icon flashing.",
+    "badger_critical_drained_1": "Completely out of energy, second animation frame: the badger has flopped down onto its tummy, chin resting on the ground, eyes drowsily half open as white lines, a small weary sigh puff by its nose - exhausted but clearly ALIVE, not dead: no X eyes, no tongue hanging out, not on its back. The SAME empty red battery icon from the previous frame flashes beside it.",
     "badger_warning_sick_0": "Coming down with something. The badger sits wrapped in a small blanket, red-nosed, sneezing into a tissue.",
     # These three are normally produced together by `strip badger_tired`, which
     # draws the whole cycle in one image so the frames match each other. The
     # briefs below exist so a single frame can still be regenerated on its own.
     "badger_warning_tired_0": "Sleepy. The badger yawns hugely, one paw rubbing an eye, a nightcap slipping down over its ear.",
     "badger_warning_tired_1": "Sleepy, second animation frame: the badger's head has nodded forward, eyes half shut, the nightcap slid further down over one ear.",
-    "badger_warning_tired_2": "Sleepy, third animation frame: the badger's head has drooped right down, eyes fully closed, nightcap flopped over, two white Z's rising to one side.",
+    "badger_warning_tired_2": "Sleepy, third animation frame: the badger is STILL SITTING UPRIGHT and still awake, just barely - fighting to stay awake. Its head nods heavily forward, eyelids drooping almost shut as white lines on its black stripes, the SAME solid red nightcap from the previous frame slipping down over one eye, one small Z beside it. It is tired, NOT asleep: not lying down, no pillow.",
     "badger_warning_hungry_0": "Peckish. The badger looks hopefully at the viewer, one paw on a rumbling belly, a thought bubble with a single red earthworm.",
-    "badger_warning_hungry_1": "Peckish, second animation frame: the badger licks its lips and points at the empty bowl, thought bubble now holding a whole bowl of red worms.",
+    "badger_warning_hungry_1": "Peckish, second animation frame: the badger licks its lips and points at its empty bowl - a plain round WHITE bowl with a thick black outline and one black paw print on its front - while its thought bubble now holds a whole bowl of red worms.",
     "badger_warning_drained_0": "Running low. The badger slumps forward with heavy eyelids, a half-empty red battery icon beside it.",
-    "badger_warning_drained_1": "Running low, second animation frame: the badger sags further, propping itself up on one wobbling paw.",
+    "badger_warning_drained_1": "Running low, second animation frame: the badger sags further, propping itself up on one wobbling paw, eyelids heavy. Beside it is ONLY the SAME half-empty red battery icon from the previous frame - no worms, no speech bubbles, no other creatures or objects.",
     "badger_warning_miserable_0": "Thoroughly miserable. The badger sits hunched and scowling under its own small rain cloud, ears flat.",
-    "badger_feeding_0": "Feeding. The badger tucks happily into a big bowl heaped with fat red earthworms, cheeks bulging, worms dangling from its mouth.",
-    "badger_feeding_1": "Feeding, second animation frame: the bowl is licked clean, the badger sits back with a full round belly and a satisfied grin.",
+    "badger_feeding_0": "Feeding. The badger tucks happily into a big bowl heaped with fat red earthworms, cheeks bulging, worms dangling from its mouth. The bowl is a plain round WHITE bowl with a thick black outline and one black paw print on its front.",
+    "badger_feeding_1": "Feeding, second animation frame: the meal is finished. The badger sits back with a full round belly and a satisfied grin, eyes closed happily. Beside it stands the SAME bowl as in the previous frame - the plain round white bowl with the black paw print on its front - now licked completely clean and EMPTY. Same bowl shape and decoration, no hearts on it.",
     "badger_healing_0": "Being healed. The badger perks up as a bold red medical cross glows above it, a bandage wrapped round one paw.",
     "badger_healing_1": "Being healed, second animation frame: the badger flexes the newly bandaged paw proudly, the red cross drifting off to one side.",
-    "badger_relaxing_0": "Relaxing. The badger lounges back in a red-and-white striped deck chair, paws behind its head, thoroughly at ease. Nothing else in the frame.",
-    "badger_relaxing_1": "Relaxing, second animation frame: still in the deck chair, sipping a drink, with a couple of bold red hearts floating up.",
-    "badger_relaxing_2": "Relaxing, third animation frame: the badger has slid down the deck chair half asleep, one paw trailing on the ground.",
-    "badger_playing_0": "Playing. The badger's head and face are fully visible and unobstructed, grinning with delight. It bats a bold red ball that flies off to ONE SIDE of its head, clearly clear of the face - the ball must never cover or overlap the head. Motion ticks trail behind the ball. No ground, no scattered soil.",
-    "badger_sleeping_0": "Fast asleep sitting up. The badger sits upright facing the viewer, head tipped forward and drooping, eyes closed as two curved lines, both head stripes clearly visible, three white Z's rising to one side. Nothing else in the frame.",
-    "badger_sleeping_1": "Fast asleep sitting up, second animation frame: the same seated badger has slumped a little further forward, a round white snoring bubble growing at its snout, the Z's drifting higher. Nothing else in the frame.",
-    "badger_sleeping_2": "Fast asleep sitting up, third animation frame: the same seated badger jolts slightly as the snoring bubble pops, head still drooping and eyes closed. Nothing else in the frame.",
+    "badger_relaxing_0": "Relaxing on holiday. The badger lounges back in a deck chair whose fabric has bold SOLID RED and white stripes, paws behind its head, thoroughly at ease. Beside the chair stands a small palm tree with white leaves outlined in black. Nothing else in the frame.",
+    "badger_relaxing_1": "Relaxing on holiday, second animation frame: still in the SAME deck chair - its fabric keeps the bold SOLID RED and white stripes - now sipping a drink through a straw, a couple of bold red hearts floating up. The SAME small palm tree stands beside the chair.",
+    "badger_relaxing_2": "Relaxing on holiday, third animation frame: the drink is finished and the badger has slid far down the SAME deck chair, dozing with eyes closed, one paw trailing on the ground. The chair fabric keeps its bold SOLID RED and white stripes, and the SAME small palm tree stands beside it.",
+    "badger_playing_0": "Playing tennis. The badger swings a tennis racket with a bold red frame, mid-stroke, grinning with delight, its face fully visible. A small white tennis ball with a black outline flies off to one side, clear of the face, with motion ticks behind it. No net, no court, no ground.",
+    "badger_playing_1": "Skateboarding. The badger rides a skateboard with a bold solid red deck and white wheels, arms out for balance, mid-ollie with the board just off the ground, grinning with delight. A few motion ticks behind it. No ramp, no ground.",
+    "badger_sleeping_0": "Fast asleep at last, continuing the tired animation: the badger lies curled up with its head resting on a small white pillow, eyes closed as white curved lines, the SAME solid red nightcap from the tired frames flopped over one ear, two Z's rising - white letters with a thick black outline. Nothing else in the frame.",
+    "badger_sleeping_1": "Fast asleep, second animation frame: the SAME badger on the SAME small white pillow, in the SAME solid red nightcap, has snuggled deeper into the pillow with a content little smile, eyes closed as white curved lines, the Z's drifting higher. NO bubble at its mouth or nose. Nothing else in the frame.",
+    "badger_sleeping_2": "Fast asleep, third animation frame: the SAME badger, pillow and solid red nightcap, now hugging the pillow with both front paws, eyes closed as white curved lines, one Z floating away. NO bubble at its mouth or nose. Nothing else in the frame.",
     "badger_leaving_0": "Leaving. The badger stands facing the viewer waving goodbye with one paw, a small bindle on a stick over its shoulder. Nothing else in the frame.",
-    "badger_leaving_1": "Leaving, second animation frame: the badger has turned around and is walking away from the viewer, seen from BEHIND. Its back is towards us, so draw the back of its head with the two black stripes running up over the top of the skull between the ears, a short upright tail, and its rear paws mid-stride. The back is white with the black stripes continuing over the crown - not a blank white shape. It must read clearly as a badger walking off. Nothing else in the frame.",
+    "badger_leaving_1": "Leaving, second animation frame: the badger has turned around and is walking away from the viewer, seen from BEHIND, still carrying the SAME bindle on a stick from the previous frame over its shoulder - the knapsack bundle hangs clearly visible behind its head. Its back is towards us, so draw the back of its head with the two black stripes running up over the top of the skull between the ears and the white blaze between them, its solid black back, a short bushy tail, and its rear paws mid-stride. It must read clearly as a badger walking off. Nothing else in the frame.",
     # "almost entirely empty" was read as licence to draw the badger anyway, so the absence is now the subject: a burrow up for rent, tenant long gone.
     # The badger kept turning up in "an almost empty frame", and a "dark burrow hole" is invisible on a transparent background, so the mound has to be the white
     # shape and the tunnel the black one.
@@ -198,16 +211,36 @@ BADGER_POSES: dict[str, str] = {
     # Spiral "dizzy" eyes reliably displaced the head stripes - the model drew one or the other, never both - so this frame uses X-shaped KO eyes instead.
     "battle_badger_lost_0": "Square battle portrait showing the badger's whole body, not a close-up. Head markings exactly as on the character sheet: two thick BLACK STRIPES running from beside the nose up through each eye to the top of the head, a white blaze between them, white cheeks outside them. Each eye is a small white X knocked out of the black stripe. This badger has just lost a fight: it sits slumped, tongue out, red headband askew, three bold red stars circling above. Nothing else in the frame.",
     "badger_exercising_0": "Working out. In a bold red headband, the badger does a press-up, body angled and tongue out with effort. No mat, no floor.",
-    "badger_exercising_1": "Working out, second animation frame: the badger is at the top of the press-up, or lifting a chunky dumbbell overhead, sweat drops flying.",
+    "badger_exercising_1": "Working out, second animation frame: in the SAME bold red headband, the badger does bicep curls, a SMALL chunky dumbbell gripped firmly in EACH front paw, elbows bent so the dumbbells sit at shoulder height right in its paws - never floating above it. A few sweat drops fly. No worms, no mat, no floor, nothing else.",
     "badger_medicating_0": "Taking its medicine. The badger eyes a big red pill warily, holding it at arm's length.",
     "badger_medicating_1": "Taking its medicine, second animation frame: the badger swallows the pill with a grimace and a red cross puffs above its head.",
-    "badger_drinking_0": "Drinking. The badger tips a large bottle up and glugs from it, throat working, a few drops flying.",
+    "badger_drinking_0": "Tipsy. The badger has had one too many: it sways on wobbly legs, leaning at an angle, clutching a big bottle in one paw. Wonky half-lidded eyes drawn as white lines on its black stripes, a goofy lopsided grin, a 'HIC!' in chunky black pixel letters beside its head and a few small bubbles floating up. Nothing else in the frame.",
     "badger_ozempic_0": "Comically shrunken. The badger has become absurdly skinny and gaunt, holding an oversized red syringe, its skin hanging loose.",
     "badger_rehab_0": "In rehab. The badger sits sheepishly on a small stool clutching a red pill bottle, looking guilty.",
     "badger_rehab_1": "In rehab, second animation frame: the badger throws the red pill bottle away with a determined look, sparkles around it.",
     # Keep this one plain: the earlier life-drawing gag tripped the image API's
     # output moderation as sexual content. The joke lives in the sign text.
-    "badger_onlypets_0": "Hamming it up for the camera. The badger sits proudly beaming at a small camera on a tripod, one paw raised in a wave, holding up a sign board with black pixel text reading 'TIP ME IN WORMS'. Nothing else in the frame.",
+    "badger_onlypets_0": "A cheesy OnlyFans-style parody called ONLYPETS, kept cute and family-friendly. The badger strikes an over-the-top glamour pose, lounging on its side on a small heart-shaped cushion, chin on one paw, a red rose clamped in its mouth, heart-shaped sunglasses pushed up on its head, batting its eyes at a phone on a tripod. A round ring light stands beside it. A small sign reads ONLYPETS in black pixel capitals with a bold red heart. Nothing else in the frame.",
+}
+
+
+# Frames that must reuse a prop from an earlier frame get it as a second
+# reference (see CONTINUITY).
+BADGER_CONTINUES = {
+    "badger_critical_drained_1": "badger_critical_drained_0",
+    "badger_critical_hungry_1": "badger_critical_hungry_0",
+    "badger_critical_sick_1": "badger_critical_sick_0",
+    "badger_happy_1": "badger_happy_0",
+    "badger_sleeping_0": "badger_warning_tired_1",
+    "badger_sleeping_1": "badger_sleeping_0",
+    "badger_sleeping_2": "badger_sleeping_1",
+    "badger_exercising_1": "badger_exercising_0",
+    "badger_warning_drained_1": "badger_warning_drained_0",
+    "badger_warning_tired_2": "badger_warning_tired_1",
+    "badger_feeding_1": "badger_feeding_0",
+    "badger_leaving_1": "badger_leaving_0",
+    "badger_relaxing_1": "badger_relaxing_0",
+    "badger_relaxing_2": "badger_relaxing_1",
 }
 
 
@@ -295,25 +328,39 @@ def strip_prompt(key: str) -> str:
 
 
 def badger_anchor_prompt() -> str:
-    """Prompt for the one hand-approved frame every other frame references."""
+    """Prompt for the one hand-approved frame every other frame references.
+
+    The first badger was the panda frame re-marked, and it kept the panda's
+    round head and white body, so it read as a panda. This one is drawn fresh:
+    the panda frame (image 1) is only a style reference, and `anchor --ref`
+    adds badger reference art (images 2+) for the anatomy.
+    """
     return (
-        "Edit this pixel-art virtual-pet sprite. It currently shows a white "
-        "panda.\n\n"
-        "Change ONLY the face and ear markings so the animal reads as a EUROPEAN "
-        "BADGER (Meles meles) instead of a panda:\n"
-        "- Replace the two big round black eye patches with TWO BLACK STRIPES. "
-        "Each stripe starts beside the nose, runs up through the eye and "
-        "continues to the top of the head, so the head shows a white centre "
-        "blaze between the two stripes and a white cheek outside each stripe.\n"
-        "- The stripes stay INSIDE the head: leave an unbroken SOLID WHITE rim "
-        "around the entire outside edge of the head, so the head still reads as "
-        "one complete white shape.\n"
-        "- The eyes are small black dots sitting inside those stripes.\n"
-        "- Make the ears small, low and rounded, filled white.\n"
-        "- Give it a small black snout at the bottom of the white centre blaze, "
-        "with a narrower, more pointed muzzle than a panda's.\n\n"
-        "Keep EVERYTHING else pixel-for-pixel as it is: the same solid white "
-        "head and body, silhouette, pose, size, placement and red paw pads.\n\n"
+        "IMAGE 1 is a sprite from a pixel-art virtual-pet game, showing a "
+        "panda. Use it ONLY as a style reference - its line weight, pixel "
+        "scale, chunky outlines and small red accents. Do NOT draw a panda or "
+        "anything panda-like. Any further images are reference drawings of a "
+        "cartoon badger: follow them for the animal's anatomy and markings, "
+        "not for their grey shading.\n\n"
+        "Draw this game's badger pet as a cute KAWAII chibi European badger "
+        "(Meles meles), standing upright on its hind legs facing the viewer:\n"
+        "- An oversized head, wide at the top and tapering to a POINTED muzzle "
+        "with a small black nose at the tip - a wedge, not a round panda face.\n"
+        "- Two broad BLACK STRIPES, one each side: each starts beside the nose, "
+        "runs up over the eye and continues back over the top of the head to "
+        "the ear. A white blaze runs between them from the nose to the crown; "
+        "the cheeks outside them are white.\n"
+        "- Big round shiny eyes sitting inside the black stripes, each ringed "
+        "in white so it shows, with a white highlight dot.\n"
+        "- A tiny happy smile. Plain white cheeks: NO red blush, nothing red "
+        "on the face - real badgers have none.\n"
+        "- Small rounded BLACK ears with a white rim, set on the sides of the "
+        "head where the stripes end.\n"
+        "- A stocky body and short legs filled SOLID BLACK, with a WHITE belly "
+        "patch down the front.\n"
+        "- A short bushy tail poking out to one side.\n"
+        "- Idle and content, front paws relaxed.\n"
+        "Nothing else in the frame.\n\n"
         f"{style()}"
     )
 
@@ -601,15 +648,14 @@ SEASTAR_CONTINUES: dict[str, str] = {
 PROFILES: dict[str, dict] = {
     "badger": {
         "noun": "badger",
-        "markings": "the badger's two head stripes, its eyes and snout",
+        "markings": "the badger's two head stripes, its ears, eyes and nose, and its black body coat",
         "identity": BADGER_IDENTITY,
         "freedom": BADGER_FREEDOM,
         "poses": BADGER_POSES,
         "strips": BADGER_STRIPS,
         "anchor_prompt": badger_anchor_prompt,
-        # The badger anchor is the panda frame re-marked, so it must track the
-        # reference closely.
-        "anchor_fidelity": "high",
+        "anchor_fidelity": "low",
+        "continues": BADGER_CONTINUES,
     },
     "seastar": {
         "noun": "sea star",
@@ -772,7 +818,10 @@ def call_api(
     for ref in refs:
         cmd += ["-F", f"image[]=@{ref};type=image/png"]
     cmd += [
-        "-F", f"prompt={prompt}",
+        # --form-string, not -F: curl parses `;` in a -F value as a parameter
+        # separator and silently drops everything after it, so a prompt with a
+        # semicolon would reach the API cut short.
+        "--form-string", f"prompt={prompt}",
         "-F", f"size={size[0]}x{size[1]}",
         "-F", "output_format=png",
         "-F", f"quality={quality}",
@@ -803,10 +852,13 @@ def cmd_anchor(args: argparse.Namespace) -> None:
     (work / "ref").mkdir(parents=True, exist_ok=True)
     ref_path = work / "ref" / f"{ANCHOR_ID}.png"
     size = reference_png(panda_frame(idx[ANCHOR_ID]["panda_rect"]), ref_path)
+    # Extra character references (e.g. badger drawings) follow the panda style
+    # frame; the anchor prompt says how to use them.
+    refs = [ref_path] + [Path(r) for r in args.ref]
     print(f"{ANCHOR_ID}: generating anchor...", flush=True)
     anchor_path(work).write_bytes(
         call_api(
-            [ref_path],
+            refs,
             PROFILE["anchor_prompt"](),
             args.quality,
             size,
@@ -1229,6 +1281,7 @@ def main() -> None:
 
     a = sub.add_parser("anchor")
     a.add_argument("--quality", default="medium", choices=["low", "medium", "high"])
+    a.add_argument("--ref", action="append", default=[], help="extra reference image (repeatable)")
     a.set_defaults(func=cmd_anchor)
 
     g = sub.add_parser("gen")
