@@ -72,6 +72,30 @@ macro_rules! atomic_stepper {
     };
 }
 
+// ── Button dispatch ─────────────────────────────────────────────────────────
+
+/// Route one (already lock-filtered) button press: the hidden display-flush
+/// combo first, then the game screen (when active), then the menu. Shared by
+/// the firmware button task and the simulator. In the simulator the flush
+/// combo is recognised (and its final press swallowed) but nothing consumes
+/// `FORCE_FLUSH_PENDING`, as there is no e-paper to de-ghost.
+pub fn dispatch_press(btn: ButtonId) {
+    if crate::display_flush::feed(btn) {
+        crate::FORCE_FLUSH_PENDING.store(true, Ordering::Relaxed);
+        return;
+    }
+
+    #[cfg(feature = "game")]
+    {
+        let on_game = DISPLAY_STATE.with(|s| s.active_screen()) == crate::SCREEN_GAME;
+        if on_game && crate::game::input::dispatch(btn) {
+            return;
+        }
+    }
+
+    DISPLAY_STATE.with_mut(|s| s.dispatch_button(btn));
+}
+
 // ── Screen identifiers ──────────────────────────────────────────────────────
 
 /// Screen identifiers — array index into `DisplayState`.
