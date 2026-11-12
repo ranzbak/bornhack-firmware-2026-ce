@@ -65,6 +65,8 @@ pub fn try_relay(msg: &Message, identity: &DeviceIdentity) -> Option<crate::TxRe
         route: msg.route,
         version: msg.version,
         transport_code: msg.transport_code,
+        // Upstream relays keep both transport codes untouched.
+        transport_code_2: msg.transport_code_2,
         path_len_byte: new_path_len_byte,
         path: new_path,
         payload: msg.payload.clone(),

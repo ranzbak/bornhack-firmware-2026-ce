@@ -96,6 +96,11 @@ pub mod fw {
     #[path = "lock.rs"]
     pub mod lock;
 
+    /// Companion text CLI — pure logic, compiled here so its unit tests run
+    /// on the host.
+    #[path = "mesh/cli.rs"]
+    pub mod cli;
+
     /// `PETS.CFG` parser — the real firmware module. Only its `parse` half
     /// compiles here (`load_and_install` is `embassy-core`-gated, and there
     /// is no FAT12 partition off-badge), which is what the simulator needs to
@@ -224,9 +229,21 @@ pub static BOOSTED_RX_GAIN: AtomicBool = AtomicBool::new(true);
 /// User can override via Settings → Timezone; the kv-stored value loads
 /// at boot and shadows this default, so changing this only affects fresh
 /// badges that have never had a timezone set.
-pub static TIMEZONE_OFFSET: core::sync::atomic::AtomicI8 = core::sync::atomic::AtomicI8::new(2);
+///
+/// Stored in quarter hours (UTC+2 = 8, UTC+5:30 = 22) so the half- and
+/// quarter-hour zones MeshCore's `set tz.offset` accepts since 1.18 fit.
+pub static TZ_OFFSET_QH: core::sync::atomic::AtomicI8 = core::sync::atomic::AtomicI8::new(8);
+/// Lowest offset, UTC-12, in quarter hours.
+pub const TZ_OFFSET_QH_MIN: i8 = -48;
+/// Highest offset, UTC+14, in quarter hours.
+pub const TZ_OFFSET_QH_MAX: i8 = 56;
 
-/// Fired when `TIMEZONE_OFFSET` changes so the BLE task can persist it.
+/// The local-time offset from UTC in seconds.
+pub fn tz_offset_secs() -> i64 {
+    TZ_OFFSET_QH.load(core::sync::atomic::Ordering::Relaxed) as i64 * 900
+}
+
+/// Fired when `TZ_OFFSET_QH` changes so the BLE task can persist it.
 #[cfg(feature = "embassy-core")]
 pub static TZ_CHANGED_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
@@ -327,7 +344,7 @@ pub static ADVERT_CHANGED_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::
 pub static LORA_RADIO_CHANGED_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// Fired by `persister::lora_radio_loop` after a successful flash write
-/// of the new radio params.  Consumed by `meshcore::run_meshcore_listener`,
+/// of the new radio params or the boost-RX flag.  Consumed by `meshcore::run_meshcore_listener`,
 /// which puts the SX1262 into standby, calls `reconfigure_radio`, and
 /// resumes RX.  Decoupling this from `LORA_RADIO_CHANGED_SIGNAL` is
 /// required because `embassy_sync::signal::Signal` only wakes a single
@@ -372,6 +389,12 @@ pub static FORCE_FLUSH_PENDING: AtomicBool = AtomicBool::new(false);
 
 /// When true, #blinkme channel LED commands are ignored.
 pub static IGNORE_BLINK: AtomicBool = AtomicBool::new(false);
+
+/// When true, incoming region-scoped (TransportFlood) packets whose transport
+/// code does not match our flood-scope key are dropped.  When false (default)
+/// they are still shown, but never relayed by client-repeat.  Toggled from the
+/// MeshCore → Region filter menu entry.
+pub static REGION_FILTER: AtomicBool = AtomicBool::new(false);
 
 /// When true, the pet severity-change buzzer alert is suppressed.
 /// Toggled from the Bornagotchi → Mute menu entry.
@@ -486,6 +509,21 @@ pub fn unix_now() -> Option<u32> {
                 .saturating_add((elapsed / embassy_time::TICK_HZ) as u32)
         })
     })
+}
+
+/// Like [`unix_now`], but strictly increasing across calls (the reference's
+/// `getCurrentTimeUnique`), so back-to-back CLI commands never reuse a
+/// timestamp and trip the receiver's replay protection.
+#[cfg(feature = "embassy-core")]
+pub fn unix_now_unique() -> Option<u32> {
+    static LAST_UNIQUE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+    let now = unix_now()?;
+    let prev = LAST_UNIQUE
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |last| {
+            Some(if now <= last { last + 1 } else { now })
+        })
+        .unwrap_or(0);
+    Some(if now <= prev { prev + 1 } else { now })
 }
 
 /// MeshCore node name cached from KV for synchronous access by the display
@@ -1046,7 +1084,7 @@ where
             }
         });
         if let Some(unix) = unix_now() {
-            let offset_secs = TIMEZONE_OFFSET.load(Ordering::Relaxed) as i64 * 3600;
+            let offset_secs = tz_offset_secs();
             let local = (unix as i64 + offset_secs) as u32;
             let h = (local % 86400) / 3600;
             let m = (local % 3600) / 60;

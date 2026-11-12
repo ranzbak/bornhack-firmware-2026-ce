@@ -24,6 +24,50 @@ struct LoadedChannel {
     name: [u8; 32],
     key: [u8; 16],
     hash: u8,
+    /// Region override (see `channels::get_region`); empty = global scope.
+    region: heapless::String<{ channels::REGION_NAME_MAX }>,
+}
+
+impl LoadedChannel {
+    /// Effective flood-scope key: the channel's region override, else the
+    /// global `DEFAULT_SCOPE_KEY` (def_scope / dk-bornhack). `None` = unscoped.
+    fn scope_key(&self) -> Option<[u8; 16]> {
+        if self.region.is_empty() {
+            crate::DEFAULT_SCOPE_KEY.lock(|c| c.get())
+        } else {
+            Some(meshcore::packet::region_key(&self.region))
+        }
+    }
+
+    /// Region filter for received channel messages. With the filter on, a
+    /// message is shown only when it was flooded with this channel's
+    /// effective region (`scope_code` = the non-zero TransportFlood code, or
+    /// `None` for unscoped/direct packets). Filter off, no region configured,
+    /// or the internal SHDW game channel (zero-hop beacons) → always shown.
+    fn region_ok(&self, scope_code: Option<u16>, payload_type: u8, payload: &[u8]) -> bool {
+        if !crate::REGION_FILTER.load(core::sync::atomic::Ordering::Relaxed)
+            || self.slot_idx == channels::SHDW_SLOT
+        {
+            return true;
+        }
+        let Some(key) = self.scope_key() else {
+            return true;
+        };
+        let ok = scope_code
+            == Some(meshcore::packet::calc_transport_code(
+                &key,
+                payload_type,
+                payload,
+            ));
+        if !ok {
+            defmt::info!(
+                "channel slot {=u8}: region mismatch (tc={=u16:#06x}) — hidden",
+                self.slot_idx,
+                scope_code.unwrap_or(0),
+            );
+        }
+        ok
+    }
 }
 
 async fn load_channels() -> heapless::Vec<LoadedChannel, { channels::NUM_CHANNELS }> {
@@ -45,6 +89,7 @@ async fn load_channels() -> heapless::Vec<LoadedChannel, { channels::NUM_CHANNEL
                 name,
                 key,
                 hash,
+                region: channels::get_region(i).await.unwrap_or_default(),
             });
         }
     }
@@ -76,6 +121,7 @@ fn update_cached_channels(loaded: &heapless::Vec<LoadedChannel, { channels::NUM_
             let _ = list.push(crate::CachedChannel {
                 slot_idx: ch.slot_idx,
                 name,
+                region: ch.region.clone(),
             });
         }
     });
@@ -124,8 +170,10 @@ pub enum AdvertMode {
 /// stored in `LAST_LORA_MSG`; node advertisements are logged; all other types
 /// are logged as raw hex.
 ///
-/// Radio parameters updated via the companion app take effect on the **next
-/// reboot** — reinitialisation while in RX is not yet implemented.
+/// Radio parameters (frequency, bandwidth, SF, CR, TX power) and the boost-RX
+/// toggle, changed from the menu, the companion app or its CLI, are applied
+/// live: the persister signals `LORA_RADIO_APPLY_SIGNAL` and the loop below
+/// reprograms the SX1262 without a reboot.
 pub async fn run_meshcore_listener<'a>(
     spi: Peri<'a, peripherals::SPI2>,
     sck_pin: Peri<'a, AnyPin>,
@@ -234,6 +282,13 @@ pub async fn run_meshcore_listener<'a>(
             cortex_m::peripheral::SCB::sys_reset();
         }
 
+        // Persist a region override set from the on-device channel browser,
+        // then reload the table below so TX/RX pick it up.
+        if let Some((idx, region)) = crate::CHANNEL_REGION_SIGNAL.try_take() {
+            channels::set_region(idx, &region).await;
+            crate::CHANNELS_CHANGED_SIGNAL.signal(());
+        }
+
         // Reload channel table if the BLE task updated a channel.
         if crate::CHANNELS_CHANGED_SIGNAL.signaled() {
             crate::CHANNELS_CHANGED_SIGNAL.reset();
@@ -321,6 +376,9 @@ pub async fn run_meshcore_listener<'a>(
             }
 
             Ok(Some((len, rssi, snr_x4))) => {
+                if len > 0 {
+                    crate::PACKET_STATS.count_recv(raw[0]);
+                }
                 // Update radio stats snapshot for CMD_GET_STATS / STATS_TYPE_RADIO.
                 {
                     let noise_floor = (rssi as i32 - (snr_x4 as i32 / 4)).clamp(-128, 0) as i16;
@@ -374,44 +432,41 @@ pub async fn run_meshcore_listener<'a>(
                             msg.payload.len(),
                         );
 
-                        // Region filter: if we have a flood-scope key and this is a
-                        // TransportFlood packet, verify the transport code.  A mismatch
-                        // means the packet belongs to a different region — drop it silently.
-                        if matches!(msg.route, RouteType::TransportFlood) {
-                            let key = crate::FLOOD_SCOPE_KEY.lock(|c| c.get());
-                            defmt::debug!(
-                                "TransportFlood pkt: type={=u8} tc={=u16:#06x} key_set={=bool}",
-                                msg.payload_type.to_u8(),
-                                msg.transport_code,
-                                key.is_some(),
-                            );
-                            if let Some(key) = key {
-                                let expected = meshcore::packet::calc_transport_code(
-                                    &key,
-                                    msg.payload_type.to_u8(),
-                                    &msg.payload,
-                                );
-                                defmt::debug!(
-                                    "TransportFlood region check: got={=u16:#06x} expected={=u16:#06x}",
-                                    msg.transport_code,
-                                    expected,
-                                );
-                                if msg.transport_code != expected {
-                                    defmt::info!(
-                                        "TransportFlood region mismatch (got {=u16:#06x}, expected {=u16:#06x}) — dropped",
-                                        msg.transport_code,
-                                        expected
-                                    );
-                                    continue;
+                        // Region: a non-zero TransportFlood code is the sender's
+                        // region scope. Code 0 is unscoped (MeshCore 1.18, #3568):
+                        // the reference `calc_transport_code` never yields 0. Every
+                        // packet is still handled here; only channel messages are
+                        // region-filtered (per channel, see `LoadedChannel::region_ok`).
+                        // A code that doesn't match our global flood scope marks the
+                        // packet foreign so client-repeat doesn't carry other
+                        // regions' floods into ours.
+                        let scope_code = (matches!(msg.route, RouteType::TransportFlood)
+                            && msg.transport_code != 0)
+                            .then_some(msg.transport_code);
+                        let foreign_region =
+                            match (scope_code, crate::DEFAULT_SCOPE_KEY.lock(|c| c.get())) {
+                                (Some(tc), Some(key)) => {
+                                    tc != meshcore::packet::calc_transport_code(
+                                        &key,
+                                        msg.payload_type.to_u8(),
+                                        &msg.payload,
+                                    )
                                 }
-                            }
-                            // No key set → wildcard: accept all TransportFlood
-                            // packets.
+                                // Unscoped, or no key set (wildcard).
+                                _ => false,
+                            };
+                        if foreign_region {
+                            defmt::debug!(
+                                "TransportFlood foreign region (tc={=u16:#06x}) — not relayed",
+                                msg.transport_code,
+                            );
                         }
 
-                        // Client-repeat relay (if enabled).
-                        if let Some(relay_req) = super::repeater::try_relay(&msg, identity) {
-                            let _ = crate::tx_send(relay_req);
+                        // Client-repeat relay (if enabled) — own region / unscoped only.
+                        if !foreign_region {
+                            if let Some(relay_req) = super::repeater::try_relay(&msg, identity) {
+                                let _ = crate::tx_send(relay_req);
+                            }
                         }
 
                         // Mirror the original firmware: flood routes carry the wire-encoded
@@ -423,8 +478,15 @@ pub async fn run_meshcore_listener<'a>(
                         };
                         match msg.payload_type {
                             PayloadType::GrpTxt => {
-                                push_grp_txt(&msg.payload, rssi, snr_x4, path_len, &loaded_channels)
-                                    .await
+                                push_grp_txt(
+                                    &msg.payload,
+                                    rssi,
+                                    snr_x4,
+                                    path_len,
+                                    scope_code,
+                                    &loaded_channels,
+                                )
+                                .await
                             }
                             PayloadType::GrpData => {
                                 push_grp_data(
@@ -432,6 +494,7 @@ pub async fn run_meshcore_listener<'a>(
                                     rssi,
                                     snr_x4,
                                     path_len,
+                                    scope_code,
                                     &loaded_channels,
                                 )
                                 .await
@@ -513,6 +576,7 @@ async fn push_grp_txt(
     rssi: i16,
     _snr_x4: i8,
     path_len: u8,
+    scope_code: Option<u16>,
     channels: &[LoadedChannel],
 ) {
     use meshcore::payload::grp_txt;
@@ -571,11 +635,19 @@ async fn push_grp_txt(
         }
     }
 
-    let ch = match channels.iter().find(|c| c.hash == grp.channel_hash) {
+    // The channel id is a single hash byte and can collide: like upstream
+    // Mesh::onRecvPacket, try (up to 4) channels with this hash in slot order
+    // and take the first whose key verifies the MAC.
+    let ch = match meshcore::payload::find_channel(
+        channels,
+        grp.channel_hash,
+        |c| c.hash,
+        |c| grp_txt::verify_mac(&c.key, &grp).is_ok(),
+    ) {
         Some(c) => c,
         None => {
             defmt::debug!(
-                "MeshCore GrpTxt [hash={=u8} {=i16}dBm] no matching channel (have: {=[u8]})",
+                "MeshCore GrpTxt [hash={=u8} {=i16}dBm] no channel verifies (have: {=[u8]})",
                 grp.channel_hash,
                 rssi,
                 &channels
@@ -587,12 +659,13 @@ async fn push_grp_txt(
         }
     };
 
-    if grp_txt::verify_mac(&ch.key, &grp).is_err() {
-        defmt::warn!(
-            "MeshCore GrpTxt [channel={=u8}] MAC mismatch on channel hash={=u8}",
-            grp.channel_hash,
-            ch.slot_idx,
-        );
+    // Region filter — before dedup, so a hidden copy can't suppress a later
+    // one flooded with the right region.
+    if !ch.region_ok(
+        scope_code,
+        meshcore::packet::PayloadType::GrpTxt.to_u8(),
+        payload,
+    ) {
         return;
     }
 
@@ -719,10 +792,40 @@ async fn push_grp_data(
     rssi: i16,
     snr_x4: i8,
     path_len: u8,
+    scope_code: Option<u16>,
     channels: &[LoadedChannel],
 ) {
     use meshcore::packet::PayloadType;
     use meshcore::payload::grp_data;
+
+    let grp = match grp_data::deserialize(payload) {
+        Ok(g) => g,
+        Err(_) => {
+            defmt::warn!("GrpData: failed to parse payload");
+            return;
+        }
+    };
+
+    // Colliding channel hashes: first of up to 4 matches whose MAC verifies
+    // (upstream Mesh::onRecvPacket / searchChannelsByHash).
+    let Some(ch) = meshcore::payload::find_channel(
+        channels,
+        grp.channel_hash,
+        |c| c.hash,
+        |c| grp_data::verify_mac(&c.key, &grp).is_ok(),
+    ) else {
+        defmt::debug!(
+            "GrpData: no channel verifies hash={=u8:#04x}",
+            grp.channel_hash
+        );
+        return;
+    };
+
+    // Region filter — before dedup, so a hidden copy can't suppress a later
+    // one flooded with the right region.
+    if !ch.region_ok(scope_code, PayloadType::GrpData.to_u8(), payload) {
+        return;
+    }
 
     // Suppress exact duplicates of the same broadcast arriving via more
     // than one mesh path (direct + one or more repeater hops) — see
@@ -740,31 +843,6 @@ async fn push_grp_data(
     });
     if !is_new {
         defmt::debug!("GrpData: duplicate suppressed (hash={=u32:#010x})", dh);
-        return;
-    }
-
-    let grp = match grp_data::deserialize(payload) {
-        Ok(g) => g,
-        Err(_) => {
-            defmt::warn!("GrpData: failed to parse payload");
-            return;
-        }
-    };
-
-    let Some(ch) = channels.iter().find(|c| c.hash == grp.channel_hash) else {
-        defmt::debug!(
-            "GrpData: no channel match for hash={=u8:#04x}",
-            grp.channel_hash
-        );
-        return;
-    };
-
-    if grp_data::verify_mac(&ch.key, &grp).is_err() {
-        defmt::warn!(
-            "GrpData [channel={=u8}] MAC mismatch on hash={=u8:#04x}",
-            ch.slot_idx,
-            grp.channel_hash,
-        );
         return;
     }
 
@@ -1228,7 +1306,10 @@ async fn try_handle_txt_msg(
     // 4-byte author prefix) into msg_queue; the BLE task splits it back out
     // into `ContactMsg.signature` when forwarding to the companion app.
     let is_plain = dec.txt_type() == txt_msg::TXT_TYPE_PLAIN;
-    let is_cli = dec.txt_type() == txt_msg::TXT_TYPE_CLI_DATA;
+    // CLI_COMMAND (1.18): a remote node runs a CLI command on us. Like the
+    // reference companion without remote-CLI permission, hand it to the app.
+    let is_cli = dec.txt_type() == txt_msg::TXT_TYPE_CLI_DATA
+        || dec.txt_type() == txt_msg::TXT_TYPE_CLI_COMMAND;
     let is_signed = dec.txt_type() == txt_msg::TXT_TYPE_SIGNED;
 
     if is_signed && dec.text.len() < 4 {
@@ -1287,7 +1368,9 @@ async fn try_handle_txt_msg(
             dec.text.len().saturating_sub(4),
             signed_ack,
         );
-        send_ack(lora, &sender.pub_key, path_len_byte, path, signed_ack).await;
+        // Upstream still sends the 4-byte form for SIGNED messages
+        // (`BaseChatMesh::onPeerDataRecv`, TXT_TYPE_SIGNED_PLAIN branch).
+        send_ack(lora, &sender.pub_key, path_len_byte, path, &signed_ack.to_le_bytes()).await;
 
         // Advance the room's sync_since cursor so the next login resumes
         // after this post instead of replaying the whole backlog. Matches
@@ -1313,7 +1396,14 @@ async fn try_handle_txt_msg(
     // CLI replies from a repeater are consumed by the companion app only —
     // the repeater does not ACK our requests and does not expect one back.
     if is_plain {
-        send_ack(lora, &sender.pub_key, path_len_byte, path, ack_hash).await;
+        // MeshCore 1.16+ (f6e6fdaa, 717142ab, 2eb747d5, a130a95a) sends a
+        // 6-byte ACK for PLAIN messages: the 4-byte hash, the byte after the
+        // text's NUL (the extended attempt counter) and one random byte, so
+        // that retries of the same text produce distinct ACK packets and are
+        // not dropped as duplicates by repeaters.
+        let random = crate::signed_channel::Csprng::next_challenge()[0];
+        let ack = meshcore::payload::txt_msg::plain_ack_payload(ack_hash, dec.ack_tail, random);
+        send_ack(lora, &sender.pub_key, path_len_byte, path, &ack).await;
 
         let display_name = {
             let name_end = sender.name.iter().position(|&b| b == 0).unwrap_or(32);
@@ -1357,14 +1447,27 @@ async fn try_handle_txt_msg(
 ///
 /// When no key is set, returns `(Flood, 0)` — unscoped, accepted by all nodes.
 fn flood_route(payload_type_u8: u8, payload: &[u8]) -> (meshcore::packet::RouteType, u16) {
+    scoped_flood_route(
+        crate::FLOOD_SCOPE_KEY.lock(|cell| cell.get()),
+        payload_type_u8,
+        payload,
+    )
+}
+
+/// [`flood_route`] with an explicit scope key (e.g. a channel's region).
+fn scoped_flood_route(
+    key: Option<[u8; 16]>,
+    payload_type_u8: u8,
+    payload: &[u8],
+) -> (meshcore::packet::RouteType, u16) {
     use meshcore::packet::RouteType;
-    crate::FLOOD_SCOPE_KEY.lock(|cell| match cell.get() {
+    match key {
         Some(key) => {
             let code = meshcore::packet::calc_transport_code(&key, payload_type_u8, payload);
             (RouteType::TransportFlood, code)
         }
         None => (RouteType::Flood, 0),
-    })
+    }
 }
 
 /// `path_len_byte` to use for a freshly-originated flood packet (0 hops).
@@ -1413,13 +1516,17 @@ async fn dispatch_tx(
             send_admin_status_request(lora, msg, identity).await
         }
         crate::TxRequest::BinaryReq(msg) => send_binary_request(lora, msg, identity).await,
+        crate::TxRequest::AnonReq(msg) => send_anon_request(lora, msg, identity).await,
         crate::TxRequest::TelemReq(msg) => send_telem_request(lora, msg, identity).await,
         crate::TxRequest::DiscoveryReq(msg) => send_discovery_request(lora, msg, identity).await,
         crate::TxRequest::ControlData(msg) => send_control_data(lora, msg).await,
         crate::TxRequest::Advert(mode) => {
             let mut name_buf = [0u8; settings::MAX_NODE_NAME];
             let name_len = settings::get_node_name(&mut name_buf).await;
-            send_advert(lora, identity, &name_buf[..name_len], 0, mode).await;
+            // Upstream nodes drop an advert whose timestamp is not newer than
+            // the last one they kept from us (replay check), so it must move.
+            let timestamp = crate::unix_now_unique().unwrap_or(0);
+            send_advert(lora, identity, &name_buf[..name_len], timestamp, mode).await;
         }
         crate::TxRequest::RawFrame { data, len } => {
             if let Err(e) = lora.send_message(&data[..len]).await {
@@ -1451,6 +1558,13 @@ async fn send_grp_txt(
         return;
     };
     let (key, hash) = (ch.key, ch.hash);
+    // Badge-originated sends use the channel's effective region; companion
+    // sends keep the app-controlled flood scope.
+    let scope = if req.channel_region {
+        ch.scope_key()
+    } else {
+        crate::FLOOD_SCOPE_KEY.lock(|c| c.get())
+    };
 
     // MeshCore GrpTxt wire format embeds the sender as "Name: MessageText".
     // Use the persisted node name, falling back to the 4-byte device-ID hex if
@@ -1498,12 +1612,14 @@ async fn send_grp_txt(
     let mut msg_payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
     let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
-    let (route, transport_code) = flood_route(PayloadType::GrpTxt.to_u8(), &msg_payload);
+    let (route, transport_code) =
+        scoped_flood_route(scope, PayloadType::GrpTxt.to_u8(), &msg_payload);
     let msg = Message {
         payload_type: PayloadType::GrpTxt,
         route,
         version: 0,
         transport_code,
+        transport_code_2: 0,
         path_len_byte: flood_path_len_byte(),
         path: heapless::Vec::new(),
         payload: msg_payload,
@@ -1620,9 +1736,10 @@ async fn send_grp_data(
             let (r, code) = flood_route(PayloadType::GrpData.to_u8(), &msg_payload);
             (r, flood_path_len_byte(), heapless::Vec::new(), code)
         } else {
+            // `path_len` is the encoded byte ((hash_size-1)<<6 | hops), not a
+            // byte count; the parser already cut `path` to hops * hash_size.
             let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
-            let copy = (req.path_len as usize).min(req.path.len());
-            let _ = pv.extend_from_slice(&req.path[..copy]);
+            let _ = pv.extend_from_slice(&req.path);
             (RouteType::Direct, req.path_len, pv, 0u16)
         };
 
@@ -1631,6 +1748,7 @@ async fn send_grp_data(
         route,
         version: 0,
         transport_code,
+        transport_code_2: 0,
         path_len_byte,
         path: path_bytes,
         payload: msg_payload,
@@ -1746,6 +1864,7 @@ async fn send_txt_msg(
         route,
         version: 0,
         transport_code,
+        transport_code_2: 0,
         path_len_byte,
         path: path_bytes,
         payload: msg_payload,
@@ -1812,42 +1931,12 @@ pub async fn send_advert(
     timestamp: u32,
     mode: AdvertMode,
 ) {
+    use meshcore::MAX_TRANS_UNIT;
     use meshcore::packet::{Message, PayloadType, RouteType};
-    use meshcore::payload::advert::{Advert, DeviceRole, serialize};
-    use meshcore::{MAX_PAYLOAD_SIZE, MAX_TRANS_UNIT};
 
-    let mut advert = Advert {
-        pub_key: identity.pub_key,
-        timestamp,
-        signature: [0u8; meshcore::SIGNATURE_SIZE],
-        role: DeviceRole::ChatNode,
-        name: {
-            let mut v = heapless::Vec::new();
-            let _ = v.extend_from_slice(&name[..name.len().min(32)]);
-            if v.is_empty() { None } else { Some(v) }
-        },
-        position: None,
-        extra1: None,
-        extra2: None,
+    let Some(msg_payload) = self_advert_payload(&identity.sec_key, name, timestamp) else {
+        return;
     };
-
-    if let Err(e) = meshcore::identity::sign_advert(&identity.sec_key, &mut advert) {
-        defmt::warn!("send_advert: signing failed: {:?}", defmt::Debug2Format(&e));
-        return;
-    }
-
-    let mut payload_buf = [0u8; MAX_PAYLOAD_SIZE];
-    let mut payload_len = 0usize;
-    if let Err(e) = serialize(&advert, &mut payload_buf, &mut payload_len) {
-        defmt::warn!(
-            "send_advert: serialize failed: {:?}",
-            defmt::Debug2Format(&e)
-        );
-        return;
-    }
-
-    let mut msg_payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
-    let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
     let (route, transport_code) = match mode {
         AdvertMode::Flood => flood_route(PayloadType::Advert.to_u8(), &msg_payload),
@@ -1859,6 +1948,7 @@ pub async fn send_advert(
         route,
         version: 0,
         transport_code,
+        transport_code_2: 0,
         path_len_byte: flood_path_len_byte(),
         path: heapless::Vec::new(),
         payload: msg_payload,
@@ -1888,6 +1978,71 @@ pub async fn send_advert(
             );
         }
     }
+}
+
+/// Our signed advert payload: pub_key, timestamp, signature and app data
+/// (chat-node role and `name`, at most 32 bytes). `None` if signing or
+/// serialising fails, which is logged.
+fn self_advert_payload(
+    sec_key: &[u8; meshcore::PRV_KEY_SIZE],
+    name: &[u8],
+    timestamp: u32,
+) -> Option<heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }>> {
+    use meshcore::MAX_PAYLOAD_SIZE;
+    use meshcore::payload::advert::{Advert, DeviceRole, serialize};
+
+    let mut advert = Advert {
+        // Filled in from the secret key by `sign_advert`.
+        pub_key: [0u8; meshcore::PUB_KEY_SIZE],
+        timestamp,
+        signature: [0u8; meshcore::SIGNATURE_SIZE],
+        role: DeviceRole::ChatNode,
+        name: {
+            let mut v = heapless::Vec::new();
+            let _ = v.extend_from_slice(&name[..name.len().min(32)]);
+            if v.is_empty() { None } else { Some(v) }
+        },
+        position: None,
+        extra1: None,
+        extra2: None,
+    };
+
+    if let Err(e) = meshcore::identity::sign_advert(sec_key, &mut advert) {
+        defmt::warn!("advert: signing failed: {:?}", defmt::Debug2Format(&e));
+        return None;
+    }
+
+    let mut payload_buf = [0u8; MAX_PAYLOAD_SIZE];
+    let mut payload_len = 0usize;
+    if let Err(e) = serialize(&advert, &mut payload_buf, &mut payload_len) {
+        defmt::warn!("advert: serialize failed: {:?}", defmt::Debug2Format(&e));
+        return None;
+    }
+    heapless::Vec::from_slice(&payload_buf[..payload_len]).ok()
+}
+
+/// Our advert as a whole packet, the form `CMD_EXPORT_CONTACT` answers with
+/// (upstream `createSelfAdvert` with `ROUTE_TYPE_FLOOD`, never sent, so no
+/// transport codes and an empty path). Returns the length written to `out`.
+pub fn export_self_advert(
+    sec_key: &[u8; meshcore::PRV_KEY_SIZE],
+    name: &[u8],
+    timestamp: u32,
+    out: &mut [u8; meshcore::MAX_TRANS_UNIT],
+) -> Option<usize> {
+    use meshcore::packet::{Message, PayloadType, RouteType};
+
+    let msg = Message {
+        payload_type: PayloadType::Advert,
+        route: RouteType::Flood,
+        version: 0,
+        transport_code: 0,
+        transport_code_2: 0,
+        path_len_byte: 0,
+        path: heapless::Vec::new(),
+        payload: self_advert_payload(sec_key, name, timestamp)?,
+    };
+    meshcore::packet::serialize(&msg, out).ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -1946,6 +2101,7 @@ pub async fn send_pm(
         route,
         version: 0,
         transport_code,
+        transport_code_2: 0,
         path_len_byte: flood_path_len_byte(),
         path: heapless::Vec::new(),
         payload: msg_payload,
@@ -1976,20 +2132,23 @@ pub async fn send_pm(
 /// Send an ACK for a received TxtMsg back toward the sender.
 ///
 /// If we have a stored path for the sender we send Direct; otherwise Flood.
+/// `ack` is the full ACK payload (4 bytes for SIGNED, 6 for PLAIN); it must
+/// be at least 4 bytes long.
 async fn send_ack(
     lora: &mut SimpleLoRa<'_>,
     sender_pk: &[u8; meshcore::PUB_KEY_SIZE],
     _recv_path_len: u8,
     _recv_path: &heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }>,
-    ack_hash: u32,
+    ack: &[u8],
 ) {
     use meshcore::MAX_TRANS_UNIT;
     use meshcore::packet::{Message, PayloadType, RouteType};
 
-    let ack_bytes = ack_hash.to_le_bytes();
+    // The first four bytes are the ACK hash; receivers match on those only.
+    let ack_hash = u32::from_le_bytes([ack[0], ack[1], ack[2], ack[3]]);
 
     let mut payload: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
-    let _ = payload.extend_from_slice(&ack_bytes);
+    let _ = payload.extend_from_slice(ack);
 
     // Route: Direct if we have a stored path, Flood otherwise.
     let contact = contacts::ContactStore::new().find_by_key(sender_pk).await;
@@ -2016,6 +2175,7 @@ async fn send_ack(
         route,
         version: 0,
         transport_code,
+        transport_code_2: 0,
         path_len_byte,
         path: path_bytes,
         payload,
@@ -2112,6 +2272,7 @@ async fn send_trace(lora: &mut SimpleLoRa<'_>, req: crate::TxTracePath) {
         route: RouteType::Direct,
         version: 0,
         transport_code: 0,
+        transport_code_2: 0,
         path_len_byte: 0,
         path: heapless::Vec::new(),
         payload,
@@ -2236,6 +2397,7 @@ async fn send_login(lora: &mut SimpleLoRa<'_>, req: crate::TxLogin, identity: &D
         route,
         version: 0,
         transport_code,
+        transport_code_2: 0,
         path_len_byte,
         path: path_bytes,
         payload,
@@ -2244,8 +2406,10 @@ async fn send_login(lora: &mut SimpleLoRa<'_>, req: crate::TxLogin, identity: &D
     let mut frame = [0u8; MAX_TRANS_UNIT];
     match meshcore::packet::serialize(&msg, &mut frame) {
         Ok(len) => {
+            crate::PENDING_LOGIN.set(crate::login_tag(&req.pub_key));
             if let Err(e) = lora.send_message(&frame[..len]).await {
                 defmt::warn!("send_login: TX failed: {:?}", e);
+                crate::PENDING_LOGIN.clear();
             } else {
                 defmt::info!(
                     "Login sent to {=[u8]:02x} node_type={=u8} is_room={=bool} ts={=u32} sync_since={=u32} ({=usize}B) frame={=[u8]:02x}",
@@ -2362,6 +2526,7 @@ async fn send_telem_request(
         route,
         version: 0,
         transport_code,
+        transport_code_2: 0,
         path_len_byte,
         path: path_bytes,
         payload: payload_vec,
@@ -2533,6 +2698,7 @@ async fn send_admin_status_request(
         route,
         version: 0,
         transport_code,
+        transport_code_2: 0,
         path_len_byte,
         path: path_bytes,
         payload: payload_vec,
@@ -2568,6 +2734,153 @@ async fn send_admin_status_request(
 // Generic binary request transmission
 // ---------------------------------------------------------------------------
 
+/// Build and transmit an unauthenticated `PAYLOAD_TYPE_ANON_REQ` —
+/// the companion protocol's `SEND_ANON_REQ` (0x39 / 57) pipe, which the app
+/// uses for **Discover Regions** (`ANON_REQ_TYPE_REGIONS = 0x01`).
+///
+/// `req.data[0]` is the `ANON_REQ_TYPE_*` discriminant. Plaintext layout:
+/// ```text
+/// [tag:4 LE][anon_req_type:1][params...]
+/// ```
+/// matching C++ `BaseChatMesh::sendAnonReq()`, whose `createAnonDatagram` body
+/// is `[tag:4][data...]`. No login is required — the repeater derives the
+/// shared secret from the sender identity carried in the packet.
+async fn send_anon_request(
+    lora: &mut SimpleLoRa<'_>,
+    req: crate::TxAnonReq,
+    identity: &DeviceIdentity,
+) {
+    use meshcore::MAX_TRANS_UNIT;
+    use meshcore::packet::{Message, PayloadType, RouteType};
+
+    if req.data.is_empty() {
+        defmt::warn!("send_anon_req: empty data — dropping");
+        return;
+    }
+
+    crate::LAST_REQ_TARGET.lock(|cell| cell.set(Some(req.pub_key)));
+
+    // ANON_REQ payload: `[dest_hash:1][sender_pk:32][mac:2][AES(tag:4 ‖ body)]`;
+    // the repeater reads the tag as its `timestamp` and switches on the first
+    // body byte. Built here rather than through `anon_req::encrypt`, whose
+    // plaintext slot only fits a 15-byte login password — a request carrying
+    // a multi-hop reply path needs up to `MAX_ANON_REQ_DATA`.
+    let secret = match meshcore::identity::derive_shared_secret(&identity.sec_key, &req.pub_key) {
+        Ok(s) => s,
+        Err(e) => {
+            defmt::warn!(
+                "send_anon_req: key exchange failed: {:?}",
+                defmt::Debug2Format(&e)
+            );
+            return;
+        }
+    };
+    let mut aes_key = [0u8; meshcore::CIPHER_KEY_SIZE];
+    aes_key.copy_from_slice(&secret[..meshcore::CIPHER_KEY_SIZE]);
+    let plain_len = 4 + req.data.len();
+    let mut plain = [0u8; 4 + crate::MAX_ANON_REQ_DATA];
+    plain[..4].copy_from_slice(&req.tag.to_le_bytes());
+    plain[4..plain_len].copy_from_slice(&req.data);
+    let mut cipher = [0u8; 4 + crate::MAX_ANON_REQ_DATA];
+    let (cipher_len, mac) = match meshcore::crypto::encrypt_then_mac(
+        &aes_key,
+        &secret,
+        &plain[..plain_len],
+        &mut cipher,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            defmt::warn!(
+                "send_anon_req: encrypt failed: {:?}",
+                defmt::Debug2Format(&e)
+            );
+            return;
+        }
+    };
+
+    // Route like the reference: a stored path goes direct, a contact without
+    // one floods, and a non-contact (FIRMWARE_VER_CODE 13 transient contact,
+    // `out_path_len = 0`) goes zero-hop direct.
+    let contact = contacts::ContactStore::new().find_by_key(&req.pub_key).await;
+    let (route, path_len_byte, path_bytes) = match contact {
+        Some(ref c) if c.out_path_len != contacts::OUT_PATH_UNKNOWN => {
+            let actual = c.path_actual_bytes();
+            let mut pv: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
+            let _ = pv.extend_from_slice(&c.out_path[..actual]);
+            (RouteType::Direct, c.out_path_len, pv)
+        }
+        Some(_) => (
+            RouteType::Flood,
+            flood_path_len_byte(),
+            heapless::Vec::new(),
+        ),
+        None => (RouteType::Direct, 0, heapless::Vec::new()),
+    };
+
+    // The repeater gates ANON_REQ_TYPE_REGIONS (and OWNER/BASIC) on
+    // `packet->isRouteDirect()` — a flooded request is silently ignored, which
+    // looks identical to "discovery returns nothing". Say so rather than let it
+    // fail quietly; the fix is to establish a path to the repeater first.
+    if route != RouteType::Direct {
+        defmt::warn!(
+            "send_anon_req: no path to {=[u8]:02x} — sending FLOOD, but the repeater \
+             only answers anon type {=u8:#04x} on a DIRECT route; expect no reply",
+            &req.pub_key[..6],
+            req.data[0],
+        );
+    }
+
+    let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
+    let _ = payload_vec.push(req.pub_key[0]);
+    let _ = payload_vec.extend_from_slice(&identity.pub_key);
+    let _ = payload_vec.extend_from_slice(&mac);
+    let _ = payload_vec.extend_from_slice(&cipher[..cipher_len]);
+
+    let (route, transport_code) = match route {
+        RouteType::Flood => flood_route(PayloadType::AnonReq.to_u8(), &payload_vec),
+        r => (r, 0),
+    };
+    let msg = Message {
+        payload_type: PayloadType::AnonReq,
+        route,
+        version: 0,
+        transport_code,
+        transport_code_2: 0,
+        path_len_byte,
+        path: path_bytes,
+        payload: payload_vec,
+    };
+
+    let mut frame = [0u8; MAX_TRANS_UNIT];
+    match meshcore::packet::serialize(&msg, &mut frame) {
+        Ok(len) => {
+            // The reply comes back as a plain RESPONSE echoing our tag, which is
+            // the same shape a binary request gets — so reuse that pending slot
+            // and the app sees the reference's PUSH_CODE_BINARY_RESPONSE (0x8C).
+            crate::PENDING_BINARY_REQ_TAG.set(req.tag);
+            if let Err(e) = lora.send_message(&frame[..len]).await {
+                defmt::warn!("send_anon_req: TX failed: {:?}", e);
+                crate::PENDING_BINARY_REQ_TAG.clear();
+            } else {
+                defmt::info!(
+                    "Anon req sent to {=[u8]:02x} tag={=u32:#010x} anon_type={=u8:#04x} direct={=bool} ({=usize}B)",
+                    &req.pub_key[..6],
+                    req.tag,
+                    req.data[0],
+                    msg.route == RouteType::Direct,
+                    len,
+                );
+            }
+        }
+        Err(e) => {
+            defmt::warn!(
+                "send_anon_req: packet serialize failed: {:?}",
+                defmt::Debug2Format(&e)
+            );
+        }
+    }
+}
+
 /// Build and transmit a generic `PAYLOAD_TYPE_REQ` with an opaque body —
 /// used by the companion protocol's `SEND_BINARY_REQ` (0x32) pipe for
 /// `REQ_TYPE_GET_NEIGHBOURS`, `REQ_TYPE_GET_ACCESS_LIST`,
@@ -2582,6 +2895,9 @@ async fn send_admin_status_request(
 /// path. `req_type` is stuffed into the txt_msg `flags` byte by decomposing
 /// it into `(attempt, txt_type)` such that `(attempt & 3) | (txt_type << 2) ==
 /// req_type`.
+///
+/// Unlike [`send_anon_request`] this requires the caller to be logged in to the
+/// target, so the shared secret is already in its ACL cache.
 async fn send_binary_request(
     lora: &mut SimpleLoRa<'_>,
     req: crate::TxBinaryReq,
@@ -2661,6 +2977,7 @@ async fn send_binary_request(
         route,
         version: 0,
         transport_code,
+        transport_code_2: 0,
         path_len_byte,
         path: path_bytes,
         payload: payload_vec,
@@ -2769,6 +3086,7 @@ async fn send_discovery_request(
         route,
         version: 0,
         transport_code,
+        transport_code_2: 0,
         path_len_byte: flood_path_len_byte(),
         path: heapless::Vec::new(),
         payload: payload_vec,
@@ -2966,7 +3284,8 @@ async fn try_dispatch_response(
 /// (e.g. first login after a wipe, or before the first advert arrives).
 ///
 /// Returns `Ok(())` if the MAC verifies and the body is dispatched to one of
-/// the pending-request branches or treated as a login response. Returns
+/// the pending-request branches (login included) or, when nothing is pending,
+/// forwarded to the app as an unsolicited binary response. Returns
 /// `Err(meshcore::Error::MacMismatch)` if this isn't the right peer so the
 /// fallback scan can try the next candidate.
 async fn try_dispatch_response_by_pk(
@@ -3079,44 +3398,6 @@ async fn try_dispatch_response_by_pk(
         return Ok(());
     }
 
-    // Pending generic binary request (CMD_SEND_BINARY_REQ /
-    // PUSH_CODE_BINARY_RESPONSE). Response body starts at plaintext[4]; in our
-    // txt_msg::decrypt view that's dec.flags (first body byte) followed by
-    // dec.text (rest, trailing zeros stripped). We reassemble the padded body
-    // up to the AES block boundary so neighbours/ACL entries that happen to end
-    // in zero bytes aren't truncated.
-    if crate::PENDING_BINARY_REQ_TAG.take_if_match(dec.timestamp) {
-        let binary_tag = dec.timestamp;
-        // msg.data is the raw ciphertext; length is a multiple of AES block size.
-        // Body length = total plaintext - timestamp(4) = msg.data.len() - 4.
-        let body_len = msg.data.len().saturating_sub(4);
-        let mut body: heapless::Vec<u8, { crate::MAX_BINARY_RESP_BODY }> = heapless::Vec::new();
-        if body_len > 0 {
-            let _ = body.push(dec.flags);
-            let tail_need = body_len - 1;
-            let tail_copy = dec.text.len().min(tail_need);
-            let _ = body.extend_from_slice(&dec.text[..tail_copy]);
-            // Zero-pad the rest so the block-aligned length is preserved.
-            while body.len() < body_len.min(crate::MAX_BINARY_RESP_BODY) {
-                let _ = body.push(0);
-            }
-        }
-
-        defmt::info!(
-            "Response recv: BINARY from {=[u8]:02x} tag={=u32:#010x} body={=usize}B",
-            &sender_pk[..6],
-            binary_tag,
-            body.len(),
-        );
-
-        let _ = crate::BINARY_RESULT_CHANNEL.try_send(crate::BinaryResult {
-            pub_key,
-            tag: binary_tag,
-            body,
-        });
-        return Ok(());
-    }
-
     // Pending telemetry request (tag-based match).
     if crate::PENDING_TELEM_TAG.take_if_match(dec.timestamp) {
         // CayenneLPP = flags_byte (= data[4]) followed by dec.text (= data[5..]).
@@ -3134,42 +3415,85 @@ async fn try_dispatch_response_by_pk(
         return Ok(());
     }
 
-    // No pending status / admin-status / telemetry request — treat as a
-    // login response. The MAC verified, so this contact is the right peer.
-    let success = resp_type == 0 || (resp_type == b'O' && dec.text.first() == Some(&b'K'));
+    // Pending login to this contact (upstream `pending_login`, matched on the
+    // pub-key prefix). The MAC verified, so this contact is the right peer.
+    if crate::PENDING_LOGIN.take_if_match(crate::login_tag(&pub_key)) {
+        let success = resp_type == 0 || (resp_type == b'O' && dec.text.first() == Some(&b'K'));
+
+        defmt::info!(
+            "Response recv: login {} from {=[u8]:02x} resp_type={=u8}",
+            if success { "OK" } else { "FAIL" },
+            &sender_pk[..6],
+            resp_type,
+        );
+
+        let tag = dec.timestamp;
+
+        let is_admin = if success {
+            dec.text.get(1).copied().unwrap_or(0)
+        } else {
+            0
+        };
+        let acl_perms = if success {
+            dec.text.get(2).copied().unwrap_or(0)
+        } else {
+            0
+        };
+        let fw_ver_level = if success {
+            dec.text.get(7).copied().unwrap_or(0)
+        } else {
+            0
+        };
+
+        let _ = crate::LOGIN_RESULT_CHANNEL.try_send(crate::LoginResult {
+            success,
+            is_admin,
+            pub_key,
+            tag,
+            acl_perms,
+            fw_ver_level,
+        });
+        return Ok(());
+    }
+
+    // Pending generic binary request (CMD_SEND_BINARY_REQ), or any response
+    // nobody is waiting for (e.g. a sensor's unsolicited telemetry push):
+    // forward it to the app as PUSH_CODE_BINARY_RESPONSE, like upstream 1.18
+    // `onContactResponse`, instead of mistaking it for a login reply.
+    // Response body starts at plaintext[4]; in our txt_msg::decrypt view
+    // that's dec.flags (first body byte) followed by dec.text (rest, trailing
+    // zeros stripped). We reassemble the padded body up to the AES block
+    // boundary so neighbours/ACL entries that happen to end in zero bytes
+    // aren't truncated.
+    let solicited = crate::PENDING_BINARY_REQ_TAG.take_if_match(dec.timestamp);
+    let binary_tag = dec.timestamp;
+    // msg.data is the raw ciphertext; length is a multiple of AES block size.
+    // Body length = total plaintext - timestamp(4) = msg.data.len() - 4.
+    let body_len = msg.data.len().saturating_sub(4);
+    let mut body: heapless::Vec<u8, { crate::MAX_BINARY_RESP_BODY }> = heapless::Vec::new();
+    if body_len > 0 {
+        let _ = body.push(dec.flags);
+        let tail_need = body_len - 1;
+        let tail_copy = dec.text.len().min(tail_need);
+        let _ = body.extend_from_slice(&dec.text[..tail_copy]);
+        // Zero-pad the rest so the block-aligned length is preserved.
+        while body.len() < body_len.min(crate::MAX_BINARY_RESP_BODY) {
+            let _ = body.push(0);
+        }
+    }
 
     defmt::info!(
-        "Response recv: login {} from {=[u8]:02x} resp_type={=u8}",
-        if success { "OK" } else { "FAIL" },
+        "Response recv: BINARY from {=[u8]:02x} tag={=u32:#010x} body={=usize}B solicited={=bool}",
         &sender_pk[..6],
-        resp_type,
+        binary_tag,
+        body.len(),
+        solicited,
     );
 
-    let tag = dec.timestamp;
-
-    let is_admin = if success {
-        dec.text.get(1).copied().unwrap_or(0)
-    } else {
-        0
-    };
-    let acl_perms = if success {
-        dec.text.get(2).copied().unwrap_or(0)
-    } else {
-        0
-    };
-    let fw_ver_level = if success {
-        dec.text.get(7).copied().unwrap_or(0)
-    } else {
-        0
-    };
-
-    let _ = crate::LOGIN_RESULT_CHANNEL.try_send(crate::LoginResult {
-        success,
-        is_admin,
+    let _ = crate::BINARY_RESULT_CHANNEL.try_send(crate::BinaryResult {
         pub_key,
-        tag,
-        acl_perms,
-        fw_ver_level,
+        tag: binary_tag,
+        body,
     });
     Ok(())
 }
@@ -3342,7 +3666,8 @@ async fn try_dispatch_path_by_pk(
         return Ok(());
     }
 
-    // PAYLOAD_TYPE_RESPONSE = 1 → admin-status / discovery / login response.
+    // PAYLOAD_TYPE_RESPONSE = 1 → admin-status / discovery / login / other
+    // binary response.
     if dec.extra_type == 1 {
         // Pending admin status request (tag = extra[0..4]). Path-decrypted
         // extras preserve trailing zero bytes, so we can parse stats directly.
@@ -3377,37 +3702,6 @@ async fn try_dispatch_path_by_pk(
                 let _ = crate::ADMIN_STATUS_RESULT_CHANNEL.try_send(result);
                 let _ =
                     crate::STATUS_RESULT_CHANNEL.try_send(crate::StatusResult { pub_key, stats });
-                return Ok(());
-            }
-        }
-
-        // Pending generic binary request (CMD_SEND_BINARY_REQ). Path-decrypted
-        // extras preserve trailing zero bytes, so we can forward the body verbatim.
-        if dec.extra.len() >= 4 {
-            let resp_tag =
-                u32::from_le_bytes([dec.extra[0], dec.extra[1], dec.extra[2], dec.extra[3]]);
-            if crate::PENDING_BINARY_REQ_TAG.take_if_match(resp_tag) {
-                let binary_tag = resp_tag;
-                let mut pub_key = [0u8; meshcore::PUB_KEY_SIZE];
-                pub_key.copy_from_slice(sender_pk);
-
-                let mut body: heapless::Vec<u8, { crate::MAX_BINARY_RESP_BODY }> =
-                    heapless::Vec::new();
-                let n = (dec.extra.len() - 4).min(crate::MAX_BINARY_RESP_BODY);
-                let _ = body.extend_from_slice(&dec.extra[4..4 + n]);
-
-                defmt::info!(
-                    "Path recv: BINARY from {=[u8]:02x} tag={=u32:#010x} body={=usize}B",
-                    &sender_pk[..6],
-                    binary_tag,
-                    body.len(),
-                );
-
-                let _ = crate::BINARY_RESULT_CHANNEL.try_send(crate::BinaryResult {
-                    pub_key,
-                    tag: binary_tag,
-                    body,
-                });
                 return Ok(());
             }
         }
@@ -3469,8 +3763,37 @@ async fn try_dispatch_path_by_pk(
             }
         }
 
-        // Default: treat as a login response.
-        handle_path_login_response(&dec.extra, sender_pk);
+        // Pending login to this contact (upstream `pending_login`).
+        if crate::PENDING_LOGIN.take_if_match(crate::login_tag(sender_pk)) {
+            handle_path_login_response(&dec.extra, sender_pk);
+            return Ok(());
+        }
+
+        // Pending generic binary request (CMD_SEND_BINARY_REQ), or a response
+        // nobody is waiting for (e.g. a sensor's telemetry push): forward to
+        // the app as PUSH_CODE_BINARY_RESPONSE (MeshCore 1.18
+        // `onContactResponse`). Path-decrypted extras preserve trailing zero
+        // bytes, so the body is forwarded verbatim.
+        if dec.extra.len() >= 4 {
+            let tag = u32::from_le_bytes([dec.extra[0], dec.extra[1], dec.extra[2], dec.extra[3]]);
+            let solicited = crate::PENDING_BINARY_REQ_TAG.take_if_match(tag);
+            let mut pub_key = [0u8; meshcore::PUB_KEY_SIZE];
+            pub_key.copy_from_slice(sender_pk);
+            let mut body: heapless::Vec<u8, { crate::MAX_BINARY_RESP_BODY }> = heapless::Vec::new();
+            let n = (dec.extra.len() - 4).min(crate::MAX_BINARY_RESP_BODY);
+            let _ = body.extend_from_slice(&dec.extra[4..4 + n]);
+
+            defmt::info!(
+                "Path recv: BINARY from {=[u8]:02x} tag={=u32:#010x} body={=usize}B solicited={=bool}",
+                &sender_pk[..6],
+                tag,
+                body.len(),
+                solicited,
+            );
+
+            let _ =
+                crate::BINARY_RESULT_CHANNEL.try_send(crate::BinaryResult { pub_key, tag, body });
+        }
     }
 
     Ok(())
@@ -3696,6 +4019,7 @@ async fn handle_telem_request_recv(
         route,
         version: 0,
         transport_code,
+        transport_code_2: 0,
         path_len_byte,
         path: path_bytes,
         payload: msg_payload,
@@ -3741,6 +4065,7 @@ async fn send_control_data(lora: &mut SimpleLoRa<'_>, req: crate::TxControlData)
         route: RouteType::Direct,                 // zero-hop (path_len_byte = 0)
         version: 0,
         transport_code: 0,
+        transport_code_2: 0,
         path_len_byte: 0,
         path: heapless::Vec::new(),
         payload: req.payload,

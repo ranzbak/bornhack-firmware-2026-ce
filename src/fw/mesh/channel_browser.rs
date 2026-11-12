@@ -2,7 +2,8 @@
 //!
 //! Replaces the single-message channel screen with a two-level browser:
 //! 1. Channel list — scrollable list of active channels
-//! 2. Channel view — last 2-3 messages in the selected channel + Reply
+//! 2. Channel view — last 2-3 messages in the selected channel; Fire opens a
+//!    popup with Reply and the channel's region override
 
 use core::cell::RefCell;
 use core::sync::atomic::Ordering::Relaxed;
@@ -41,7 +42,16 @@ enum BrowserState {
         channel_idx: u8,
         anchor: Option<u32>,
     },
+    /// Action popup over the channel view (see [`POPUP_ITEMS`]).
+    Popup {
+        channel_idx: u8,
+        anchor: Option<u32>,
+        pos: u8,
+    },
 }
+
+/// Channel-view popup rows: Reply, set the region override, Cancel.
+const POPUP_ITEMS: [&str; 3] = ["Reply", "Set region", "< Cancel"];
 
 pub struct ChannelBrowser {
     state: BrowserState,
@@ -144,17 +154,59 @@ pub fn dispatch(btn: ButtonId) -> bool {
                     }
                 }
                 ButtonId::Execute | ButtonId::Fire => {
-                    let ci = channel_idx;
-                    // Drop the borrow before calling text_entry (which may lock other statics).
-                    drop(b);
-                    start_reply(ci);
-                    return false;
+                    b.state = BrowserState::Popup {
+                        channel_idx,
+                        anchor,
+                        pos: 0,
+                    };
                 }
                 ButtonId::Cancel => {
                     b.state = BrowserState::ChannelList { cursor: 0 };
                 }
                 _ => {}
             },
+            BrowserState::Popup {
+                channel_idx,
+                anchor,
+                pos,
+            } => {
+                let n = POPUP_ITEMS.len() as u8;
+                let view = BrowserState::ChannelView {
+                    channel_idx,
+                    anchor,
+                };
+                match btn {
+                    // Up/Down wrap around like the contacts popup.
+                    ButtonId::Up => {
+                        b.state = BrowserState::Popup {
+                            channel_idx,
+                            anchor,
+                            pos: if pos > 0 { pos - 1 } else { n - 1 },
+                        };
+                    }
+                    ButtonId::Down => {
+                        b.state = BrowserState::Popup {
+                            channel_idx,
+                            anchor,
+                            pos: if pos + 1 < n { pos + 1 } else { 0 },
+                        };
+                    }
+                    ButtonId::Execute | ButtonId::Fire => {
+                        b.state = view;
+                        // Drop the borrow before calling text_entry (which may lock other statics).
+                        drop(b);
+                        match pos {
+                            0 => start_reply(channel_idx),
+                            1 => start_region_entry(channel_idx),
+                            _ => {}
+                        }
+                        return false;
+                    }
+                    ButtonId::Cancel => b.state = view,
+                    // Stay in the modal until confirm/cancel.
+                    ButtonId::Left | ButtonId::Right => {}
+                }
+            }
         }
         false
     })
@@ -173,10 +225,60 @@ fn start_reply(channel_idx: u8) {
             channel_idx: ch,
             timestamp: ts,
             text: v,
+            channel_region: true,
         }));
     }
 
     crate::text_entry::begin(&[], 160, on_reply_complete, "Reply", false);
+}
+
+/// Region override of `channel_idx` from the UI mirror; empty = global scope.
+fn cached_region(channel_idx: u8) -> heapless::String<{ super::channels::REGION_NAME_MAX }> {
+    crate::CACHED_CHANNELS.lock(|c| {
+        c.borrow()
+            .iter()
+            .find(|ch| ch.slot_idx == channel_idx)
+            .map(|ch| ch.region.clone())
+            .unwrap_or_default()
+    })
+}
+
+/// Edit the channel's region override with the on-screen keyboard. Empty
+/// input clears it (the channel then follows the global flood scope); a
+/// leading `#` is dropped since region keys hash `"#" + name` themselves.
+fn start_region_entry(channel_idx: u8) {
+    static REGION_CHANNEL_IDX: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+    REGION_CHANNEL_IDX.store(channel_idx, Relaxed);
+
+    fn on_region_complete(text: &[u8]) {
+        let ch = REGION_CHANNEL_IDX.load(Relaxed);
+        let Ok(name) = core::str::from_utf8(text) else {
+            return;
+        };
+        let name = name.trim();
+        let name = name.strip_prefix('#').unwrap_or(name);
+        let mut region: heapless::String<{ super::channels::REGION_NAME_MAX }> =
+            heapless::String::new();
+        let _ = region.push_str(truncate_bytes(name, super::channels::REGION_NAME_MAX));
+        // Update the UI mirror now; the meshcore task persists the change
+        // and reloads its channel table.
+        crate::CACHED_CHANNELS.lock(|c| {
+            if let Some(entry) = c.borrow_mut().iter_mut().find(|e| e.slot_idx == ch) {
+                entry.region = region.clone();
+            }
+        });
+        crate::CHANNEL_REGION_SIGNAL.signal((ch, region));
+        crate::TX_WAKEUP.signal(());
+    }
+
+    let current = cached_region(channel_idx);
+    crate::text_entry::begin(
+        current.as_bytes(),
+        super::channels::REGION_NAME_MAX as u8,
+        on_region_complete,
+        "Region",
+        true,
+    );
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
@@ -252,6 +354,24 @@ where
                 channel_idx,
                 anchor,
             } => draw_channel_view(display, channel_idx, anchor),
+            BrowserState::Popup {
+                channel_idx,
+                anchor,
+                pos,
+            } => {
+                draw_channel_view(display, channel_idx, anchor)?;
+                // Title shows the effective region: the override, or
+                // "default" for the global flood scope.
+                let region = cached_region(channel_idx);
+                let mut title: heapless::String<20> = heapless::String::new();
+                let _ = title.push_str("Rgn ");
+                let _ = title.push_str(if region.is_empty() {
+                    "default"
+                } else {
+                    truncate_bytes(region.as_str(), 12)
+                });
+                crate::ui::draw_picker_menu(display, &title, &POPUP_ITEMS, pos as usize)
+            }
         }
     })
 }
@@ -566,7 +686,13 @@ where
     Rectangle::new(Point::new(0, 140), Size::new(152, 12))
         .into_styled(PrimitiveStyle::with_fill(BLACK))
         .draw(display)?;
-    Text::with_text_style("Fire: Reply", Point::new(76, 140), FONT_INV, center).draw(display)?;
+    Text::with_text_style(
+        "Fire: Reply / Region",
+        Point::new(76, 140),
+        FONT_INV,
+        center,
+    )
+    .draw(display)?;
 
     Ok(())
 }

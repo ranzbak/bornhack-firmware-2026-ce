@@ -152,9 +152,9 @@ async fn dispatch(which: Which) {
     use core::sync::atomic::Ordering::Relaxed;
     match which {
         Which::Tz => {
-            let offset = crate::TIMEZONE_OFFSET.load(Relaxed);
+            let offset = crate::TZ_OFFSET_QH.load(Relaxed);
             match settings::set_timezone(offset).await {
-                Ok(()) => defmt::debug!("settings: timezone={} persisted", offset),
+                Ok(()) => defmt::debug!("settings: timezone={} qh persisted", offset),
                 Err(e) => defmt::warn!("settings: timezone persist failed: {:?}", e),
             }
         }
@@ -164,6 +164,10 @@ async fn dispatch(which: Which) {
                 Ok(()) => defmt::debug!("settings: boost_rx={} persisted", enabled),
                 Err(e) => defmt::warn!("settings: boost_rx persist failed: {:?}", e),
             }
+            // The RxGain register is only rewritten when RX is re-armed, so
+            // without this the toggle waited for the next TX. A live
+            // reconfigure ends in `resume_rx`, which applies the new gain.
+            crate::LORA_RADIO_APPLY_SIGNAL.signal(());
         }
         Which::LoraRadio => {
             let mut rp = settings::get_radio_params_or_default().await;
@@ -202,6 +206,11 @@ async fn dispatch(which: Which) {
             match settings::set_ignore_blink(ignore).await {
                 Ok(()) => defmt::debug!("settings: ignore_blink={=bool} persisted", ignore),
                 Err(e) => defmt::warn!("settings: ignore_blink persist failed: {:?}", e),
+            }
+            let region_filter = crate::REGION_FILTER.load(Relaxed);
+            match settings::set_region_filter(region_filter).await {
+                Ok(()) => defmt::debug!("settings: region_filter={=bool} persisted", region_filter),
+                Err(e) => defmt::warn!("settings: region_filter persist failed: {:?}", e),
             }
         }
         Which::Advert => {

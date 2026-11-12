@@ -127,7 +127,7 @@ pub async fn settings_persister_task() {
 /// (hold Execute on plug-in if you need DFU first) and copying any
 /// iCalendar export — the schedule from <https://bornhack.dk/.../program/ics/>
 /// works directly.  Times are taken at face value as local time; if your
-/// ICS is in UTC you'll be off by `TIMEZONE_OFFSET` hours.
+/// ICS is in UTC you'll be off by the `TZ_OFFSET_QH` offset.
 ///
 /// Re-runs on every boot, overwriting whatever was in slots 1..N_ALARMS.
 /// The default melody (`ALARM` beep-beep) is applied; the trigger
@@ -143,8 +143,6 @@ const ICS_READ_BUF_LEN: usize = 16 * 1024;
 
 #[cfg(feature = "embassy-core")]
 pub async fn import_alarms_from_fat12() {
-    use core::sync::atomic::Ordering;
-
     use crate::fw::fat12;
     use crate::fw::led::{self, LED_BLUE, LedState};
 
@@ -177,7 +175,7 @@ pub async fn import_alarms_from_fat12() {
     // DTSTART / DTEND carried a `Z` suffix.  The badge has no tzdata,
     // so non-Z timestamps (floating local time, `TZID=...:` values) are
     // taken at face value.
-    let tz_offset = crate::TIMEZONE_OFFSET.load(Ordering::Relaxed);
+    let tz_offset_min = (crate::tz_offset_secs() / 60) as i32;
 
     let mut slot = 1usize; // slot 0 stays reserved for the manual alarm
     for event in ics::Parser::new(&buf[..n]) {
@@ -191,7 +189,7 @@ pub async fn import_alarms_from_fat12() {
                 event.day,
                 event.hour,
                 event.minute,
-                tz_offset,
+                tz_offset_min,
             )
         } else {
             (event.year, event.month, event.day, event.hour, event.minute)
@@ -203,7 +201,7 @@ pub async fn import_alarms_from_fat12() {
                 event.end_day,
                 event.end_hour,
                 event.end_minute,
-                tz_offset,
+                tz_offset_min,
             )
         } else {
             (
@@ -254,11 +252,12 @@ fn shift_utc_to_local(
     day: u8,
     hour: u8,
     minute: u8,
-    tz_offset_hours: i8,
+    offset_min: i32,
 ) -> (u16, u8, u8, u8, u8) {
-    let total = hour as i32 + tz_offset_hours as i32;
-    let day_delta = total.div_euclid(24);
-    let new_hour = total.rem_euclid(24) as u8;
+    let total = hour as i32 * 60 + minute as i32 + offset_min;
+    let day_delta = total.div_euclid(24 * 60);
+    let new_hour = (total.rem_euclid(24 * 60) / 60) as u8;
+    let minute = (total.rem_euclid(60)) as u8;
     if day_delta == 0 {
         return (year, month, day, new_hour, minute);
     }

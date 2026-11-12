@@ -290,7 +290,8 @@ NDEF message you write to it, defaulting to `https://badge.team/docs/badges/born
 
 ## MeshCore Companion Protocol
 
-The firmware implements the [MeshCore companion protocol](https://docs.meshcore.io/companion_protocol/) over BLE NUS.
+The firmware implements the [MeshCore companion protocol](https://docs.meshcore.io/companion_protocol/) over BLE NUS,
+reporting `FIRMWARE_VER_CODE` 14 / `v1.18.0` (MeshCore 1.18).
 
 ### Commands handled (companion → device)
 
@@ -320,7 +321,21 @@ The firmware implements the [MeshCore companion protocol](https://docs.meshcore.
 | `0x24` | `SEND_TRACE_PATH`      | Send trace packet (ping); returns `0x89` async  |
 | `0x26` | `SET_OTHER_PARAMS`     | Set telemetry mode, location policy, etc.       |
 | `0x2A` | `GET_ADVERT_PATH`      | Return last-seen advert path for a contact      |
-| `0x36` | `SET_FLOOD_SCOPE`      | Set or clear transport-key flood scope          |
+| `0x36` | `SET_FLOOD_SCOPE`      | `0x00 [key]`: set or drop the runtime scope override (no key → default scope); `0x01`: send un-scoped |
+| `0x39` | `SEND_ANON_REQ`        | Anonymous request (e.g. Discover Regions); non-contacts go zero-hop direct; reply as `0x8C` |
+| `0x3F` | `SET_DEFAULT_FLOOD_SCOPE` | Persist the default scope; applies at once unless a `0x36` override is active |
+| `0x40` | `GET_DEFAULT_FLOOD_SCOPE` | Return the persisted default scope             |
+| `0x41` | `SEND_RAW_PACKET`      | Validate and transmit a raw MeshCore frame (priority ignored) |
+| `0x42` | `RUN_CLI_COMMAND`      | Run a text CLI command, reply `0x1D CLI_REPLY` — see below |
+
+#### Companion CLI (`0x42`)
+
+The app's Command Line screen talks to the badge itself. Supported:
+`get name`, `set name <name>`, `get radio`, `set radio <MHz>,<kHz>,<sf>,<cr>`,
+`get freq`, `get tx`, `set tx <dBm>` (-9..22), `get tz.offset`,
+`set tz.offset <h>` (-12..14, in quarter hours such as `5.5` or `5.75`), `ver`, `board`, `reboot`. `poweroff` /
+`shutdown` answer `Error: unsupported` (no System OFF on the badge); anything
+else answers `Unknown command`. Radio changes apply live, no reboot needed.
 
 ### Push notifications (device → companion)
 
@@ -359,7 +374,7 @@ A standalone watch screen — accessible from the main icon grid via Left/Right 
 
 The screen redraws on every minute boundary via the shared `MINUTE_TICK` signal — no second hand and no per-second redraws, since the e-paper refresh is too slow for that anyway.
 
-The watch reads `unix_now()` (set via the MeshCore companion `SET_DEVICE_TIME` 0x06 command) and applies `TIMEZONE_OFFSET` (configured under Settings → Timezone). When the clock has not yet been synced the screen shows "Clock not set".
+The watch reads `unix_now()` (set via the MeshCore companion `SET_DEVICE_TIME` 0x06 command) and applies `TZ_OFFSET_QH` (configured under Settings → Timezone). When the clock has not yet been synced the screen shows "Clock not set".
 
 #### Watch buttons
 
@@ -509,7 +524,7 @@ The main menu contains a **Settings** submenu with:
 - **Bluetooth** — view BLE device name, enable/disable BLE, clear stored pairings (with confirmation)
 - **LoRa** — enable/disable LoRa radio, boost RX gain, radio preset picker (community presets), TX power
 - **MeshCore** — set node name, client repeat (with confirmation), adverts (on/off, interval), telemetry sharing (3-state: **No** / **Contacts** / **Yes** — mirrors the MeshCore companion app's "Allow Telemetry Requests" setting; `Contacts` only responds to peers with `Contact.flags` bit 1 set), multi-ACK, path hash length, reset channels, reset contacts
-- **Timezone** — UTC offset stepper
+- **Timezone** — UTC offset stepper (whole hours; `set tz.offset` sets half and quarter hours)
 - **Factory reset** — wipes all settings and reboots (with confirmation)
 
 Destructive actions (reset channels, reset contacts, factory reset, clear pairings) show a full-screen "Are you sure?" confirmation dialog. The client-repeat toggle also shows a warning when enabling.

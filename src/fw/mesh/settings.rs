@@ -207,6 +207,25 @@ pub async fn set_ignore_blink(ignore: bool) -> Result<(), kv::KvError> {
 }
 
 // ---------------------------------------------------------------------------
+// Region filter  (menu only — not part of the companion protocol)
+// ---------------------------------------------------------------------------
+
+/// Read the persisted incoming region-filter flag.  Returns `false`
+/// (accept other regions) if not stored.
+pub async fn get_region_filter() -> bool {
+    let mut b = [0u8; 1];
+    match ns().get("rgn_filt", &mut b).await {
+        Ok(1) => b[0] != 0,
+        _ => false,
+    }
+}
+
+/// Persist the incoming region-filter flag to flash.
+pub async fn set_region_filter(on: bool) -> Result<(), kv::KvError> {
+    ns().set("rgn_filt", &[on as u8], true).await
+}
+
+// ---------------------------------------------------------------------------
 // LoRa enabled  (menu only — not part of the companion protocol)
 // ---------------------------------------------------------------------------
 
@@ -372,17 +391,26 @@ pub async fn set_autoadd_config(config: u8, max_hops: u8) -> Result<(), kv::KvEr
 /// badges ship into a Bornhack-style summer venue, so this saves the
 /// user from immediately having to flip Settings → Timezone before the
 /// clock face shows the right time.
+///
+/// In quarter hours (see `TZ_OFFSET_QH`). Firmware before quarter-hour
+/// support only wrote whole hours under `"tz"`; that value is used, times
+/// four, until `"tzq"` exists.
 pub async fn get_timezone() -> i8 {
     let mut b = [0u8; 1];
+    if let Ok(1) = ns().get("tzq", &mut b).await {
+        return (b[0] as i8).clamp(crate::TZ_OFFSET_QH_MIN, crate::TZ_OFFSET_QH_MAX);
+    }
     match ns().get("tz", &mut b).await {
-        Ok(1) => b[0] as i8,
-        _ => 2,
+        Ok(1) => (b[0] as i8).clamp(-12, 14) * 4,
+        _ => 8,
     }
 }
 
-/// Persist the UTC hour offset to flash.
-pub async fn set_timezone(offset: i8) -> Result<(), kv::KvError> {
-    ns().set("tz", &[offset as u8], true).await
+/// Persist the UTC offset (quarter hours) to flash. The whole-hour part also
+/// goes to the old `"tz"` key so older firmware still reads a sane offset.
+pub async fn set_timezone(offset_qh: i8) -> Result<(), kv::KvError> {
+    ns().set("tzq", &[offset_qh as u8], true).await?;
+    ns().set("tz", &[(offset_qh / 4) as u8], true).await
 }
 
 /// Read the persisted boost-RX flag.

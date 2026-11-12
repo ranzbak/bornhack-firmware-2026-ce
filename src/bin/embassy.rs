@@ -447,9 +447,9 @@ async fn main(spawner: Spawner) {
         // reads them starts rendering. Previously the load lived inside the
         // BLE task's init block, which races against the display task: on a
         // quick reboot the display could draw a frame using the static
-        // default (TIMEZONE_OFFSET = 0 → UTC) before the BLE task had a
+        // default (TZ_OFFSET_QH = 0 → UTC) before the BLE task had a
         // chance to load the persisted offset.
-        bornhack_aegg::TIMEZONE_OFFSET.store(
+        bornhack_aegg::TZ_OFFSET_QH.store(
             settings::get_timezone().await,
             core::sync::atomic::Ordering::Relaxed,
         );
@@ -470,6 +470,7 @@ async fn main(spawner: Spawner) {
                 None => Some(settings::dk_bornhack_default_scope()),
             };
             bornhack_aegg::fw::mesh::FLOOD_SCOPE_KEY.lock(|c| c.set(scope));
+            bornhack_aegg::fw::mesh::DEFAULT_SCOPE_KEY.lock(|c| c.set(scope));
         }
 
         {
@@ -505,6 +506,7 @@ async fn main(spawner: Spawner) {
             bornhack_aegg::ADVERT_INTERVAL_HOURS.store(adv.interval_hours, Relaxed);
 
             bornhack_aegg::IGNORE_BLINK.store(settings::get_ignore_blink().await, Relaxed);
+            bornhack_aegg::REGION_FILTER.store(settings::get_region_filter().await, Relaxed);
             bornhack_aegg::LORA_DISABLED.store(!settings::get_lora_enabled().await, Relaxed);
             bornhack_aegg::BLE_DISABLED.store(!settings::get_ble_enabled().await, Relaxed);
         }
@@ -554,6 +556,7 @@ async fn main(spawner: Spawner) {
                 sdc,
                 CompanionContext {
                     pub_key: identity.pub_key,
+                    sec_key: identity.sec_key,
                 },
                 ble_prng_seed,
             ));

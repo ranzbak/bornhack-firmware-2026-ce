@@ -1150,6 +1150,13 @@ impl ContactStore {
     ///
     /// The entire scan is a single pass over all slots.
     pub async fn add_or_update(&self, contact: &Contact) -> Result<AddResult, kv::KvError> {
+        // An all-zero pub_key is how a slot reads as deleted, so storing one
+        // would take a slot (or evict a real contact) that every lookup then
+        // skips. Upstream skips such empty slots for the same reason: the key
+        // is a null-key ECDH sink (MeshCore 060fd219).
+        if contact.is_deleted() {
+            return Err(kv::KvError::Other);
+        }
         let _guard = MUTATION_LOCK.lock().await;
         // --- Update path: contact already known via index ---
         if let Some(slot) = self.index_lookup(&contact.pub_key).await {

@@ -186,10 +186,9 @@ pub(super) struct Clock {
     pub weekday: u8, // 0 = MON
 }
 
-fn build_clock(unix_secs: u32, tz_offset_hours: i8) -> Option<Clock> {
+fn build_clock(unix_secs: u32, offset_secs: i64) -> Option<Clock> {
     use fasttime::Date;
 
-    let offset_secs = tz_offset_hours as i64 * 3600;
     let local = (unix_secs as i64).saturating_add(offset_secs).max(0) as u32;
 
     let minute = ((local % 3600) / 60) as u8;
@@ -211,16 +210,14 @@ fn build_clock(unix_secs: u32, tz_offset_hours: i8) -> Option<Clock> {
 #[cfg(feature = "embassy-core")]
 pub(super) fn wall_clock() -> Option<Clock> {
     let unix = crate::unix_now()?;
-    let tz = crate::TIMEZONE_OFFSET.load(Ordering::Relaxed);
-    build_clock(unix, tz)
+    build_clock(unix, crate::tz_offset_secs())
 }
 
 #[cfg(all(feature = "simulator", not(feature = "embassy-core")))]
 pub(super) fn wall_clock() -> Option<Clock> {
     use std::time::{SystemTime, UNIX_EPOCH};
     let unix = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs() as u32;
-    let tz = crate::TIMEZONE_OFFSET.load(Ordering::Relaxed);
-    build_clock(unix, tz)
+    build_clock(unix, crate::tz_offset_secs())
 }
 
 #[cfg(not(any(feature = "embassy-core", feature = "simulator")))]
