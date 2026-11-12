@@ -2606,6 +2606,8 @@ async fn nus_peripheral_loop<C>(
                                     other_params.multi_acks.min(2)
                                 };
                                 crate::MULTI_ACKS.store(ma, Relaxed);
+                                crate::TELEMETRY_MODE_BASE
+                                    .store(other_params.telemetry_mode_base.min(2), Relaxed);
                                 match settings::set_other_params(other_params).await {
                                     Ok(()) => defmt::debug!("companion: other params persisted"),
                                     Err(e) => defmt::warn!(
