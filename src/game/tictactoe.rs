@@ -15,6 +15,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 
+use crate::menu::ButtonId;
 use crate::{BLACK, TriColor, WHITE, ui};
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -95,9 +96,23 @@ pub fn close() {
     crate::FULL_REFRESH_PENDING.store(true, Ordering::Relaxed);
 }
 
+/// Route a button press while this mini-game is active.
+pub fn dispatch(btn: ButtonId) {
+    match btn {
+        ButtonId::Cancel => close(),
+        ButtonId::Up => cursor_up(),
+        ButtonId::Down => cursor_down(),
+        ButtonId::Left => cursor_left(),
+        ButtonId::Right => cursor_right(),
+        ButtonId::Fire | ButtonId::Execute => {
+            place();
+        }
+    }
+}
+
 // ── Input handling ───────────────────────────────────────────────────────────
 
-pub fn cursor_up() {
+fn cursor_up() {
     if MENU_OPEN.load(Ordering::Relaxed) {
         let p = MENU_POS.load(Ordering::Relaxed);
         if p > 0 {
@@ -111,7 +126,7 @@ pub fn cursor_up() {
     }
 }
 
-pub fn cursor_down() {
+fn cursor_down() {
     if MENU_OPEN.load(Ordering::Relaxed) {
         let p = MENU_POS.load(Ordering::Relaxed);
         if p < 1 {
@@ -125,7 +140,7 @@ pub fn cursor_down() {
     }
 }
 
-pub fn cursor_left() {
+fn cursor_left() {
     if MENU_OPEN.load(Ordering::Relaxed) {
         return;
     }
@@ -135,7 +150,7 @@ pub fn cursor_left() {
     }
 }
 
-pub fn cursor_right() {
+fn cursor_right() {
     if MENU_OPEN.load(Ordering::Relaxed) {
         return;
     }
@@ -146,7 +161,7 @@ pub fn cursor_right() {
 }
 
 /// Player places their mark. Returns true if the game ended (win/draw).
-pub fn place() -> bool {
+fn place() -> bool {
     // Difficulty picker open: confirm selection and start the game.
     if MENU_OPEN.load(Ordering::Relaxed) {
         DIFFICULTY.store(MENU_POS.load(Ordering::Relaxed), Ordering::Relaxed);

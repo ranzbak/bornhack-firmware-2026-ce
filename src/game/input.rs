@@ -101,31 +101,13 @@ pub fn dispatch(btn: ButtonId) -> bool {
 
     // ── Lights Out mini-game ──────────────────────────────────────────
     if super::lightsout::is_active() {
-        match btn {
-            ButtonId::Cancel => super::lightsout::close(),
-            ButtonId::Up => super::lightsout::cursor_up(),
-            ButtonId::Down => super::lightsout::cursor_down(),
-            ButtonId::Left => super::lightsout::cursor_left(),
-            ButtonId::Right => super::lightsout::cursor_right(),
-            ButtonId::Fire | ButtonId::Execute => {
-                super::lightsout::activate();
-            }
-        }
+        super::lightsout::dispatch(btn);
         return true;
     }
 
     // ── Black Hole mini-game ──────────────────────────────────────────
     if super::blackhole::is_active() {
-        match btn {
-            ButtonId::Cancel => super::blackhole::close(),
-            ButtonId::Up => super::blackhole::cursor_up(),
-            ButtonId::Down => super::blackhole::cursor_down(),
-            ButtonId::Left => super::blackhole::cursor_left(),
-            ButtonId::Right => super::blackhole::cursor_right(),
-            ButtonId::Fire | ButtonId::Execute => {
-                super::blackhole::activate();
-            }
-        }
+        super::blackhole::dispatch(btn);
         return true;
     }
 
@@ -146,16 +128,7 @@ pub fn dispatch(btn: ButtonId) -> bool {
 
     // ── Tic-tac-toe mini-game ──────────────────────────────────────────
     if super::tictactoe::is_active() {
-        match btn {
-            ButtonId::Cancel => super::tictactoe::close(),
-            ButtonId::Up => super::tictactoe::cursor_up(),
-            ButtonId::Down => super::tictactoe::cursor_down(),
-            ButtonId::Left => super::tictactoe::cursor_left(),
-            ButtonId::Right => super::tictactoe::cursor_right(),
-            ButtonId::Fire | ButtonId::Execute => {
-                super::tictactoe::place();
-            }
-        }
+        super::tictactoe::dispatch(btn);
         return true;
     }
 

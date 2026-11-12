@@ -16,6 +16,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 
+use crate::menu::ButtonId;
 use crate::{BLACK, TriColor, WHITE};
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -108,30 +109,44 @@ pub fn close() {
     crate::FULL_REFRESH_PENDING.store(true, core::sync::atomic::Ordering::Relaxed);
 }
 
+/// Route a button press while this mini-game is active.
+pub fn dispatch(btn: ButtonId) {
+    match btn {
+        ButtonId::Cancel => close(),
+        ButtonId::Up => cursor_up(),
+        ButtonId::Down => cursor_down(),
+        ButtonId::Left => cursor_left(),
+        ButtonId::Right => cursor_right(),
+        ButtonId::Fire | ButtonId::Execute => {
+            activate();
+        }
+    }
+}
+
 // ── Input handling ───────────────────────────────────────────────────────────
 
-pub fn cursor_up() {
+fn cursor_up() {
     let c = CURSOR.load(Ordering::Relaxed);
     if c >= GRID as u8 {
         CURSOR.store(c - GRID as u8, Ordering::Relaxed);
     }
 }
 
-pub fn cursor_down() {
+fn cursor_down() {
     let c = CURSOR.load(Ordering::Relaxed);
     if c + GRID as u8 <= 24 {
         CURSOR.store(c + GRID as u8, Ordering::Relaxed);
     }
 }
 
-pub fn cursor_left() {
+fn cursor_left() {
     let c = CURSOR.load(Ordering::Relaxed);
     if !c.is_multiple_of(GRID as u8) {
         CURSOR.store(c - 1, Ordering::Relaxed);
     }
 }
 
-pub fn cursor_right() {
+fn cursor_right() {
     let c = CURSOR.load(Ordering::Relaxed);
     if c % (GRID as u8) < (GRID as u8 - 1) {
         CURSOR.store(c + 1, Ordering::Relaxed);
@@ -139,7 +154,7 @@ pub fn cursor_right() {
 }
 
 /// Toggle the cell under the cursor (+ neighbours).
-pub fn activate() {
+fn activate() {
     if SOLVED.load(Ordering::Relaxed) {
         // Puzzle already solved — Fire closes and awards reward.
         super::lifecycle::award_inspiration(super::engine::MiniGame::LightsOut);
