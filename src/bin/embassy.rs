@@ -1102,6 +1102,18 @@ async fn display_loop_1680<D>(
             continue;
         }
 
+        // Hidden de-ghost combo (`display_flush`): black -> white full-refresh
+        // cycle, then force a whole-frame redraw. Mirrors the SSD1675 loop's
+        // FORCE_FLUSH_PENDING handling, using the driver's `Full` path.
+        if bornhack_aegg::FORCE_FLUSH_PENDING.swap(false, core::sync::atomic::Ordering::Relaxed) {
+            let _ = display.clear(bornhack_aegg::color::EpdColor::Black);
+            let _ = display.refresh(RefreshMode::Full).await;
+            let _ = display.clear(bornhack_aegg::color::EpdColor::White);
+            let _ = display.refresh(RefreshMode::Full).await;
+            let _ = display.deep_sleep().await;
+            bornhack_aegg::FULL_REFRESH_PENDING.store(true, core::sync::atomic::Ordering::Relaxed);
+        }
+
         let active_screen = render_frame(display, &mut anim_state).await;
 
         // The SSD1680 de-ghosts on the non-blink delta, so screen switches use
