@@ -30,6 +30,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 use heapless::format;
+use meshcore::payload::advert::DeviceRole;
 
 use super::contacts::{Contact, ContactStore, FLAG_FAVORITE, MAX_CONTACTS, OUT_PATH_UNKNOWN};
 use super::{TxPrivateMsg, TxRequest, msg_queue, tx_send};
@@ -411,10 +412,10 @@ impl Filter {
         match self {
             Filter::All => true,
             Filter::Favorites => e.is_favorite(),
-            Filter::Chat => e.node_type == 1,
-            Filter::Repeaters => e.node_type == 2,
-            Filter::Rooms => e.node_type == 3,
-            Filter::Sensors => e.node_type == 4,
+            Filter::Chat => DeviceRole::from(e.node_type) == DeviceRole::ChatNode,
+            Filter::Repeaters => DeviceRole::from(e.node_type) == DeviceRole::Repeater,
+            Filter::Rooms => DeviceRole::from(e.node_type) == DeviceRole::RoomServer,
+            Filter::Sensors => DeviceRole::from(e.node_type) == DeviceRole::Sensor,
         }
     }
 }
@@ -654,14 +655,19 @@ fn fmt_relative(observed_at_secs: Option<u64>) -> heapless::String<8> {
     super::time_fmt::fmt_relative_secs(now.saturating_sub(seen))
 }
 
+/// Only chat nodes can be sent a PM.
+fn is_chat_node(node_type: u8) -> bool {
+    DeviceRole::from(node_type) == DeviceRole::ChatNode
+}
+
 fn role_glyph(node_type: u8) -> Option<&'static str> {
-    match node_type {
+    match DeviceRole::from(node_type) {
         // Chat node — no glyph (the common case stays visually quiet).
-        1 => None,
-        2 => Some("R"), // Repeater
-        3 => Some("#"), // Room server
-        4 => Some("S"), // Sensor
-        _ => Some("?"),
+        DeviceRole::ChatNode => None,
+        DeviceRole::Repeater => Some("R"),
+        DeviceRole::RoomServer => Some("#"),
+        DeviceRole::Sensor => Some("S"),
+        DeviceRole::Unknown => Some("?"),
     }
 }
 
@@ -710,7 +716,7 @@ fn popup_items(
         // Heard-but-not-saved.  Add is primary; PM still works (we
         // have the pub_key) for chat nodes even before Adding.
         let _ = v.push(PopupAction::Add);
-        if node_type == 1 {
+        if is_chat_node(node_type) {
             let _ = v.push(PopupAction::Pm);
         }
         let _ = v.push(PopupAction::Info);
@@ -722,7 +728,7 @@ fn popup_items(
     } else {
         PopupAction::Save
     };
-    if node_type == 1 {
+    if is_chat_node(node_type) {
         // Chat Node — PM is the most common action.
         let _ = v.push(PopupAction::Pm);
         let _ = v.push(PopupAction::Info);
@@ -909,7 +915,7 @@ pub fn dispatch(btn: ButtonId) -> bool {
                 ButtonId::Fire | ButtonId::Execute => {
                     // Open PM compose if this contact is a chat node.
                     if let Some(entry) = filtered_get(filter, target)
-                        && entry.node_type == 1
+                        && is_chat_node(entry.node_type)
                     {
                         b.mode = Mode::List;
                         start_pm_compose(entry.pub_key);
@@ -1159,12 +1165,12 @@ where
     ui::draw_text(display, name, Point::new(4, 32), style_bold, bottom)?;
 
     // Role
-    let role = match entry.node_type {
-        1 => "Chat Node",
-        2 => "Repeater",
-        3 => "Room Server",
-        4 => "Sensor",
-        _ => "Unknown role",
+    let role = match DeviceRole::from(entry.node_type) {
+        DeviceRole::ChatNode => "Chat Node",
+        DeviceRole::Repeater => "Repeater",
+        DeviceRole::RoomServer => "Room Server",
+        DeviceRole::Sensor => "Sensor",
+        DeviceRole::Unknown => "Unknown role",
     };
     Text::with_text_style(role, Point::new(4, 48), style_small, bottom).draw(display)?;
 

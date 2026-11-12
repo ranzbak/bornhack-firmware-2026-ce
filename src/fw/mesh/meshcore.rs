@@ -1038,12 +1038,12 @@ async fn log_advert(
     let type_allowed = if !manual_add_only {
         true // manual mode off → reference auto-adds all types
     } else {
-        let type_bit = match a.role.to_u8() {
-            1 => AUTO_ADD_CHAT,
-            2 => AUTO_ADD_REPEATER,
-            3 => AUTO_ADD_ROOM,
-            4 => AUTO_ADD_SENSOR,
-            _ => 0, // unknown type — never auto-add
+        let type_bit = match a.role {
+            advert::DeviceRole::ChatNode => AUTO_ADD_CHAT,
+            advert::DeviceRole::Repeater => AUTO_ADD_REPEATER,
+            advert::DeviceRole::RoomServer => AUTO_ADD_ROOM,
+            advert::DeviceRole::Sensor => AUTO_ADD_SENSOR,
+            advert::DeviceRole::Unknown => 0, // unknown type — never auto-add
         };
         type_bit != 0 && (autoadd_config & type_bit) != 0
     };
@@ -2422,17 +2422,17 @@ async fn send_login(lora: &mut SimpleLoRa<'_>, req: crate::TxLogin, identity: &D
         .find_by_key(&req.pub_key)
         .await;
 
-    // ADV_TYPE_ROOM = 3 (see
-    // `vendor/meshcore/src/payload/advert.rs::DeviceRole::RoomServer`).
     // When the target is a room server we include the persisted
     // `Contact.sync_since` — the last post timestamp we successfully ACKed.
     // The room uses this to resume pushing posts from where we left off
     // instead of replaying the whole backlog. Non-room targets omit the
     // sync_since header entirely (repeater-shaped login plaintext).
-    const ADV_TYPE_ROOM: u8 = 3;
     let is_room = contact
         .as_ref()
-        .map(|c| c.node_type == ADV_TYPE_ROOM)
+        .map(|c| {
+            meshcore::payload::advert::DeviceRole::from(c.node_type)
+                == meshcore::payload::advert::DeviceRole::RoomServer
+        })
         .unwrap_or(false);
     let sync_since = if is_room {
         Some(contact.as_ref().map(|c| c.sync_since).unwrap_or(0))
