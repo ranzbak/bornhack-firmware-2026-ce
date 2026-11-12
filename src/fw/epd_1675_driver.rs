@@ -8,7 +8,7 @@
 //! self-promotes to a full ghost-reset waveform internally once the cumulative
 //! changed-pixel counter trips `should_force_full()` (vendor `display.rs`), so the
 //! adapter never selects that waveform itself. LUT-speed, temperature compensation,
-//! variant detection, and the staged drive all stay internal to this adapter — they
+//! variant detection, and the partial/tri-colour drive all stay internal to this adapter — they
 //! are SSD1675 specifics, not part of the trait.
 
 use crate::color::EpdColor;
@@ -54,14 +54,14 @@ impl<'a> Ssd1675Driver<'a> {
         Self { gfx, partial_state }
     }
 
-    /// Borrow the inner [`EpdGfx`] and [`PartialState`] together for the staged
-    /// neighbourhood-erosion B/W drive run from `display_loop`.
+    /// Borrow the inner [`EpdGfx`] and [`PartialState`] together for the
+    /// SSD1675-specific drive run from `display_loop`.
     ///
-    /// The staged path is an SSD1675-specific quality feature that operates
-    /// directly on the panel's plane buffers and the host delta ledger (it is
-    /// not expressible through the panel-agnostic [`EpdDriver`] trait). Exposing
-    /// both fields through one split borrow lets the loop drive the staged
-    /// waveform while still rendering the UI through this adapter's
+    /// That drive (variant probe, plane sync, partial / tri-colour waveform
+    /// selection) operates directly on the panel's plane buffers and the host
+    /// delta ledger and is not expressible through the panel-agnostic
+    /// [`EpdDriver`] trait. Exposing both fields through one split borrow lets
+    /// the loop do that while still rendering the UI through this adapter's
     /// [`DrawTarget`]/[`EpdDriver`] surface.
     ///
     /// # Returns

@@ -59,8 +59,8 @@
 //! lives at `0x00000000`–`0x0000FFFF` (64 KiB) and hands off to the app
 //! at `0x00010000`.  The main app's `memory-fw.x` accordingly sets
 //! `FLASH ORIGIN = 0x00010000` and `LENGTH = 960K`.  The bootloader is a
-//! standalone Cargo project, *not* in this workspace and *not* tracked
-//! in git — see the README for build steps.
+//! standalone Cargo project (tracked in git, but *not* part of this
+//! workspace) — see the README for build steps.
 
 // The library only has meaningful content when building the main firmware
 // or simulator. Other binaries (e.g. `hwtest`) build against an empty
@@ -352,8 +352,8 @@ pub static FACTORY_RESET_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::n
 pub static NODE_NAME_CHANGED_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// One-shot request for the next EPD refresh to use the slow full
-/// waveform (`ssd1675::UpdateMode::Mode2`) instead of the fast LUT
-/// (`ssd1675::UpdateMode::Mode1`).  The display loop in `embassy.rs`
+/// tri-colour waveform (`RefreshMode::Full`) instead of the fast partial
+/// update (`RefreshMode::Fast`).  The display loop in `embassy.rs`
 /// `swap`s the flag back to `false` after consuming it, so a mini-game
 /// can simply set this to `true` on close to clear residual ghosting
 /// from its many fast updates in one full-cycle refresh.
