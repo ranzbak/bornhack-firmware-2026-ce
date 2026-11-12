@@ -618,21 +618,21 @@ pub async fn run_first_boot_interactive(hw: &HardwareInfo, display: &mut crate::
     if !all_pass {
         // Visible-across-the-bench fault indicator so a worker can
         // tell a "needs rework" badge from a passing one without
-        // squinting at the e-paper.  Blue + green off so red is the
-        // only colour.
-        crate::fw::led::set_led(&crate::fw::led::LED_BLUE, crate::fw::led::LedState::Off);
-        crate::fw::led::set_led(&crate::fw::led::LED_GREEN, crate::fw::led::LedState::Off);
-        crate::fw::led::set_led(&crate::fw::led::LED_RED, crate::fw::led::LedState::Duty50);
+        // squinting at the e-paper: red, 500 ms on / 500 ms off.
         defmt::error!(
             "hwtest: FAILURE on first boot — halting in factory-test mode forever \
              (HardwareInfo: {:?})",
             hw,
         );
         loop {
-            // Long sleep — the watchdog task is feeding the WDT so
-            // the chip won't reset out of this state.  Screen retains
-            // the FAIL row indefinitely; that's the point.
-            Timer::after_secs(60).await;
+            // The watchdog task is feeding the WDT so the chip won't
+            // reset out of this state.  Screen retains the FAIL row
+            // indefinitely; that's the point.
+            crate::fw::led::set_color(
+                crate::fw::led::Rgb::RED,
+                embassy_time::Duration::from_millis(500),
+            );
+            Timer::after_secs(1).await;
         }
     }
 
@@ -642,15 +642,13 @@ pub async fn run_first_boot_interactive(hw: &HardwareInfo, display: &mut crate::
     // ship image itself confirms a pass anyway.
     //
     // Visible-across-the-bench LED indicator so the factory worker
-    // can tell at a glance which badges are done: red off, blue off,
-    // green pulsing at 50 % duty.  Pairs with the ship image to give
-    // both "look at the screen" and "look at the side of the badge"
-    // confirmation of pass.  Stays on through the rest of the halt;
-    // USB MSC continues running in parallel for the asset-copy
-    // script to land sprites.
-    crate::fw::led::set_led(&crate::fw::led::LED_RED, crate::fw::led::LedState::Off);
-    crate::fw::led::set_led(&crate::fw::led::LED_BLUE, crate::fw::led::LedState::Off);
-    crate::fw::led::set_led(&crate::fw::led::LED_GREEN, crate::fw::led::LedState::Duty50);
+    // can tell at a glance which badges are done: steady green while the
+    // ship image draws, then green pulsing at 50 % duty through the halt.
+    // Pairs with the ship image to give both "look at the screen" and
+    // "look at the side of the badge" confirmation of pass.  USB MSC
+    // continues running in parallel for the asset-copy script to land
+    // sprites.
+    crate::fw::led::set_color(crate::fw::led::Rgb::GREEN, crate::fw::led::FOREVER);
     mark_passed().await;
     defmt::info!("hwtest: first-boot complete — drawing ship image");
 
@@ -669,7 +667,11 @@ pub async fn run_first_boot_interactive(hw: &HardwareInfo, display: &mut crate::
     // pulled; the image on the e-paper persists either way.
     defmt::info!("hwtest: halted, ready to ship");
     loop {
-        Timer::after_secs(60).await;
+        crate::fw::led::set_color(
+            crate::fw::led::Rgb::GREEN,
+            embassy_time::Duration::from_millis(500),
+        );
+        Timer::after_secs(1).await;
     }
 }
 

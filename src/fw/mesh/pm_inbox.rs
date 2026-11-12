@@ -25,6 +25,26 @@ use core::sync::atomic::{AtomicU8, Ordering};
 
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
+
+/// Signalled when a PM arrives while no phone is connected.
+pub static PM_LED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
+/// Blink the LED blue (50 ms each second) until the PM screen is viewed,
+/// which clears [`crate::PM_UNREAD`].
+#[embassy_executor::task]
+pub async fn pm_led_task() -> ! {
+    loop {
+        PM_LED.wait().await;
+        while crate::PM_UNREAD.load(Ordering::Relaxed) {
+            crate::fw::led::set_color(
+                crate::fw::led::Rgb::BLUE,
+                embassy_time::Duration::from_millis(50),
+            );
+            embassy_time::Timer::after_secs(1).await;
+        }
+    }
+}
 
 /// Maximum cached PMs (incoming + outgoing combined).  Each entry is
 /// ~226 B (130 text + 32 name + bookkeeping), so 32 = ~7.2 KiB total.

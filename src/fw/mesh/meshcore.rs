@@ -612,21 +612,21 @@ async fn push_grp_txt(
                 .copied();
             match cmd {
                 Some(b'r') | Some(b'R') => {
-                    crate::fw::led::set_led(
-                        &crate::fw::led::LED_RED,
-                        crate::fw::led::LedState::BlinkOnce,
+                    crate::fw::led::set_color(
+                        crate::fw::led::Rgb::RED,
+                        embassy_time::Duration::from_millis(50),
                     );
                 }
                 Some(b'g') | Some(b'G') => {
-                    crate::fw::led::set_led(
-                        &crate::fw::led::LED_GREEN,
-                        crate::fw::led::LedState::BlinkOnce,
+                    crate::fw::led::set_color(
+                        crate::fw::led::Rgb::GREEN,
+                        embassy_time::Duration::from_millis(50),
                     );
                 }
                 Some(b'b') | Some(b'B') => {
-                    crate::fw::led::set_led(
-                        &crate::fw::led::LED_BLUE,
-                        crate::fw::led::LedState::BlinkOnce,
+                    crate::fw::led::set_color(
+                        crate::fw::led::Rgb::BLUE,
+                        embassy_time::Duration::from_millis(50),
                     );
                 }
                 _ => {}
@@ -1427,7 +1427,7 @@ async fn try_handle_txt_msg(
         crate::PM_UNREAD.store(true, core::sync::atomic::Ordering::Relaxed);
 
         if !crate::BLE_CONNECTED.load(core::sync::atomic::Ordering::Relaxed) {
-            crate::fw::led::set_led(&crate::fw::led::LED_BLUE, crate::fw::led::LedState::Blink);
+            super::pm_inbox::PM_LED.signal(());
         }
     }
 

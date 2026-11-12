@@ -863,11 +863,11 @@ impl ContactStore {
         // --- 1. Detect and wipe legacy records. ---
         if self.detect_legacy_records().await {
             defmt::warn!(
-                "contacts: record format mismatch — wiping store (blink LED, alpha-phase policy)"
+                "contacts: record format mismatch — wiping store (green LED, alpha-phase policy)"
             );
-            crate::fw::led::set_led(&crate::fw::led::LED_GREEN, crate::fw::led::LedState::Duty50);
+            crate::fw::led::set_color(crate::fw::led::Rgb::GREEN, crate::fw::led::FOREVER);
             self.wipe_contact_store().await;
-            crate::fw::led::set_led(&crate::fw::led::LED_GREEN, crate::fw::led::LedState::Off);
+            crate::fw::led::off();
         }
 
         // --- 2. Read/write meta. ---

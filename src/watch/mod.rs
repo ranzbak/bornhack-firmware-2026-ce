@@ -144,7 +144,8 @@ const ICS_READ_BUF_LEN: usize = 16 * 1024;
 #[cfg(feature = "embassy-core")]
 pub async fn import_alarms_from_fat12() {
     use crate::fw::fat12;
-    use crate::fw::led::{self, LED_BLUE, LedState};
+    use crate::fw::led::{self, Rgb};
+    use embassy_time::Duration;
 
     let Some(name) = fat12::to_8_3("ALARMS.ICS") else {
         return;
@@ -158,7 +159,7 @@ pub async fn import_alarms_from_fat12() {
     // the EPD takes its sweet time to refresh after, so without this
     // the user just sees a frozen pre-import frame.  Blue while we
     // read+parse, off when the slots are populated.
-    led::set_led(&LED_BLUE, LedState::On);
+    led::set_color(Rgb::BLUE, led::FOREVER);
 
     // Boxed onto the heap-equivalent? No heap — keep on stack.  16 KiB
     // is fine on the main task's stack during this brief boot phase.
@@ -166,7 +167,7 @@ pub async fn import_alarms_from_fat12() {
     let n = match fat12::read_file(&file, 0, &mut buf).await {
         Ok(n) => n,
         Err(_) => {
-            led::set_led(&LED_BLUE, LedState::Off);
+            led::off();
             return;
         }
     };
@@ -234,9 +235,10 @@ pub async fn import_alarms_from_fat12() {
 
     // Done — drop the blue "working" indicator and (on success) flash a
     // single green pulse so the user knows events landed in slots.
-    led::set_led(&LED_BLUE, LedState::Off);
     if imported > 0 {
-        led::set_led(&crate::fw::led::LED_GREEN, LedState::Duty50Once);
+        led::set_color(Rgb::GREEN, Duration::from_millis(500));
+    } else {
+        led::off();
     }
 }
 
