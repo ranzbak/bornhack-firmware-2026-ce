@@ -470,7 +470,7 @@ use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 
 use crate::menu::ButtonId;
-use crate::{BLACK, TriColor, WHITE, draw_header, ui};
+use crate::{BLACK, TriColor, draw_header, ui};
 
 #[derive(Clone, Copy)]
 enum Mode {
@@ -863,6 +863,5 @@ where
     // (25 chars, ~175 px) which ran off the right edge.
     let hint = "Fire reply  Esc back";
     Text::with_text_style(hint, Point::new(2, 152), ui::TEXT_BOLD_BLACK, bottom).draw(display)?;
-    let _ = WHITE;
     Ok(())
 }
