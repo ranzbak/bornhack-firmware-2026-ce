@@ -198,9 +198,14 @@ async fn main(spawner: Spawner) {
     .unwrap();
     #[cfg(feature = "ssd1675-driver")]
     defmt::info!("EPD initialized");
-    // EPD tuning is persisted via the mesh settings KV store; non-mesh builds
-    // boot with the compiled-in defaults (LUT speed 100, temp bias 0).
-    #[cfg(all(feature = "ssd1675-driver", feature = "mesh"))]
+    // EPD tuning and the timezone are persisted in the shared "settings" KV
+    // namespace, in every build (mesh or not). Load them synchronously here,
+    // before any task that renders with them starts.
+    bornhack_aegg::TZ_OFFSET_QH.store(
+        bornhack_aegg::fw::settings::get_timezone().await,
+        core::sync::atomic::Ordering::Relaxed,
+    );
+    #[cfg(feature = "ssd1675-driver")]
     {
         bornhack_aegg::fw::epd::load_persisted_lut_speed().await;
         bornhack_aegg::fw::epd::load_persisted_temp_bias().await;
@@ -429,6 +434,11 @@ async fn main(spawner: Spawner) {
         });
     }
 
+    // ── Device settings persister (non-mesh builds) ──────────────────────
+    // Mesh builds persist timezone + EPD tuning from `persister::run`.
+    #[cfg(not(feature = "mesh"))]
+    spawner.must_spawn(bornhack_aegg::fw::settings::persister_task());
+
     // ── Mesh stack (contacts, identity, BLE) ─────────────────────────────
     // Must come before temperature/EPD because it consumes p.RNG, p.RTC0,
     // p.TIMER0, p.TEMP, and PPI channels.
@@ -452,17 +462,9 @@ async fn main(spawner: Spawner) {
             channels::count_active().await
         );
 
-        // Load persisted display/runtime settings (timezone, boost-RX) into
-        // their in-RAM atomics SYNCHRONOUSLY here — before any task that
-        // reads them starts rendering. Previously the load lived inside the
-        // BLE task's init block, which races against the display task: on a
-        // quick reboot the display could draw a frame using the static
-        // default (TZ_OFFSET_QH = 0 → UTC) before the BLE task had a
-        // chance to load the persisted offset.
-        bornhack_aegg::TZ_OFFSET_QH.store(
-            settings::get_timezone().await,
-            core::sync::atomic::Ordering::Relaxed,
-        );
+        // Load persisted boost-RX into its in-RAM atomic SYNCHRONOUSLY here —
+        // before any task that reads it starts. (The timezone is loaded
+        // earlier, right after EPD init, for all builds.)
         bornhack_aegg::BOOSTED_RX_GAIN.store(
             settings::get_boost_rx().await,
             core::sync::atomic::Ordering::Relaxed,

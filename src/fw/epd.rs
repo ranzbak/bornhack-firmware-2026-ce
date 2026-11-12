@@ -793,13 +793,10 @@ pub static EPD_LUT_SPEED_DIRTY: Signal<CriticalSectionRawMutex, ()> = Signal::ne
 /// value (e.g. from a build that allowed lower values) locking the user
 /// out of an unreadable display.
 ///
-/// Gated on `mesh`, not `embassy-base`: the settings KV store lives under
-/// `fw::mesh::settings`, so persistence only exists in mesh builds. In
-/// non-mesh configs (embassy-game / embassy-watch) the menu still tunes the
-/// live atomic; the value just isn't saved across reboots.
-#[cfg(feature = "mesh")]
+/// Persisted in the shared `"settings"` KV namespace (`fw::settings`), which
+/// every firmware build has, so this works with or without `mesh`.
 pub async fn load_persisted_lut_speed() {
-    let scale = crate::fw::mesh::settings::get_epd_lut_speed()
+    let scale = crate::fw::settings::get_epd_lut_speed()
         .await
         .unwrap_or(100)
         .max(EPD_LUT_SPEED_MIN);
@@ -835,25 +832,24 @@ pub static EPD_TEMP_BIAS_C10: AtomicI8 = AtomicI8::new(0);
 #[cfg(feature = "embassy-core")]
 pub static EPD_TEMP_BIAS_DIRTY: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
-// Gated on `mesh` (settings KV store) — see `load_persisted_lut_speed`.
-#[cfg(feature = "mesh")]
+// Persisted via `fw::settings` — see `load_persisted_lut_speed`.
 pub async fn load_persisted_temp_bias() {
-    let v = crate::fw::mesh::settings::get_epd_temp_bias_c10()
+    let v = crate::fw::settings::get_epd_temp_bias_c10()
         .await
         .unwrap_or(0)
         .clamp(EPD_TEMP_BIAS_MIN, EPD_TEMP_BIAS_MAX);
     EPD_TEMP_BIAS_C10.store(v, Ordering::Relaxed);
 }
 
-// Spawned only by the mesh settings persister; needs `fw::mesh::settings`.
-#[cfg(feature = "mesh")]
+// Spawned by the mesh settings persister, or by `fw::settings::persister_task`
+// in non-mesh builds.
 pub async fn epd_temp_bias_persist_loop() -> ! {
     loop {
         EPD_TEMP_BIAS_DIRTY.wait().await;
         let v = EPD_TEMP_BIAS_C10
             .load(Ordering::Relaxed)
             .clamp(EPD_TEMP_BIAS_MIN, EPD_TEMP_BIAS_MAX);
-        match crate::fw::mesh::settings::set_epd_temp_bias_c10(v).await {
+        match crate::fw::settings::set_epd_temp_bias_c10(v).await {
             Ok(()) => defmt::debug!("settings: epd_temp_bias_c10={} persisted", v),
             Err(e) => defmt::warn!("settings: epd_temp_bias_c10 persist failed: {:?}", e),
         }
@@ -892,16 +888,15 @@ pub fn current_lut_speed() -> u8 {
 
 /// Persister loop: waits on [`EPD_LUT_SPEED_DIRTY`], writes the current
 /// [`EPD_LUT_SPEED`] value to the `"settings"` KV namespace.  Spawned by
-/// [`crate::fw::mesh::persister::run`] alongside the other settings loops.
-// Gated on `mesh` (settings KV store) — see `load_persisted_lut_speed`.
-#[cfg(feature = "mesh")]
+/// [`crate::fw::mesh::persister::run`] alongside the other settings loops (or
+/// [`crate::fw::settings::persister_task`] in non-mesh builds).
 pub async fn epd_lut_speed_persist_loop() -> ! {
     loop {
         EPD_LUT_SPEED_DIRTY.wait().await;
         // Clamp to the lock-out floor before persisting so a future menu
         // bug can't write an unrecoverable value.
         let scale = EPD_LUT_SPEED.load(Ordering::Relaxed).max(EPD_LUT_SPEED_MIN);
-        match crate::fw::mesh::settings::set_epd_lut_speed(scale).await {
+        match crate::fw::settings::set_epd_lut_speed(scale).await {
             Ok(()) => defmt::debug!("settings: epd_lut_speed={} persisted", scale),
             Err(e) => defmt::warn!("settings: epd_lut_speed persist failed: {:?}", e),
         }

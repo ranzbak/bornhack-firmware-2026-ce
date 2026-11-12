@@ -95,3 +95,37 @@ pub async fn get_epd_temp_bias_c10() -> Option<i8> {
 pub async fn set_epd_temp_bias_c10(bias: i8) -> Result<(), kv::KvError> {
     set_u8("epd_tb", bias as u8).await
 }
+
+// ---------------------------------------------------------------------------
+// Persister for non-mesh builds
+// ---------------------------------------------------------------------------
+
+/// Saves timezone and EPD tuning changes made from the menu. Mesh builds do
+/// this from `fw::mesh::persister::run` (which also owns the other mesh
+/// settings); builds without `mesh` spawn this instead.
+#[cfg(not(feature = "mesh"))]
+#[embassy_executor::task]
+pub async fn persister_task() -> ! {
+    let tz = async {
+        loop {
+            crate::TZ_CHANGED_SIGNAL.wait().await;
+            let offset = crate::TZ_OFFSET_QH.load(core::sync::atomic::Ordering::Relaxed);
+            match set_timezone(offset).await {
+                Ok(()) => defmt::debug!("settings: timezone={} qh persisted", offset),
+                Err(e) => defmt::warn!("settings: timezone persist failed: {:?}", e),
+            }
+        }
+    };
+    // EPD LUT-speed / temperature-bias tuning is SSD1675-only.
+    #[cfg(feature = "ssd1675-driver")]
+    let epd = embassy_futures::join::join(
+        crate::fw::epd::epd_lut_speed_persist_loop(),
+        crate::fw::epd::epd_temp_bias_persist_loop(),
+    );
+    #[cfg(not(feature = "ssd1675-driver"))]
+    let epd = core::future::pending::<()>();
+    let _: ((), _) = embassy_futures::join::join(tz, epd).await;
+    loop {
+        core::future::pending::<()>().await;
+    }
+}
