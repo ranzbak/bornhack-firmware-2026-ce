@@ -425,9 +425,7 @@ where
     // Full-screen white wipe so the previous frame's content (game
     // icons, pet area, leftover toast, …) doesn't bleed through under
     // and around the board.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     for idx in 0..CELLS {
         let gem = BOARD[idx].load(Ordering::Relaxed);

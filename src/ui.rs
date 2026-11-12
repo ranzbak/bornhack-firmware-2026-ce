@@ -111,6 +111,21 @@ where
 }
 
 // ---------------------------------------------------------------------------
+// Full-screen clear
+// ---------------------------------------------------------------------------
+
+/// Wipe the whole 152×152 panel to white.  Every screen that owns the
+/// full display starts with this so the previous frame doesn't bleed
+/// through.  `DrawTarget::clear` fills the target's bounding box, which
+/// is exactly 152×152 on every panel adapter and the simulator.
+pub fn clear_screen<D>(display: &mut D) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    display.clear(WHITE)
+}
+
+// ---------------------------------------------------------------------------
 // "No data" placeholder
 // ---------------------------------------------------------------------------
 

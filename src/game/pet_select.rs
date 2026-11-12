@@ -21,7 +21,7 @@ use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
 
 use super::engine::PetKind;
 use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_BLACK, TEXT_BOLD_WHITE};
-use crate::{BLACK, TriColor, WHITE};
+use crate::{BLACK, TriColor};
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -216,9 +216,7 @@ where
     let selection = SELECTION.load(Ordering::Relaxed) as usize;
 
     // Background.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     let title = if PHASE.load(Ordering::Relaxed) == PHASE_MONEY {
         "Play with money?"

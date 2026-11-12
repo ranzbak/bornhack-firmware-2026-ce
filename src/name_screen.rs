@@ -73,9 +73,7 @@ where
     let _ = bat_prc; // Battery isn't surfaced on this screen — name stands alone.
 
     // Clear the panel — bottom half stays white, top is overdrawn red below.
-    Rectangle::new(Point::new(0, 0), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     // ── Red band: filled rectangle covering the top portion ───────────────
     Rectangle::new(Point::new(0, 0), Size::new(152, RED_BAND_BOTTOM as u32))
