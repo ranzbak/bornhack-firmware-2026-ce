@@ -3102,21 +3102,79 @@ async fn try_dispatch_response_by_pk(
         return Ok(());
     }
 
-    // Pending admin status request (REQ_TYPE_GET_STATUS, tag-based match).
-    // Plaintext layout: [ts:4 LE][RepeaterStats:56]. After txt_msg::decrypt
-    // that becomes dec.timestamp = ts, dec.flags = stats[0], dec.text =
-    // stats[1..] (with trailing zero bytes stripped). We reassemble the full
-    // 56-byte blob and parse it manually.
-    if crate::PENDING_ADMIN_STATUS_TAG.take_if_match(dec.timestamp) {
-        let mut stats = [0u8; 56];
-        stats[0] = dec.flags;
-        let tail_len = dec.text.len().min(55);
-        stats[1..1 + tail_len].copy_from_slice(&dec.text[..tail_len]);
+    // Everything below is the pending-request ladder shared with the
+    // Path-wrapped form (see `dispatch_response_plain`). The plaintext body
+    // starts at plaintext[4]; `txt_msg::decrypt` splits it into `dec.flags`
+    // (first body byte) and `dec.text` (the rest, trailing zeros stripped).
+    //
+    // `trimmed` is that stripped view (flags ++ text): admin status, telemetry
+    // and login read it. The generic binary response needs the body up to the
+    // AES block boundary, so neighbours/ACL entries that happen to end in zero
+    // bytes aren't truncated: msg.data is the raw ciphertext, a multiple of
+    // the AES block size, and body length = total plaintext - timestamp(4).
+    let body_len = msg.data.len().saturating_sub(4);
+    let mut trimmed: heapless::Vec<u8, { crate::MAX_BINARY_RESP_BODY }> = heapless::Vec::new();
+    let _ = trimmed.push(dec.flags);
+    let _ = trimmed.extend_from_slice(&dec.text);
+    let mut body: heapless::Vec<u8, { crate::MAX_BINARY_RESP_BODY }> = heapless::Vec::new();
+    if body_len > 0 {
+        let _ = body.push(dec.flags);
+        let tail_need = body_len - 1;
+        let tail_copy = dec.text.len().min(tail_need);
+        let _ = body.extend_from_slice(&dec.text[..tail_copy]);
+        // Zero-pad the rest so the block-aligned length is preserved.
+        while body.len() < body_len.min(crate::MAX_BINARY_RESP_BODY) {
+            let _ = body.push(0);
+        }
+    }
 
-        let result = parse_repeater_stats(&stats, pub_key, dec.timestamp);
+    dispatch_response_plain(sender_pk, dec.timestamp, &body, &trimmed, None, "Response recv");
+    Ok(())
+}
+
+/// Path-specific context for [`dispatch_response_plain`]: a Path-wrapped
+/// response also carries the route the server used to reach us.
+struct PathCtx<'a> {
+    path_len_byte: u8,
+    path: &'a [u8],
+}
+
+/// Match a decrypted response (`tag` + `body`) against the pending requests
+/// and forward the result to the matching channel. Shared by plain
+/// `Response` packets and `Path`-wrapped responses (`extra_type == 1`).
+///
+/// Ladder, in order: admin status, telemetry, path discovery (Path form
+/// only), login, then everything else as a generic binary response (solicited
+/// when `PENDING_BINARY_REQ_TAG` matches, unsolicited otherwise).
+///
+/// `body` is the response body verbatim (the Response form re-pads it to the
+/// AES block boundary, the Path form already keeps its trailing zeros).
+/// `trimmed` is the same body without trailing zero bytes, which is what the
+/// Response form always had on hand for admin status, telemetry and login;
+/// the Path form passes `body` for both. `src` prefixes the log lines.
+fn dispatch_response_plain(
+    sender_pk: &[u8; meshcore::PUB_KEY_SIZE],
+    tag: u32,
+    body: &[u8],
+    trimmed: &[u8],
+    path: Option<PathCtx<'_>>,
+    src: &'static str,
+) {
+    let mut pub_key = [0u8; meshcore::PUB_KEY_SIZE];
+    pub_key.copy_from_slice(sender_pk);
+
+    // Pending admin status request (REQ_TYPE_GET_STATUS, tag-based match).
+    // Body is the 56-byte RepeaterStats blob, zero-padded or truncated to fit.
+    if crate::PENDING_ADMIN_STATUS_TAG.take_if_match(tag) {
+        let mut stats = [0u8; 56];
+        let n = trimmed.len().min(56);
+        stats[..n].copy_from_slice(&trimmed[..n]);
+
+        let result = parse_repeater_stats(&stats, pub_key, tag);
 
         defmt::info!(
-            "Response recv: ADMIN_STATUS from {=[u8]:02x} tag={=u32:#010x} up={=u32}s batt={=u16}mV queue={=u16} rssi={=i16} snrX4={=i16} recv={=u32} sent={=u32}",
+            "{=str}: ADMIN_STATUS from {=[u8]:02x} tag={=u32:#010x} up={=u32}s batt={=u16}mV queue={=u16} rssi={=i16} snrX4={=i16} recv={=u32} sent={=u32}",
+            src,
             &sender_pk[..6],
             result.tag,
             result.total_up_time_secs,
@@ -3132,107 +3190,125 @@ async fn try_dispatch_response_by_pk(
 
         // Forward the raw stats blob to BLE for PUSH_CODE_STATUS_RESPONSE.
         let _ = crate::STATUS_RESULT_CHANNEL.try_send(crate::StatusResult { pub_key, stats });
-        return Ok(());
+        return;
     }
 
-    // Pending telemetry request (tag-based match).
-    if crate::PENDING_TELEM_TAG.take_if_match(dec.timestamp) {
-        // CayenneLPP = flags_byte (= data[4]) followed by dec.text (= data[5..]).
+    // Pending telemetry request (tag-based match). Body is CayenneLPP.
+    if crate::PENDING_TELEM_TAG.take_if_match(tag) {
         let mut lpp: heapless::Vec<u8, 176> = heapless::Vec::new();
-        let _ = lpp.push(dec.flags);
-        let _ = lpp.extend_from_slice(&dec.text);
+        let n = trimmed.len().min(176);
+        let _ = lpp.extend_from_slice(&trimmed[..n]);
 
         defmt::info!(
-            "Response recv: TELEM from {=[u8]:02x} lpp={=usize}B",
+            "{=str}: TELEM from {=[u8]:02x} tag={=u32:#010x} lpp={=usize}B",
+            src,
             &sender_pk[..6],
+            tag,
             lpp.len(),
         );
 
         let _ = crate::TELEM_RESULT_CHANNEL.try_send(crate::TelemResult { pub_key, lpp });
-        return Ok(());
+        return;
+    }
+
+    // Pending path-discovery request (tag-based match). Only a Path-wrapped
+    // response carries the discovered route.
+    if let Some(ctx) = &path
+        && crate::PENDING_DISCOVERY_TAG.take_if_match(tag)
+    {
+        let mut out_path: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
+        let _ = out_path.extend_from_slice(ctx.path);
+        let in_path: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
+
+        defmt::info!(
+            "{=str}: DISCOVERY response from {=[u8]:02x} tag={=u32:#010x} out_path_len={=u8}",
+            src,
+            &sender_pk[..6],
+            tag,
+            ctx.path_len_byte,
+        );
+
+        let _ = crate::DISCOVERY_RESULT_CHANNEL.try_send(crate::DiscoveryResult {
+            pub_key,
+            out_path_len_byte: ctx.path_len_byte,
+            out_path,
+            in_path_len_byte: 0xFF,
+            in_path,
+        });
+        return;
     }
 
     // Pending login to this contact (upstream `pending_login`, matched on the
     // pub-key prefix). The MAC verified, so this contact is the right peer.
     if crate::PENDING_LOGIN.take_if_match(crate::login_tag(&pub_key)) {
-        let success = resp_type == 0 || (resp_type == b'O' && dec.text.first() == Some(&b'K'));
+        // Path extras keep their trailing zeros, so a short one is malformed.
+        // Response bodies are stripped and are read leniently below.
+        if path.is_some() && body.len() + 4 < meshcore::payload::path_msg::LOGIN_RESPONSE_EXTRA_LEN {
+            warn_login_too_short(body.len() + 4);
+            return;
+        }
+
+        // Body layout (same as the plaintext seen by C++ `onContactResponse`
+        // after the 4-byte tag):
+        //   [0] resp_type  [1] keep_alive/16 (b'K' in the legacy reply)
+        //   [2] is_admin   [3] acl_perms     [4..8] random   [8] fw_ver_level
+        let at = |i: usize| trimmed.get(i).copied().unwrap_or(0);
+        let resp_type = at(0);
+        // RESP_SERVER_LOGIN_OK = 0 (new format); legacy is b'O' followed by b'K'.
+        let success = resp_type == 0 || (resp_type == b'O' && trimmed.get(1) == Some(&b'K'));
 
         defmt::info!(
-            "Response recv: login {} from {=[u8]:02x} resp_type={=u8}",
+            "{=str}: login {} from {=[u8]:02x} resp_type={=u8} tag={=u32:#010x}",
+            src,
             if success { "OK" } else { "FAIL" },
             &sender_pk[..6],
             resp_type,
+            tag,
         );
-
-        let tag = dec.timestamp;
-
-        let is_admin = if success {
-            dec.text.get(1).copied().unwrap_or(0)
-        } else {
-            0
-        };
-        let acl_perms = if success {
-            dec.text.get(2).copied().unwrap_or(0)
-        } else {
-            0
-        };
-        let fw_ver_level = if success {
-            dec.text.get(7).copied().unwrap_or(0)
-        } else {
-            0
-        };
 
         let _ = crate::LOGIN_RESULT_CHANNEL.try_send(crate::LoginResult {
             success,
-            is_admin,
+            is_admin: if success { at(2) } else { 0 },
             pub_key,
             tag,
-            acl_perms,
-            fw_ver_level,
+            acl_perms: if success { at(3) } else { 0 },
+            fw_ver_level: if success { at(8) } else { 0 },
         });
-        return Ok(());
+        return;
     }
 
     // Pending generic binary request (CMD_SEND_BINARY_REQ), or any response
     // nobody is waiting for (e.g. a sensor's unsolicited telemetry push):
     // forward it to the app as PUSH_CODE_BINARY_RESPONSE, like upstream 1.18
     // `onContactResponse`, instead of mistaking it for a login reply.
-    // Response body starts at plaintext[4]; in our txt_msg::decrypt view
-    // that's dec.flags (first body byte) followed by dec.text (rest, trailing
-    // zeros stripped). We reassemble the padded body up to the AES block
-    // boundary so neighbours/ACL entries that happen to end in zero bytes
-    // aren't truncated.
-    let solicited = crate::PENDING_BINARY_REQ_TAG.take_if_match(dec.timestamp);
-    let binary_tag = dec.timestamp;
-    // msg.data is the raw ciphertext; length is a multiple of AES block size.
-    // Body length = total plaintext - timestamp(4) = msg.data.len() - 4.
-    let body_len = msg.data.len().saturating_sub(4);
-    let mut body: heapless::Vec<u8, { crate::MAX_BINARY_RESP_BODY }> = heapless::Vec::new();
-    if body_len > 0 {
-        let _ = body.push(dec.flags);
-        let tail_need = body_len - 1;
-        let tail_copy = dec.text.len().min(tail_need);
-        let _ = body.extend_from_slice(&dec.text[..tail_copy]);
-        // Zero-pad the rest so the block-aligned length is preserved.
-        while body.len() < body_len.min(crate::MAX_BINARY_RESP_BODY) {
-            let _ = body.push(0);
-        }
-    }
+    let solicited = crate::PENDING_BINARY_REQ_TAG.take_if_match(tag);
+    let mut out: heapless::Vec<u8, { crate::MAX_BINARY_RESP_BODY }> = heapless::Vec::new();
+    let n = body.len().min(crate::MAX_BINARY_RESP_BODY);
+    let _ = out.extend_from_slice(&body[..n]);
 
     defmt::info!(
-        "Response recv: BINARY from {=[u8]:02x} tag={=u32:#010x} body={=usize}B solicited={=bool}",
+        "{=str}: BINARY from {=[u8]:02x} tag={=u32:#010x} body={=usize}B solicited={=bool}",
+        src,
         &sender_pk[..6],
-        binary_tag,
-        body.len(),
+        tag,
+        out.len(),
         solicited,
     );
 
     let _ = crate::BINARY_RESULT_CHANNEL.try_send(crate::BinaryResult {
         pub_key,
-        tag: binary_tag,
-        body,
+        tag,
+        body: out,
     });
-    Ok(())
+}
+
+/// A Path-wrapped login response whose extra bytes are too short to read.
+fn warn_login_too_short(len: usize) {
+    defmt::warn!(
+        "Path login response: extra too short ({=usize}B, need {=usize}B)",
+        len,
+        meshcore::payload::path_msg::LOGIN_RESPONSE_EXTRA_LEN,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -3403,188 +3479,31 @@ async fn try_dispatch_path_by_pk(
         return Ok(());
     }
 
-    // PAYLOAD_TYPE_RESPONSE = 1 → admin-status / discovery / login / other
-    // binary response.
+    // PAYLOAD_TYPE_RESPONSE = 1 → admin-status / telemetry / discovery / login
+    // / other binary response. Extra layout: `[tag:4 LE][body...]`; path
+    // extras preserve trailing zero bytes, so the body is used verbatim.
     if dec.extra_type == 1 {
-        // Pending admin status request (tag = extra[0..4]). Path-decrypted
-        // extras preserve trailing zero bytes, so we can parse stats directly.
-        if dec.extra.len() >= 4 {
-            let resp_tag =
-                u32::from_le_bytes([dec.extra[0], dec.extra[1], dec.extra[2], dec.extra[3]]);
-            if crate::PENDING_ADMIN_STATUS_TAG.take_if_match(resp_tag) {
-                let admin_tag = resp_tag;
-                let mut pub_key = [0u8; meshcore::PUB_KEY_SIZE];
-                pub_key.copy_from_slice(sender_pk);
-
-                // Copy the raw stats blob (truncate or zero-pad to exactly 56B).
-                let mut stats = [0u8; 56];
-                let n = (dec.extra.len() - 4).min(56);
-                stats[..n].copy_from_slice(&dec.extra[4..4 + n]);
-
-                let result = parse_repeater_stats(&stats, pub_key, admin_tag);
-
-                defmt::info!(
-                    "Path recv: ADMIN_STATUS from {=[u8]:02x} tag={=u32:#010x} up={=u32}s batt={=u16}mV queue={=u16} rssi={=i16} snrX4={=i16} recv={=u32} sent={=u32}",
-                    &sender_pk[..6],
-                    result.tag,
-                    result.total_up_time_secs,
-                    result.batt_milli_volts,
-                    result.curr_tx_queue_len,
-                    result.last_rssi,
-                    result.last_snr_x4,
-                    result.n_packets_recv,
-                    result.n_packets_sent,
-                );
-
-                let _ = crate::ADMIN_STATUS_RESULT_CHANNEL.try_send(result);
-                let _ =
-                    crate::STATUS_RESULT_CHANNEL.try_send(crate::StatusResult { pub_key, stats });
-                return Ok(());
-            }
-        }
-
-        // Pending telemetry request (tag = extra[0..4]). Body is CayenneLPP.
-        if dec.extra.len() >= 4 {
-            let resp_tag =
-                u32::from_le_bytes([dec.extra[0], dec.extra[1], dec.extra[2], dec.extra[3]]);
-            if crate::PENDING_TELEM_TAG.take_if_match(resp_tag) {
-                let telem_tag = resp_tag;
-                let mut pub_key = [0u8; meshcore::PUB_KEY_SIZE];
-                pub_key.copy_from_slice(sender_pk);
-
-                let mut lpp: heapless::Vec<u8, 176> = heapless::Vec::new();
-                let n = (dec.extra.len() - 4).min(176);
-                let _ = lpp.extend_from_slice(&dec.extra[4..4 + n]);
-
-                defmt::info!(
-                    "Path recv: TELEM from {=[u8]:02x} tag={=u32:#010x} lpp={=usize}B",
-                    &sender_pk[..6],
-                    telem_tag,
-                    lpp.len(),
-                );
-
-                let _ = crate::TELEM_RESULT_CHANNEL.try_send(crate::TelemResult { pub_key, lpp });
-                return Ok(());
-            }
-        }
-
-        // Pending discovery request (tag = extra[0..4]).
-        if dec.extra.len() >= 4 {
-            let resp_tag =
-                u32::from_le_bytes([dec.extra[0], dec.extra[1], dec.extra[2], dec.extra[3]]);
-            if crate::PENDING_DISCOVERY_TAG.take_if_match(resp_tag) {
-                let disc_tag = resp_tag;
-                let mut out_path: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> =
-                    heapless::Vec::new();
-                let _ = out_path.extend_from_slice(&dec.path);
-                let in_path: heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }> = heapless::Vec::new();
-
-                let mut pub_key = [0u8; meshcore::PUB_KEY_SIZE];
-                pub_key.copy_from_slice(sender_pk);
-
-                defmt::info!(
-                    "Path recv: DISCOVERY response from {=[u8]:02x} tag={=u32:#010x} out_path_len={=u8}",
-                    &sender_pk[..6],
-                    disc_tag,
-                    dec.path_len_byte,
-                );
-
-                let _ = crate::DISCOVERY_RESULT_CHANNEL.try_send(crate::DiscoveryResult {
-                    pub_key,
-                    out_path_len_byte: dec.path_len_byte,
-                    out_path,
-                    in_path_len_byte: 0xFF,
-                    in_path,
-                });
-                return Ok(());
-            }
-        }
-
-        // Pending login to this contact (upstream `pending_login`).
-        if crate::PENDING_LOGIN.take_if_match(crate::login_tag(sender_pk)) {
-            handle_path_login_response(&dec.extra, sender_pk);
-            return Ok(());
-        }
-
-        // Pending generic binary request (CMD_SEND_BINARY_REQ), or a response
-        // nobody is waiting for (e.g. a sensor's telemetry push): forward to
-        // the app as PUSH_CODE_BINARY_RESPONSE (MeshCore 1.18
-        // `onContactResponse`). Path-decrypted extras preserve trailing zero
-        // bytes, so the body is forwarded verbatim.
         if dec.extra.len() >= 4 {
             let tag = u32::from_le_bytes([dec.extra[0], dec.extra[1], dec.extra[2], dec.extra[3]]);
-            let solicited = crate::PENDING_BINARY_REQ_TAG.take_if_match(tag);
-            let mut pub_key = [0u8; meshcore::PUB_KEY_SIZE];
-            pub_key.copy_from_slice(sender_pk);
-            let mut body: heapless::Vec<u8, { crate::MAX_BINARY_RESP_BODY }> = heapless::Vec::new();
-            let n = (dec.extra.len() - 4).min(crate::MAX_BINARY_RESP_BODY);
-            let _ = body.extend_from_slice(&dec.extra[4..4 + n]);
-
-            defmt::info!(
-                "Path recv: BINARY from {=[u8]:02x} tag={=u32:#010x} body={=usize}B solicited={=bool}",
-                &sender_pk[..6],
+            let body = &dec.extra[4..];
+            dispatch_response_plain(
+                sender_pk,
                 tag,
-                body.len(),
-                solicited,
+                body,
+                body,
+                Some(PathCtx {
+                    path_len_byte: dec.path_len_byte,
+                    path: &dec.path,
+                }),
+                "Path recv",
             );
-
-            let _ =
-                crate::BINARY_RESULT_CHANNEL.try_send(crate::BinaryResult { pub_key, tag, body });
+        } else if crate::PENDING_LOGIN.take_if_match(crate::login_tag(sender_pk)) {
+            // Too short for a tag, so only a (malformed) login can match.
+            warn_login_too_short(dec.extra.len());
         }
     }
 
     Ok(())
-}
-
-/// Extract and push a login result from path-packet extra bytes.
-///
-/// Extra byte layout (same as the plaintext seen by C++ `onContactResponse`):
-///   `[timestamp:4
-/// LE][resp_type:1][keep_alive:1][is_admin:1][acl_perms:1][random:
-/// 4][fw_ver_level:1]`
-fn handle_path_login_response(extra: &[u8], sender_pub_key: &[u8; meshcore::PUB_KEY_SIZE]) {
-    if extra.len() < path_msg::LOGIN_RESPONSE_EXTRA_LEN {
-        defmt::warn!(
-            "Path login response: extra too short ({=usize}B, need {=usize}B)",
-            extra.len(),
-            path_msg::LOGIN_RESPONSE_EXTRA_LEN,
-        );
-        return;
-    }
-
-    use meshcore::payload::path_msg;
-
-    let tag = u32::from_le_bytes([extra[0], extra[1], extra[2], extra[3]]);
-    let resp_type = extra[4];
-    // extra[5] = keep_alive / 16
-    let is_admin = extra[6];
-    let acl_perms = extra[7];
-    // extra[8..12] = random
-    let fw_ver_level = extra[12];
-
-    // RESP_SERVER_LOGIN_OK = 0 (new format).
-    // Legacy: resp_type == b'O' and extra[5] == b'K'.
-    let success = resp_type == 0 || (resp_type == b'O' && extra.get(5) == Some(&b'K'));
-
-    defmt::info!(
-        "Path login response: {} from {=[u8]:02x} resp_type={=u8} tag={=u32:#010x}",
-        if success { "OK" } else { "FAIL" },
-        &sender_pub_key[..6],
-        resp_type,
-        tag,
-    );
-
-    let mut pub_key = [0u8; meshcore::PUB_KEY_SIZE];
-    pub_key.copy_from_slice(sender_pub_key);
-
-    let _ = crate::LOGIN_RESULT_CHANNEL.try_send(crate::LoginResult {
-        success,
-        is_admin: if success { is_admin } else { 0 },
-        pub_key,
-        tag,
-        acl_perms: if success { acl_perms } else { 0 },
-        fw_ver_level: if success { fw_ver_level } else { 0 },
-    });
 }
 
 // ---------------------------------------------------------------------------
