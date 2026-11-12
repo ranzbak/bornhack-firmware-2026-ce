@@ -31,22 +31,10 @@ pub async fn load_and_install(mode: Mode) -> (Mode, bool) {
 
     let mut values = mode.preset();
 
-    let Some(name) = fat12::to_8_3("BORNPETS.CFG") else {
-        thresholds::install(values, mode, false);
-        return (mode, false);
-    };
-    let Ok(file) = fat12::find_file(&name).await else {
-        thresholds::install(values, mode, false);
-        return (mode, false);
-    };
-
     let mut buf = [0u8; READ_BUF_LEN];
-    let n = match fat12::read_file(&file, 0, &mut buf).await {
-        Ok(n) => n,
-        Err(_) => {
-            thresholds::install(values, mode, false);
-            return (mode, false);
-        }
+    let Ok(n) = fat12::read_named("BORNPETS.CFG", &mut buf).await else {
+        thresholds::install(values, mode, false);
+        return (mode, false);
     };
 
     let applied = apply_overrides(&mut values, &buf[..n]);

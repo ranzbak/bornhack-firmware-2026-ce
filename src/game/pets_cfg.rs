@@ -38,14 +38,10 @@ pub async fn load_and_install() {
 
     let mut pets: heapless::Vec<PetDef, MAX_PETS> = heapless::Vec::new();
 
-    if let Some(name) = fat12::to_8_3("PETS.CFG")
-        && let Ok(file) = fat12::find_file(&name).await
-    {
-        let mut buf = [0u8; READ_BUF_LEN];
-        if let Ok(n) = fat12::read_file(&file, 0, &mut buf).await {
-            let parsed = parse(&buf[..n], &mut pets);
-            defmt::info!("PETS.CFG: {} pet(s) parsed", parsed);
-        }
+    let mut buf = [0u8; READ_BUF_LEN];
+    if let Ok(n) = fat12::read_named("PETS.CFG", &mut buf).await {
+        let parsed = parse(&buf[..n], &mut pets);
+        defmt::info!("PETS.CFG: {} pet(s) parsed", parsed);
     }
 
     if pets.is_empty() {

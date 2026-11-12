@@ -518,6 +518,15 @@ pub async fn read_file(file: &FileRef, offset: u32, buf: &mut [u8]) -> Result<us
     Ok(bytes_read)
 }
 
+/// Read the start of a root-directory file named `name` (any case, `NAME.EXT`
+/// form) into `buf`. Returns the bytes read; `FileNotFound` if the name is not
+/// a valid 8.3 name or the file is absent.
+pub async fn read_named(name: &str, buf: &mut [u8]) -> Result<usize, FatError> {
+    let name_8_3 = to_8_3(name).ok_or(FatError::FileNotFound)?;
+    let file = find_file(&name_8_3).await?;
+    read_file(&file, 0, buf).await
+}
+
 /// Stream `file` through `scratch` line by line, invoking `f` once per
 /// text line (without its `\n`). Lines may span read-chunk boundaries —
 /// the partial tail is carried over between reads — so the file itself
