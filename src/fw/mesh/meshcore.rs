@@ -1630,6 +1630,52 @@ async fn tx_packet(
     }
 }
 
+/// Encrypt `text` into a `PAYLOAD_TYPE_TXT_MSG`-shaped body for `dest` and
+/// serialize it. This is the envelope for plain/CLI messages and for every
+/// REQ (`txt_type`/`attempt` carry the request type in the flags byte).
+/// Returns the payload and the expected ack hash; on failure logs
+/// `who: encrypt failed` / `who: serialize failed` and returns `None`.
+fn encrypt_txt_payload(
+    who: &'static str,
+    identity: &DeviceIdentity,
+    dest: &[u8; meshcore::PUB_KEY_SIZE],
+    timestamp: u32,
+    txt_type: u8,
+    attempt: u8,
+    text: &[u8],
+) -> Option<(heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }>, u32)> {
+    use meshcore::payload::txt_msg;
+
+    let (encrypted, ack_hash) = match txt_msg::encrypt(
+        &identity.sec_key,
+        &identity.pub_key,
+        dest,
+        timestamp,
+        txt_type,
+        attempt,
+        text,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            defmt::warn!("{=str}: encrypt failed: {:?}", who, defmt::Debug2Format(&e));
+            return None;
+        }
+    };
+
+    let mut payload_buf = [0u8; meshcore::MAX_PAYLOAD_SIZE];
+    let mut payload_len = 0usize;
+    if let Err(e) = txt_msg::serialize(&encrypted, &mut payload_buf, &mut payload_len) {
+        defmt::warn!(
+            "{=str}: serialize failed: {:?}",
+            who,
+            defmt::Debug2Format(&e)
+        );
+        return None;
+    }
+    let payload = heapless::Vec::from_slice(&payload_buf[..payload_len]).ok()?;
+    Some((payload, ack_hash))
+}
+
 // ---------------------------------------------------------------------------
 // Channel message transmission
 // ---------------------------------------------------------------------------
@@ -1905,7 +1951,6 @@ async fn send_txt_msg(
 ) {
     use meshcore::packet::{PayloadType, RouteType};
     use meshcore::payload::txt_msg;
-    use meshcore::MAX_PAYLOAD_SIZE;
 
     // Hint for the RX fast path so the CLI reply (or plain-chat reply) lands
     // on a single O(1) find_by_key instead of a 300-slot linear scan.
@@ -1916,37 +1961,18 @@ async fn send_txt_msg(
         .find_by_key(&req.recipient_pub_key)
         .await;
 
-    let (encrypted, expected_ack) = match txt_msg::encrypt(
-        &identity.sec_key,
-        &identity.pub_key,
+    let Some((msg_payload, expected_ack)) = encrypt_txt_payload(
+        "send_txt_msg",
+        identity,
         &req.recipient_pub_key,
         req.timestamp,
         req.txt_type,
         req.attempt,
         &req.text,
-    ) {
-        Ok(e) => e,
-        Err(e) => {
-            defmt::warn!(
-                "send_txt_msg: encrypt failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-            return;
-        }
+    ) else {
+        return;
     };
 
-    let mut payload_buf = [0u8; MAX_PAYLOAD_SIZE];
-    let mut payload_len = 0usize;
-    if let Err(e) = txt_msg::serialize(&encrypted, &mut payload_buf, &mut payload_len) {
-        defmt::warn!(
-            "send_txt_msg: serialize failed: {:?}",
-            defmt::Debug2Format(&e)
-        );
-        return;
-    }
-
-    let mut msg_payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
-    let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
     let route = route_for_contact(contact.as_ref(), PayloadType::TxtMsg, &msg_payload);
     let direct = route.route == RouteType::Direct;
@@ -2132,35 +2158,20 @@ pub async fn send_pm(
 ) {
     use meshcore::packet::PayloadType;
     use meshcore::payload::txt_msg;
-    use meshcore::MAX_PAYLOAD_SIZE;
 
-    let (msg, expected_ack) = match txt_msg::encrypt(
-        &identity.sec_key,
-        &identity.pub_key,
+    let Some((msg_payload, expected_ack)) = encrypt_txt_payload(
+        "send_pm",
+        identity,
         recipient_pk,
         timestamp,
         txt_msg::TXT_TYPE_PLAIN,
         0,
         text,
-    ) {
-        Ok(m) => m,
-        Err(e) => {
-            defmt::warn!("send_pm: encrypt failed: {:?}", defmt::Debug2Format(&e));
-            return;
-        }
+    ) else {
+        return;
     };
 
     defmt::info!("send_pm: expected_ack={=u32:#010x}", expected_ack);
-
-    let mut payload_buf = [0u8; MAX_PAYLOAD_SIZE];
-    let mut payload_len = 0usize;
-    if let Err(e) = txt_msg::serialize(&msg, &mut payload_buf, &mut payload_len) {
-        defmt::warn!("send_pm: serialize failed: {:?}", defmt::Debug2Format(&e));
-        return;
-    }
-
-    let mut msg_payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
-    let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
     // TxtMsg uses Direct route so the full path to the recipient is embedded.
     // For now we send as Flood — the recipient will filter on dest_pub_key.
@@ -2431,42 +2442,21 @@ async fn send_telem_request(
     // attempt = REQ_TYPE_TELEMETRY so that flags byte = 0x03 in the AES plaintext.
     let text: [u8; 8] = [0u8; 8]; // reserved(4) + random(4) — zeros acceptable
 
-    let (encrypted, _ack_hash) = match meshcore::payload::txt_msg::encrypt(
-        &identity.sec_key,
-        &identity.pub_key,
+    let Some((payload_vec, _)) = encrypt_txt_payload(
+        "send_telem_req",
+        identity,
         &req.pub_key,
         req.tag,
-        0,                  // txt_type = 0 → upper bits of flags = 0
-        REQ_TYPE_TELEMETRY, // attempt field → flags & 3 = 0x03
+        0,
+        REQ_TYPE_TELEMETRY,
         &text,
-    ) {
-        Ok(r) => r,
-        Err(e) => {
-            defmt::warn!(
-                "send_telem_req: encrypt failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-            return;
-        }
-    };
-
-    let mut payload_buf = [0u8; meshcore::MAX_PAYLOAD_SIZE];
-    let mut payload_len = 0usize;
-    if let Err(e) =
-        meshcore::payload::txt_msg::serialize(&encrypted, &mut payload_buf, &mut payload_len)
-    {
-        defmt::warn!(
-            "send_telem_req: serialize failed: {:?}",
-            defmt::Debug2Format(&e)
-        );
+    ) else {
         return;
-    }
+    };
 
     let contact = contacts::ContactStore::new()
         .find_by_key(&req.pub_key)
         .await;
-    let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
-    let _ = payload_vec.extend_from_slice(&payload_buf[..payload_len]);
 
     let route = route_for_contact(contact.as_ref(), PayloadType::Req, &payload_vec);
     let Some(frame) = build_frame("send_telem_req", PayloadType::Req, route, payload_vec) else {
@@ -2561,47 +2551,27 @@ async fn send_admin_status_request(
     identity: &DeviceIdentity,
 ) {
     use meshcore::packet::PayloadType;
-    use meshcore::payload::txt_msg;
 
     const REQ_TYPE_GET_STATUS: u8 = 0x01;
     let text: [u8; 8] = [0u8; 8];
 
     crate::LAST_REQ_TARGET.lock(|cell| cell.set(Some(req.pub_key)));
 
-    let (encrypted, _ack_hash) = match txt_msg::encrypt(
-        &identity.sec_key,
-        &identity.pub_key,
+    let Some((payload_vec, _)) = encrypt_txt_payload(
+        "send_admin_status_req",
+        identity,
         &req.pub_key,
         req.tag,
-        0,                   // txt_type = 0
-        REQ_TYPE_GET_STATUS, // attempt → flags & 3 = 0x01
+        0,
+        REQ_TYPE_GET_STATUS,
         &text,
-    ) {
-        Ok(r) => r,
-        Err(e) => {
-            defmt::warn!(
-                "send_admin_status_req: encrypt failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-            return;
-        }
-    };
-
-    let mut payload_buf = [0u8; meshcore::MAX_PAYLOAD_SIZE];
-    let mut payload_len = 0usize;
-    if let Err(e) = txt_msg::serialize(&encrypted, &mut payload_buf, &mut payload_len) {
-        defmt::warn!(
-            "send_admin_status_req: serialize failed: {:?}",
-            defmt::Debug2Format(&e)
-        );
+    ) else {
         return;
-    }
+    };
 
     let contact = contacts::ContactStore::new()
         .find_by_key(&req.pub_key)
         .await;
-    let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
-    let _ = payload_vec.extend_from_slice(&payload_buf[..payload_len]);
 
     let route = route_for_contact(contact.as_ref(), PayloadType::Req, &payload_vec);
     let Some(frame) = build_frame(
@@ -2769,7 +2739,6 @@ async fn send_binary_request(
     identity: &DeviceIdentity,
 ) {
     use meshcore::packet::PayloadType;
-    use meshcore::payload::txt_msg;
 
     if req.req_data.is_empty() {
         defmt::warn!("send_binary_req: empty req_data — dropping");
@@ -2783,40 +2752,21 @@ async fn send_binary_request(
     let attempt = req_type & 0x03;
     let txt_type = req_type >> 2;
 
-    let (encrypted, _ack_hash) = match txt_msg::encrypt(
-        &identity.sec_key,
-        &identity.pub_key,
+    let Some((payload_vec, _)) = encrypt_txt_payload(
+        "send_binary_req",
+        identity,
         &req.pub_key,
         req.tag,
         txt_type,
         attempt,
         params,
-    ) {
-        Ok(r) => r,
-        Err(e) => {
-            defmt::warn!(
-                "send_binary_req: encrypt failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-            return;
-        }
-    };
-
-    let mut payload_buf = [0u8; meshcore::MAX_PAYLOAD_SIZE];
-    let mut payload_len = 0usize;
-    if let Err(e) = txt_msg::serialize(&encrypted, &mut payload_buf, &mut payload_len) {
-        defmt::warn!(
-            "send_binary_req: serialize failed: {:?}",
-            defmt::Debug2Format(&e)
-        );
+    ) else {
         return;
-    }
+    };
 
     let contact = contacts::ContactStore::new()
         .find_by_key(&req.pub_key)
         .await;
-    let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
-    let _ = payload_vec.extend_from_slice(&payload_buf[..payload_len]);
 
     let route = route_for_contact(contact.as_ref(), PayloadType::Req, &payload_vec);
     let Some(frame) = build_frame("send_binary_req", PayloadType::Req, route, payload_vec) else {
@@ -2872,39 +2822,18 @@ async fn send_discovery_request(
     const REQ_TYPE_DISCOVERY: u8 = 0x03;
     let text: [u8; 8] = [0xFE, 0, 0, 0, 0, 0, 0, 0];
 
-    let (encrypted, _ack_hash) = match meshcore::payload::txt_msg::encrypt(
-        &identity.sec_key,
-        &identity.pub_key,
+    let Some((payload_vec, _)) = encrypt_txt_payload(
+        "send_discovery_req",
+        identity,
         &req.pub_key,
         req.tag,
-        0,                  // txt_type = 0
-        REQ_TYPE_DISCOVERY, // attempt → flags & 3 = 0x03
+        0,
+        REQ_TYPE_DISCOVERY,
         &text,
-    ) {
-        Ok(r) => r,
-        Err(e) => {
-            defmt::warn!(
-                "send_discovery_req: encrypt failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-            return;
-        }
+    ) else {
+        return;
     };
 
-    let mut payload_buf = [0u8; meshcore::MAX_PAYLOAD_SIZE];
-    let mut payload_len = 0usize;
-    if let Err(e) =
-        meshcore::payload::txt_msg::serialize(&encrypted, &mut payload_buf, &mut payload_len)
-    {
-        defmt::warn!(
-            "send_discovery_req: serialize failed: {:?}",
-            defmt::Debug2Format(&e)
-        );
-        return;
-    }
-
-    let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
-    let _ = payload_vec.extend_from_slice(&payload_buf[..payload_len]);
 
     // Always flood for discovery — the whole point is to find new paths.
     let route = Route::flood(PayloadType::Req, &payload_vec);
