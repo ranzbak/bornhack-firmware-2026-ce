@@ -134,20 +134,25 @@ pub fn menu_icon_filename(slot: u8, selected: bool) -> [u8; 11] {
 /// Number of menu-icon slots (top-row 4 + bottom-row 4).
 pub const MENU_ICON_COUNT: u8 = 8;
 
-/// Map (row=Top, col 0..3) and (row=Bottom, col 0..3) to the
-/// `slot` argument of [`menu_icon_filename`].
-pub fn menu_icon_slot(top_row: bool, col: u8) -> Option<u8> {
-    if top_row {
-        match col {
-            0 | 1 => Some(col),
-            2 => Some(6), // Exercise — added after slots 0-5 shipped.
-            3 => Some(7), // Drink — added after slot 6 shipped.
-            _ => None,
-        }
-    } else if col < 4 {
-        Some(2 + col)
+/// Where menu icon `slot` sits: `(top_row, column)`. Slots 0-5 shipped first
+/// (0, 1 on the top row, 2-5 on the bottom row); Exercise (6) and Drink (7)
+/// were added later and fill the top row's columns 2 and 3.
+pub fn menu_icon_pos(slot: u8) -> (bool, u8) {
+    match slot {
+        0 | 1 => (true, slot),
+        6 => (true, 2),
+        7 => (true, 3),
+        _ => (false, slot - 2),
+    }
+}
+
+/// Sprite frame for a raw step count: hatching clamps to the last frame (the
+/// egg stays cracked), every other animation wraps. `count` must be > 0.
+pub fn clamp_or_wrap(raw: u32, count: u8, anim: DisplayAnim) -> u8 {
+    if matches!(anim, DisplayAnim::Hatching { .. }) {
+        raw.min(count.saturating_sub(1) as u32) as u8
     } else {
-        None
+        (raw % count as u32) as u8
     }
 }
 

@@ -533,11 +533,7 @@ where
                 // 10 s per frame — matches the firmware default sprite
                 // tick interval.  Hatching clamps to the last frame.
                 let raw = (delta_ms / 10_000) as u32;
-                let frame = if matches!(anim, engine::DisplayAnim::Hatching { .. }) {
-                    raw.min(count.saturating_sub(1) as u32) as u8
-                } else {
-                    (raw % count as u32) as u8
-                };
+                let frame = anim_files::clamp_or_wrap(raw, count, anim);
                 let name = anim_files::anim_filename(kind, anim, frame);
                 sprite_loader::blit_pcx_sim(display, &name, 0, PET_AREA_TOP as i32, false);
             }
@@ -590,12 +586,8 @@ where
     // resolve them here from `assets/to-badge/`.
     #[cfg(feature = "simulator")]
     for slot in 0..engine::anim_files::MENU_ICON_COUNT {
-        let (row_kind, col) = match slot {
-            0 | 1 => (Row::Top, slot),
-            6 => (Row::Top, 2), // Exercise — added after slots 0-5 shipped.
-            7 => (Row::Top, 3), // Drink — added after slot 6 shipped.
-            _ => (Row::Bottom, slot - 2),
-        };
+        let (top_row, col) = engine::anim_files::menu_icon_pos(slot);
+        let row_kind = if top_row { Row::Top } else { Row::Bottom };
         let cy = if matches!(row_kind, Row::Top) {
             TOP_CY
         } else {
@@ -761,12 +753,7 @@ where
         // soft (cell stays whatever the EPD was cleared to).
         let nav = nav::get_nav();
         for slot in 0..anim_files::MENU_ICON_COUNT {
-            let (top_row, col) = match slot {
-                0 | 1 => (true, slot),
-                6 => (true, 2), // Exercise — added after slots 0-5 shipped.
-                7 => (true, 3), // Drink — added after slot 6 shipped.
-                _ => (false, slot - 2),
-            };
+            let (top_row, col) = anim_files::menu_icon_pos(slot);
             let cy = if top_row { TOP_CY } else { BOT_CY };
             let cx = ICON_CX[col as usize];
             let row_kind = if top_row { Row::Top } else { Row::Bottom };

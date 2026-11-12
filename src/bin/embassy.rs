@@ -726,17 +726,12 @@ impl AnimState {
             let kind = bornhack_aegg::game::lifecycle::pet_kind();
             let count = bornhack_aegg::game::engine::anim_files::frame_count(kind, anim);
             if count > 0 {
-                let next = self.sprite_frame + 1;
-                // During hatching, clamp to the last frame instead of wrapping.
-                let is_hatching = matches!(
+                // Hatching clamps to the last frame instead of wrapping.
+                self.sprite_frame = bornhack_aegg::game::engine::anim_files::clamp_or_wrap(
+                    self.sprite_frame as u32 + 1,
+                    count,
                     anim,
-                    bornhack_aegg::game::engine::DisplayAnim::Hatching { .. }
                 );
-                self.sprite_frame = if is_hatching {
-                    next.min(count - 1)
-                } else {
-                    next % count
-                };
             }
         }
         #[cfg(not(feature = "game"))]
