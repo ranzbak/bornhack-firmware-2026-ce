@@ -38,15 +38,17 @@ pub mod sprite_loader;
 pub mod stat_bar;
 pub mod station;
 pub mod tictactoe;
+pub mod timed_flag;
 pub mod traits_view;
 // ── Action feedback toast ────────────────────────────────────────────────────
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicU16, AtomicU32, Ordering};
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 pub use nav::{GameNav, Row};
 
 use crate::{BLACK, RED, TriColor};
+use timed_flag::TimedFlag;
 
 /// Action feedback shown briefly after an action.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -166,12 +168,8 @@ impl Toast {
 /// Toast message index.
 static TOAST_MSG: AtomicU8 = AtomicU8::new(0);
 /// Whether a toast is currently visible.  Cleared on the first
-/// render that occurs at or after `TOAST_STARTED_MS + TOAST_MIN_VISIBLE_MS`.
-static TOAST_ACTIVE: AtomicBool = AtomicBool::new(false);
-/// Wall-clock millisecond timestamp when the active toast was shown.
-/// Stored as the low 32 bits of the uptime-millisecond counter — wraps
-/// after ~49 days, far longer than any toast's lifetime.
-static TOAST_STARTED_MS: AtomicU32 = AtomicU32::new(0);
+/// render that occurs at or after `TOAST_MIN_VISIBLE_MS` since it was shown.
+static TOAST: TimedFlag = TimedFlag::new();
 
 /// Remaining cooldown in seconds, read by the renderer when the
 /// active toast is [`Toast::StationCooldown`].  Set by
@@ -189,8 +187,7 @@ const TOAST_MIN_VISIBLE_MS: u32 = 2000;
 /// `DIABETES_ALERT_MIN_VISIBLE_MS` has elapsed since it started — same
 /// start-timestamp-plus-minimum-duration pattern as the toast above,
 /// just occupying the whole screen instead of one line.
-static DIABETES_ALERT_ACTIVE: AtomicBool = AtomicBool::new(false);
-static DIABETES_ALERT_STARTED_MS: AtomicU32 = AtomicU32::new(0);
+static DIABETES_ALERT: TimedFlag = TimedFlag::new();
 /// Minimum wall-clock visibility for the diabetes alert screen.
 const DIABETES_ALERT_MIN_VISIBLE_MS: u32 = 3000;
 
@@ -199,22 +196,19 @@ const DIABETES_ALERT_MIN_VISIBLE_MS: u32 = 3000;
 /// `DIABETES_ALERT_MIN_VISIBLE_MS`. Called once, the instant diabetes
 /// triggers — see `lifecycle::check_diabetes_onset`.
 pub fn show_diabetes_alert() {
-    DIABETES_ALERT_STARTED_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
-    DIABETES_ALERT_ACTIVE.store(true, Ordering::Relaxed);
+    DIABETES_ALERT.start();
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
 }
 
 /// Full-screen "now alcoholic" alert — the alcoholism twin of the
 /// diabetes onset takeover above, reusing `DIABETES_ALERT_MIN_VISIBLE_MS`.
-static ALCOHOLISM_ALERT_ACTIVE: AtomicBool = AtomicBool::new(false);
-static ALCOHOLISM_ALERT_STARTED_MS: AtomicU32 = AtomicU32::new(0);
+static ALCOHOLISM_ALERT: TimedFlag = TimedFlag::new();
 
 /// Show the full-screen "now alcoholic" alert, fired once the instant
 /// alcoholism triggers — see `lifecycle::check_alcoholism_onset`.
 pub fn show_alcoholism_alert() {
-    ALCOHOLISM_ALERT_STARTED_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
-    ALCOHOLISM_ALERT_ACTIVE.store(true, Ordering::Relaxed);
+    ALCOHOLISM_ALERT.start();
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
 }
@@ -232,8 +226,7 @@ const BATTLE_STAGE_MS: u32 = 5_000;
 /// Total animation length — both stages back to back.
 const BATTLE_TOTAL_MS: u32 = 2 * BATTLE_STAGE_MS;
 
-static BATTLE_ANIM_ACTIVE: AtomicBool = AtomicBool::new(false);
-static BATTLE_ANIM_STARTED_MS: AtomicU32 = AtomicU32::new(0);
+static BATTLE_ANIM: TimedFlag = TimedFlag::new();
 /// Packed context: byte0 = own pet kind, byte1 = opponent kind, bit16 =
 /// viewer-won. Set once by [`show_battle_anim`], read by the renderer.
 static BATTLE_ANIM_CTX: AtomicU32 = AtomicU32::new(0);
@@ -288,21 +281,19 @@ pub fn show_battle_anim(
         | ((viewer_won as u32) << 30);
     BATTLE_ANIM_CTX.store(ctx, Ordering::Relaxed);
     BATTLE_ANIM_OPP_ID.store(u16::from_le_bytes(opp_id), Ordering::Relaxed);
-    BATTLE_ANIM_STARTED_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
-    BATTLE_ANIM_ACTIVE.store(true, Ordering::Relaxed);
+    BATTLE_ANIM.start();
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
 }
 
 /// True while the battle-animation takeover should own the display.
 pub fn battle_anim_active() -> bool {
-    BATTLE_ANIM_ACTIVE.load(Ordering::Relaxed)
+    BATTLE_ANIM.is_active()
 }
 
 /// Current stage from the elapsed time since [`show_battle_anim`].
 pub fn battle_anim_stage() -> BattleStage {
-    let elapsed = crate::platform::uptime_ms_u32().wrapping_sub(BATTLE_ANIM_STARTED_MS.load(Ordering::Relaxed));
-    battle_stage_from_elapsed(elapsed)
+    battle_stage_from_elapsed(BATTLE_ANIM.elapsed_ms())
 }
 
 /// Unpacked animation context: `(own_kind, opp_kind, viewer_won)`.
@@ -324,7 +315,7 @@ pub fn battle_anim_hp() -> (u8, u8) {
 
 /// End the battle-animation takeover (called once the stage reaches `Done`).
 pub fn clear_battle_anim() {
-    BATTLE_ANIM_ACTIVE.store(false, Ordering::Relaxed);
+    BATTLE_ANIM.clear();
 }
 
 /// Show a feedback toast.  Becomes visible on the next display
@@ -335,10 +326,35 @@ pub fn clear_battle_anim() {
 /// the display task is parked).
 pub fn show_toast(toast: Toast) {
     TOAST_MSG.store(toast as u8, Ordering::Relaxed);
-    TOAST_STARTED_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
-    TOAST_ACTIVE.store(true, Ordering::Relaxed);
+    TOAST.start();
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
+}
+
+/// Full-screen one-shot condition alert: two bold black lines and a red hint,
+/// cleared once `ALERT_MIN_VISIBLE_MS` has elapsed.
+fn draw_alert<D>(
+    display: &mut D,
+    flag: &TimedFlag,
+    lines: [&str; 2],
+    hint: &str,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    use embedded_graphics::mono_font::MonoTextStyle;
+    use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
+    use embedded_graphics::text::Text;
+
+    let centered = crate::ui::CENTERED;
+    let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
+    let font_red = MonoTextStyle::new(&FONT_7X13_BOLD, RED);
+    crate::ui::clear_screen(display)?;
+    Text::with_text_style(lines[0], Point::new(76, 56), font, centered).draw(display)?;
+    Text::with_text_style(lines[1], Point::new(76, 74), font, centered).draw(display)?;
+    Text::with_text_style(hint, Point::new(76, 100), font_red, centered).draw(display)?;
+    flag.clear_if_elapsed(DIABETES_ALERT_MIN_VISIBLE_MS);
+    Ok(())
 }
 
 /// True when the game screen is showing a red status message — an active
@@ -348,9 +364,9 @@ pub fn show_toast(toast: Toast) {
 /// seats properly on the full-waveform path.  `partial_idle` upstream keeps
 /// this from re-flashing once the message is drawn.
 pub fn status_wants_full_refresh() -> bool {
-    TOAST_ACTIVE.load(Ordering::Relaxed)
-        || DIABETES_ALERT_ACTIVE.load(Ordering::Relaxed)
-        || ALCOHOLISM_ALERT_ACTIVE.load(Ordering::Relaxed)
+    TOAST.is_active()
+        || DIABETES_ALERT.is_active()
+        || ALCOHOLISM_ALERT.is_active()
         || lifecycle::display_anim() == engine::DisplayAnim::Gone
         || lifecycle::is_diabetic_unmedicated()
         || lifecycle::is_alcoholic_untreated()
@@ -418,40 +434,24 @@ where
     // Diabetes onset alert takes priority over everything else, including
     // mini-games and modals — a rare, one-shot event worth interrupting
     // whatever's on screen for.
-    if DIABETES_ALERT_ACTIVE.load(Ordering::Relaxed) {
-        crate::ui::clear_screen(display)?;
-        Text::with_text_style("TYPE 2", Point::new(76, 56), font, centered).draw(display)?;
-        Text::with_text_style("DIABETES", Point::new(76, 74), font, centered).draw(display)?;
-        Text::with_text_style(
+    if DIABETES_ALERT.is_active() {
+        return draw_alert(
+            display,
+            &DIABETES_ALERT,
+            ["TYPE 2", "DIABETES"],
             "Give medication soon",
-            Point::new(76, 100),
-            font_red,
-            centered,
-        )
-        .draw(display)?;
-
-        let elapsed = crate::platform::uptime_ms_u32().wrapping_sub(DIABETES_ALERT_STARTED_MS.load(Ordering::Relaxed));
-        if elapsed >= DIABETES_ALERT_MIN_VISIBLE_MS {
-            DIABETES_ALERT_ACTIVE.store(false, Ordering::Relaxed);
-        }
-        return Ok(());
+        );
     }
 
     // Alcoholism onset alert — same one-shot full-screen takeover as
     // diabetes, the twin permanent condition on the drink arc.
-    if ALCOHOLISM_ALERT_ACTIVE.load(Ordering::Relaxed) {
-        crate::ui::clear_screen(display)?;
-        Text::with_text_style("ALCOHOL", Point::new(76, 56), font, centered).draw(display)?;
-        Text::with_text_style("DEPENDENCE", Point::new(76, 74), font, centered).draw(display)?;
-        Text::with_text_style("Give rehab soon", Point::new(76, 100), font_red, centered)
-            .draw(display)?;
-
-        let elapsed =
-            crate::platform::uptime_ms_u32().wrapping_sub(ALCOHOLISM_ALERT_STARTED_MS.load(Ordering::Relaxed));
-        if elapsed >= DIABETES_ALERT_MIN_VISIBLE_MS {
-            ALCOHOLISM_ALERT_ACTIVE.store(false, Ordering::Relaxed);
-        }
-        return Ok(());
+    if ALCOHOLISM_ALERT.is_active() {
+        return draw_alert(
+            display,
+            &ALCOHOLISM_ALERT,
+            ["ALCOHOL", "DEPENDENCE"],
+            "Give rehab soon",
+        );
     }
 
     if pet_select::is_active() {
@@ -628,7 +628,7 @@ where
 
     // Action feedback toast — shown until the first render at or
     // after TOAST_MIN_VISIBLE_MS has elapsed since show_toast.
-    if TOAST_ACTIVE.load(Ordering::Relaxed) {
+    if TOAST.is_active() {
         let toast = Toast::from_u8(TOAST_MSG.load(Ordering::Relaxed));
         // Dynamic toasts (station cooldown) format their text at draw
         // time from a small atomic; everything else uses the static
@@ -658,13 +658,7 @@ where
             )
             .draw(display)?;
         }
-        // Wrapping subtraction handles the once-per-49-days uptime
-        // wraparound correctly: if start was before wrap and now after,
-        // `now - start` still yields the true elapsed delta (mod 2^32).
-        let elapsed = crate::platform::uptime_ms_u32().wrapping_sub(TOAST_STARTED_MS.load(Ordering::Relaxed));
-        if elapsed >= TOAST_MIN_VISIBLE_MS {
-            TOAST_ACTIVE.store(false, Ordering::Relaxed);
-        }
+        TOAST.clear_if_elapsed(TOAST_MIN_VISIBLE_MS);
     }
 
     // Persistent condition banners, stacked top-right and drawn on the
