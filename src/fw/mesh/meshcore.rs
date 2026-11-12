@@ -1175,34 +1175,8 @@ async fn log_txt_msg(
     // 300-slot linear scan. This is the common case for CLI replies right
     // after we've sent a command to the same peer.
     let store = contacts::ContactStore::new();
-    let hint = crate::LAST_REQ_TARGET.lock(|cell| cell.get());
-    if let Some(hint_pk) = hint
-        && hint_pk[0] == msg.src_hash
-        && let Some(c) = store.find_by_key(&hint_pk).await
-        && try_handle_txt_msg(lora, &c, &msg, rssi, path_len_byte, path, identity, &store)
-            .await
-            .is_ok()
-    {
-        return;
-    }
-
-    // Fallback: look up candidate slots via the `hi` hash-byte index. One
-    // flash `get` for the bucket + up to `MAX_SLOTS_PER_BUCKET` slot reads.
-    // For uncached contacts (the hint didn't match), this replaces what was
-    // previously a full-table linear scan.
-    let mut slots = [0u16; contacts::MAX_SLOTS_PER_BUCKET];
-    let n = store.hash_index_lookup(msg.src_hash, &mut slots).await;
-    for &slot in &slots[..n] {
-        let Some(c) = store.read_slot(slot as usize).await else {
-            continue;
-        };
-        if c.pub_key[0] != msg.src_hash {
-            continue;
-        }
-        if hint == Some(c.pub_key) {
-            continue;
-        }
-
+    let mut candidates = SenderCandidates::new(msg.src_hash);
+    while let Some(c) = candidates.next_contact(&store).await {
         if try_handle_txt_msg(lora, &c, &msg, rssi, path_len_byte, path, identity, &store)
             .await
             .is_ok()
@@ -1674,6 +1648,104 @@ fn encrypt_txt_payload(
     }
     let payload = heapless::Vec::from_slice(&payload_buf[..payload_len]).ok()?;
     Some((payload, ack_hash))
+}
+
+/// Candidate senders for an incoming request/response packet that only
+/// carries the first byte of the sender's pub_key (`src_hash`).
+///
+/// Yields, in order: the `LAST_REQ_TARGET` hint if its first byte matches
+/// (the common case right after we sent that peer a request; no contact
+/// lookup needed for [`next_pub_key`](Self::next_pub_key), so it works for
+/// peers that are not in the contact store), then every stored contact in the
+/// `src_hash` bucket of the hash-byte index whose first byte really matches,
+/// skipping the hint (already tried). The bucket is read lazily, after the
+/// hint failed: one flash `get` plus up to `MAX_SLOTS_PER_BUCKET` slot reads
+/// instead of a full-table scan. The caller stops at the first `Ok`.
+struct SenderCandidates {
+    src_hash: u8,
+    hint: Option<[u8; meshcore::PUB_KEY_SIZE]>,
+    hint_pending: bool,
+    slots: [u16; contacts::MAX_SLOTS_PER_BUCKET],
+    n: usize,
+    next_slot: usize,
+    bucket_read: bool,
+}
+
+impl SenderCandidates {
+    /// Candidates for `src_hash`, trying the `LAST_REQ_TARGET` hint first.
+    fn new(src_hash: u8) -> Self {
+        let hint = crate::LAST_REQ_TARGET.lock(|cell| cell.get());
+        Self {
+            hint,
+            hint_pending: hint.is_some_and(|pk| pk[0] == src_hash),
+            ..Self::without_hint(src_hash)
+        }
+    }
+
+    /// Candidates for `src_hash` from the contact store only.
+    fn without_hint(src_hash: u8) -> Self {
+        Self {
+            src_hash,
+            hint: None,
+            hint_pending: false,
+            slots: [0u16; contacts::MAX_SLOTS_PER_BUCKET],
+            n: 0,
+            next_slot: 0,
+            bucket_read: false,
+        }
+    }
+
+    /// The next candidate's pub_key; the hint is returned as-is, without
+    /// checking that it is a stored contact.
+    async fn next_pub_key(
+        &mut self,
+        store: &contacts::ContactStore,
+    ) -> Option<[u8; meshcore::PUB_KEY_SIZE]> {
+        if self.hint_pending {
+            self.hint_pending = false;
+            return self.hint;
+        }
+        self.next_stored(store).await.map(|c| c.pub_key)
+    }
+
+    /// The next candidate as a stored contact; a hint that is not in the
+    /// store is skipped.
+    async fn next_contact(&mut self, store: &contacts::ContactStore) -> Option<contacts::Contact> {
+        if self.hint_pending {
+            self.hint_pending = false;
+            if let Some(hint_pk) = self.hint
+                && let Some(c) = store.find_by_key(&hint_pk).await
+            {
+                return Some(c);
+            }
+        }
+        self.next_stored(store).await
+    }
+
+    /// Next contact from the hash bucket, skipping the hint.
+    async fn next_stored(&mut self, store: &contacts::ContactStore) -> Option<contacts::Contact> {
+        if !self.bucket_read {
+            self.bucket_read = true;
+            self.n = store
+                .hash_index_lookup(self.src_hash, &mut self.slots)
+                .await;
+        }
+        while self.next_slot < self.n {
+            let slot = self.slots[self.next_slot];
+            self.next_slot += 1;
+            let Some(c) = store.read_slot(slot as usize).await else {
+                continue;
+            };
+            if c.pub_key[0] != self.src_hash {
+                continue;
+            }
+            if self.hint == Some(c.pub_key) {
+                continue;
+            }
+            return Some(c);
+        }
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2962,52 +3034,18 @@ async fn handle_response_recv(payload: &[u8], identity: &DeviceIdentity) {
     // client's "pending request target" slot so login / status / telemetry
     // responses decrypt even when the target isn't (yet) in the contact
     // store, e.g. first login after a wipe or before the first advert.
+    // The hint is tried without a contact lookup; the rest of the hash bucket
+    // covers unsolicited responses from peers we didn't just request anything
+    // from.
     let store = contacts::ContactStore::new();
-    let hint = crate::LAST_REQ_TARGET.lock(|cell| cell.get());
-    if let Some(hint_pk) = hint
-        && hint_pk[0] == msg.src_hash
-        && try_dispatch_response_by_pk(&hint_pk, &msg, identity)
-            .await
-            .is_ok()
-    {
-        return;
-    }
-
-    // Fallback: look up candidate slots via the `hi` hash-byte index instead
-    // of a 300-slot linear scan. Covers unsolicited responses from peers we
-    // didn't just request anything from.
-    let mut slots = [0u16; contacts::MAX_SLOTS_PER_BUCKET];
-    let n = store.hash_index_lookup(msg.src_hash, &mut slots).await;
-    for &slot in &slots[..n] {
-        let Some(c) = store.read_slot(slot as usize).await else {
-            continue;
-        };
-        if c.pub_key[0] != msg.src_hash {
-            continue;
-        }
-        if hint == Some(c.pub_key) {
-            continue;
-        }
-
-        if try_dispatch_response(&c, &msg, identity).await.is_ok() {
+    let mut candidates = SenderCandidates::new(msg.src_hash);
+    while let Some(pk) = candidates.next_pub_key(&store).await {
+        if try_dispatch_response_by_pk(&pk, &msg, identity).await.is_ok() {
             return;
         }
     }
 
     defmt::debug!("Response recv: could not decrypt with any known contact");
-}
-
-/// Verify MAC, decrypt and dispatch a `PayloadType::Response` packet.
-///
-/// Thin wrapper around [`try_dispatch_response_by_pk`] that accepts a stored
-/// [`contacts::Contact`] — kept so the store-fallback scan in
-/// [`handle_response_recv`] can stay unchanged.
-async fn try_dispatch_response(
-    c: &contacts::Contact,
-    msg: &meshcore::payload::txt_msg::TxtMsg,
-    identity: &DeviceIdentity,
-) -> Result<(), meshcore::Error> {
-    try_dispatch_response_by_pk(&c.pub_key, msg, identity).await
 }
 
 /// Verify MAC, decrypt and dispatch a `PayloadType::Response` packet using
@@ -3360,34 +3398,12 @@ async fn handle_path_recv(payload: &[u8], rssi: i16, identity: &DeviceIdentity) 
     // pub_key — no Contact lookup required. Lets Path-wrapped login /
     // admin-status / discovery responses decrypt even when the target isn't
     // (yet) in the contact store.
-    let store = contacts::ContactStore::new();
-    let hint = crate::LAST_REQ_TARGET.lock(|cell| cell.get());
-    if let Some(hint_pk) = hint
-        && hint_pk[0] == msg.src_hash
-        && try_dispatch_path_by_pk(&hint_pk, &msg, rssi, &store, identity)
-            .await
-            .is_ok()
-    {
-        return;
-    }
-
-    // Fallback: look up candidate slots via the `hi` hash-byte index instead
-    // of a 300-slot linear scan. Covers unsolicited Path returns from peers
+    // The rest of the hash bucket covers unsolicited Path returns from peers
     // we didn't just request anything from.
-    let mut slots = [0u16; contacts::MAX_SLOTS_PER_BUCKET];
-    let n = store.hash_index_lookup(msg.src_hash, &mut slots).await;
-    for &slot in &slots[..n] {
-        let Some(c) = store.read_slot(slot as usize).await else {
-            continue;
-        };
-        if c.pub_key[0] != msg.src_hash {
-            continue;
-        }
-        if hint == Some(c.pub_key) {
-            continue;
-        }
-
-        if try_dispatch_path(&c, &msg, rssi, &store, identity)
+    let store = contacts::ContactStore::new();
+    let mut candidates = SenderCandidates::new(msg.src_hash);
+    while let Some(pk) = candidates.next_pub_key(&store).await {
+        if try_dispatch_path_by_pk(&pk, &msg, rssi, &store, identity)
             .await
             .is_ok()
         {
@@ -3399,21 +3415,6 @@ async fn handle_path_recv(payload: &[u8], rssi: i16, identity: &DeviceIdentity) 
         "Path recv: no matching contact for src_hash={=u8:#04x}",
         msg.src_hash
     );
-}
-
-/// Verify, decrypt and dispatch a `PayloadType::Path` packet.
-///
-/// Thin wrapper around [`try_dispatch_path_by_pk`] that accepts a stored
-/// [`contacts::Contact`] — kept so the store-fallback scan in
-/// [`handle_path_recv`] can stay unchanged.
-async fn try_dispatch_path(
-    c: &contacts::Contact,
-    msg: &meshcore::payload::path_msg::PathMsg,
-    rssi: i16,
-    store: &contacts::ContactStore,
-    identity: &DeviceIdentity,
-) -> Result<(), meshcore::Error> {
-    try_dispatch_path_by_pk(&c.pub_key, msg, rssi, store, identity).await
 }
 
 /// Verify, decrypt and dispatch a `PayloadType::Path` packet using only the
@@ -3553,13 +3554,9 @@ async fn handle_req_recv(
     }
 
     let store = contacts::ContactStore::new();
-    let mut slots = [0u16; contacts::MAX_SLOTS_PER_BUCKET];
-    let n = store.hash_index_lookup(msg.src_hash, &mut slots).await;
-    for &slot in &slots[..n] {
-        let Some(c) = store.read_slot(slot as usize).await else { continue };
-        if c.pub_key[0] != msg.src_hash {
-            continue;
-        }
+    // No hint here: a request is never an answer to something we sent.
+    let mut candidates = SenderCandidates::without_hint(msg.src_hash);
+    while let Some(c) = candidates.next_contact(&store).await {
         if req::verify_mac(&identity.sec_key, &c.pub_key, &msg).is_err() {
             continue;
         }
