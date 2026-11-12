@@ -190,8 +190,7 @@ impl FriendRecord {
 
     /// Friend's pet name as a str.
     pub fn name_str(&self) -> &str {
-        let n = (self.name_len as usize).min(PET_NAME_MAX);
-        core::str::from_utf8(&self.name[..n]).unwrap_or("")
+        super::engine::name_str(&self.name, self.name_len)
     }
 }
 

@@ -1679,6 +1679,29 @@ pub struct PetStats {
     pub hibernate_hours: u32,
 }
 
+/// A stored pet name (`buf`, `len` bytes used) as a str. `len` may come from
+/// flash and be corrupt, so it is clamped to the buffer; invalid UTF-8 gives
+/// an empty name.
+pub fn name_str(buf: &[u8], len: u8) -> &str {
+    let n = (len as usize).min(PET_NAME_MAX).min(buf.len());
+    core::str::from_utf8(&buf[..n]).unwrap_or("")
+}
+
+/// Ticks (1 tick = 10 s) as "Xd Xh".
+pub fn fmt_days_hours(ticks: u32) -> heapless::String<12> {
+    let hours = ticks / 360;
+    let days = hours / 24;
+    let mut s = heapless::String::new();
+    let _ = core::fmt::Write::write_fmt(&mut s, format_args!("{}d {}h", days, hours % 24));
+    s
+}
+
+/// A trait value (0..=65535, higher = stronger) as a 0..=100 percentage.
+/// Not the inverted [`to_display_pct`], which maps "bad" stats.
+pub fn trait_pct(v: u16) -> u8 {
+    (v as u32 * 100 / 65535) as u8
+}
+
 /// Convert internal stat (0=good, 65535=bad) to display (0=bad, 100=good).
 fn to_display_pct(val: u16) -> u8 {
     100 - (val as u32 * 100 / STAT_MAX() as u32) as u8
@@ -2213,19 +2236,14 @@ impl PetRecord {
 
     /// Pet name as a str.
     pub fn name_str(&self) -> &str {
-        // name_len comes from flash and could be corrupt/> the array; clamp so
-        // the slice can't go out of bounds (would panic when the realm opens).
-        let n = (self.name_len as usize).min(PET_NAME_MAX);
-        core::str::from_utf8(&self.name[..n]).unwrap_or("")
+        // name_len comes from flash and could be corrupt; `name_str` clamps it
+        // so the realm screen can't panic on a bad record.
+        name_str(&self.name, self.name_len)
     }
 
     /// Format age as "Xd Xh".
     pub fn age_str(&self) -> heapless::String<12> {
-        let hours = self.age_ticks / 360;
-        let days = hours / 24;
-        let mut s = heapless::String::new();
-        let _ = core::fmt::Write::write_fmt(&mut s, format_args!("{}d {}h", days, hours % 24));
-        s
+        fmt_days_hours(self.age_ticks)
     }
 }
 

@@ -217,9 +217,9 @@ pub fn set_pet_name(name: &[u8]) {
 
 /// Get the current pet name as a str.
 pub fn pet_name() -> &'static str {
-    let len = PET_NAME_LEN.load(core::sync::atomic::Ordering::Relaxed) as usize;
+    let len = PET_NAME_LEN.load(core::sync::atomic::Ordering::Relaxed);
     let buf = unsafe { &*PET_NAME.get() };
-    core::str::from_utf8(&buf[..len]).unwrap_or("")
+    super::engine::name_str(buf, len)
 }
 
 /// Get the current pet name as raw bytes.
@@ -728,12 +728,11 @@ pub fn pet_traits() -> Option<(u16, u16, u16)> {
 pub fn combat_stats() -> Option<super::battle::CombatStats> {
     let stats = cycle()?;
     let (vitality, curiosity, resilience) = pet_traits()?;
-    let pct = |v: u16| (v as u32 * 100 / 65535) as u8;
     Some(super::battle::derive_combat_stats(
         &stats,
-        pct(vitality),
-        pct(curiosity),
-        pct(resilience),
+        super::engine::trait_pct(vitality),
+        super::engine::trait_pct(curiosity),
+        super::engine::trait_pct(resilience),
     ))
 }
 

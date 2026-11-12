@@ -90,9 +90,9 @@ where
 
         // Traits line.
         let mut traits: heapless::String<32> = heapless::String::new();
-        let vit_pct = pet.vitality as u32 * 100 / 65535;
-        let cur_pct = pet.curiosity as u32 * 100 / 65535;
-        let res_pct = pet.resilience as u32 * 100 / 65535;
+        let vit_pct = super::engine::trait_pct(pet.vitality);
+        let cur_pct = super::engine::trait_pct(pet.curiosity);
+        let res_pct = super::engine::trait_pct(pet.resilience);
         let _ = core::fmt::Write::write_fmt(
             &mut traits,
             format_args!("V:{}% C:{}% R:{}%", vit_pct, cur_pct, res_pct),

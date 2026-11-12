@@ -79,16 +79,6 @@ pub fn handle_input(btn: ButtonId) {
     }
 }
 
-/// Format ticks-since-first-met as "Xd Xh" (1 tick = 10s, same convention
-/// as `PetRecord::age_str`).
-fn since_str(ticks: u32) -> heapless::String<12> {
-    let hours = ticks / 360;
-    let days = hours / 24;
-    let mut s = heapless::String::new();
-    let _ = core::fmt::Write::write_fmt(&mut s, format_args!("{}d {}h", days, hours % 24));
-    s
-}
-
 /// Draw up to 2 word-wrapped lines of `label` starting at `(x, y)`,
 /// 13px apart. Returns the y just past the last line drawn.
 fn draw_wrapped<D>(
@@ -215,7 +205,7 @@ where
         &mut met,
         format_args!(
             "Met {} ago",
-            since_str(now.saturating_sub(friend.first_seen_tick))
+            super::engine::fmt_days_hours(now.saturating_sub(friend.first_seen_tick))
         ),
     );
     Text::with_text_style(met.as_str(), Point::new(6, y), TEXT_BLACK, left).draw(display)?;
@@ -226,7 +216,7 @@ where
         &mut seen,
         format_args!(
             "Last seen {} ago",
-            since_str(now.saturating_sub(friend.last_seen_tick))
+            super::engine::fmt_days_hours(now.saturating_sub(friend.last_seen_tick))
         ),
     );
     Text::with_text_style(seen.as_str(), Point::new(6, y), TEXT_BLACK, left).draw(display)?;

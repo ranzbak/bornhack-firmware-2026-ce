@@ -182,8 +182,7 @@ where
     let opp = match super::friends::name_of(super::battle_anim_opp_id()) {
         Some((buf, len)) => {
             opp_buf = buf;
-            let n = (len as usize).min(PET_NAME_MAX);
-            core::str::from_utf8(&opp_buf[..n]).unwrap_or("")
+            super::engine::name_str(&opp_buf, len)
         }
         None => "",
     };
@@ -480,8 +479,7 @@ where
     };
 
     let left = crate::ui::TOP_LEFT;
-    let n = (result.friend_name_len as usize).min(PET_NAME_MAX);
-    let friend_name = core::str::from_utf8(&result.friend_name[..n]).unwrap_or("Friend");
+    let friend_name = super::engine::name_str(&result.friend_name, result.friend_name_len);
     let friend_label = if friend_name.is_empty() {
         "Friend"
     } else {

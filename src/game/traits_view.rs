@@ -86,7 +86,7 @@ where
         let y = ROWS_Y + i as i32 * ROW_H;
         // Label vertically centred against the taller bar.
         let label_y = y + (BAR_H as i32 - 13) / 2;
-        let pct = (*value as u32 * 100 / 65535) as u8;
+        let pct = super::engine::trait_pct(*value);
 
         draw_stat_bar(
             display,
