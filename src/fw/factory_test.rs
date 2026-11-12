@@ -71,11 +71,7 @@ use embassy_time::Timer;
 // nRF52840 CLOCK peripheral — raw register addresses (PAC-free).
 // ---------------------------------------------------------------------------
 
-const CLOCK_TASKS_HFCLKSTART: *mut u32 = 0x4000_0000 as *mut u32;
-const CLOCK_TASKS_HFCLKSTOP: *mut u32 = 0x4000_0004 as *mut u32;
-const CLOCK_EVENTS_HFCLKSTARTED: *mut u32 = 0x4000_0100 as *mut u32;
-const CLOCK_HFCLKSTAT: *const u32 = 0x4000_0408 as *const u32;
-const CLOCK_LFCLKSTAT: *const u32 = 0x4000_0418 as *const u32;
+include!("nrf_clock_regs.rs");
 
 /// `HFCLKSTAT.STATE` bit (16): 1 when the requested HFCLK source is
 /// the current source.  For HFXO requests, this means the crystal
