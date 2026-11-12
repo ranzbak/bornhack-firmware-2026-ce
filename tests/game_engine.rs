@@ -1,17 +1,14 @@
 //! Game engine tests — validates progression, action effects, and lifetime
 //! ranges against player policies matching the Python simulation.
 
+use bornhack_aegg::game::engine::sim::{self, Policy, Skip, night_owl_act, optimal_act};
 use bornhack_aegg::game::engine::thresholds::*;
 use bornhack_aegg::game::engine::{FoodKind, GameState, PetKind, Phase};
 use std::cell::Cell;
 
 // ---------------------------------------------------------------------------
-// Player policies
+// Player policies (shared logic and the runner live in `game::engine::sim`)
 // ---------------------------------------------------------------------------
-
-trait Policy {
-    fn act(&self, state: &mut GameState, tick: u32);
-}
 
 /// Never interacts — baseline for survival measurement.
 struct AbsentPolicy;
@@ -51,48 +48,7 @@ impl Policy for AttentivePolicy {
             return;
         }
         self.last_checked.set(tick);
-        if state.phase != Phase::Active {
-            return;
-        }
-
-        // Sleep when tired > 70%.
-        if state.tired > 45874 && !state.is_sleeping {
-            state.sleep();
-            return;
-        }
-
-        // Wake when tired < 20%.
-        if state.is_sleeping && state.tired < 13107 {
-            state.wake();
-            return;
-        }
-
-        if state.is_sleeping {
-            return;
-        }
-
-        // Priority: feed > heal > play.
-        // NOTE: `relax`/`drained` were removed in Stage 4 (redundant
-        // "inspired" axis) — this policy previously also relaxed above
-        // 32768 `drained` between the heal and play checks.
-        if state.hunger > 32768 {
-            state.feed(FoodKind::Apple);
-            return;
-        }
-        if state.sick > 32768 {
-            state.heal();
-            return;
-        }
-        if state.miserable > 32768 {
-            state.play();
-            return;
-        }
-
-        // Proactive: feed if available.
-        if state.hunger > 16384 {
-            state.feed(FoodKind::Apple);
-            return;
-        }
+        optimal_act(state, Skip::NONE);
     }
 }
 
@@ -126,26 +82,7 @@ impl Policy for NightOwlPolicy {
             return;
         } // check every minute
         self.last_checked.set(tick);
-        if state.phase != Phase::Active {
-            return;
-        }
-        // Wake immediately if sleeping.
-        if state.is_sleeping {
-            state.wake();
-            return;
-        }
-        if state.hunger > 32768 {
-            state.feed(FoodKind::Apple);
-            return;
-        }
-        if state.sick > 32768 {
-            state.heal();
-            return;
-        }
-        if state.miserable > 32768 {
-            state.play();
-            return;
-        }
+        night_owl_act(state);
     }
 }
 
@@ -153,36 +90,40 @@ impl Policy for NightOwlPolicy {
 // Simulation runner
 // ---------------------------------------------------------------------------
 
-/// Run a simulation for up to `max_days` days.
-///
-/// Uses boundary-based scheduling: the engine jumps to the next
-/// interesting event or the policy's check interval, whichever comes
-/// first.  A 60-day simulation runs in milliseconds, not minutes.
-/// Run with per-tick policy checks.  Uses boundary scheduling so the
-/// engine jumps ahead; the policy only fires when the engine wakes.
-fn run_sim(policy: &dyn Policy, seed: u64, max_days: u32) -> f64 {
-    let ticks_per_day: u32 = 8640;
-    let max_ticks = max_days * ticks_per_day;
-
-    let mut state = GameState::new_egg(seed, PetKind::DEFAULT);
-    // These survival-curve tests exercise the core stat-decay/action
-    // mechanics, not the money layer — none of the `Policy` impls below earn
-    // HEX, so the Stage-5 affordability gate would otherwise starve the pet
-    // of feed/play long before its stats do. Disable money so the gate never
-    // fires here.
-    state.money_enabled = false;
-    let mut tick: u32 = 0;
-
-    while tick < max_ticks && state.phase != Phase::Gone {
-        state.update(tick);
-        policy.act(&mut state, tick);
-        // Jump to the next boundary — the engine has already computed
-        // exactly when rates change.  The policy runs at every wake.
-        let next = state.next_wake_tick();
-        tick = next.max(tick + 1).min(max_ticks); // always advance ≥ 1
+/// Wake only at the engine's own boundaries (the policy gates itself).
+struct EngineOnly<'a>(&'a dyn Policy);
+impl Policy for EngineOnly<'_> {
+    fn act(&self, state: &mut GameState, tick: u32) {
+        self.0.act(state, tick);
     }
+    fn next_check(&self, _tick: u32) -> u32 {
+        u32::MAX
+    }
+}
 
-    state.age_ticks as f64 / ticks_per_day as f64
+/// Wake at the engine's boundaries or every `interval` ticks, whichever is
+/// sooner.
+struct Every<'a>(&'a dyn Policy, u32);
+impl Policy for Every<'_> {
+    fn act(&self, state: &mut GameState, tick: u32) {
+        self.0.act(state, tick);
+    }
+    fn next_check(&self, tick: u32) -> u32 {
+        tick + self.1
+    }
+}
+
+/// Run a simulation for up to `max_days` days; returns survival in days.
+///
+/// Uses boundary-based scheduling: the engine jumps to the next interesting
+/// event, so a 60-day simulation runs in milliseconds.
+///
+/// These survival-curve tests exercise the core stat-decay/action mechanics,
+/// not the money layer — none of the policies earn HEX, so the affordability
+/// gate would otherwise starve the pet of feed/play long before its stats
+/// do. Money is therefore disabled.
+fn run_sim(policy: &dyn Policy, seed: u64, max_days: u32) -> f64 {
+    sim::run(&EngineOnly(policy), seed, max_days, false).days
 }
 
 fn run_sim_with_interval(
@@ -191,25 +132,7 @@ fn run_sim_with_interval(
     max_days: u32,
     check_interval: u32,
 ) -> f64 {
-    let ticks_per_day: u32 = 8640;
-    let max_ticks = max_days * ticks_per_day;
-
-    let mut state = GameState::new_egg(seed, PetKind::DEFAULT);
-    // See the comment in `run_sim` — money is irrelevant to these tests and
-    // would otherwise starve the pet of affordable actions.
-    state.money_enabled = false;
-    let mut tick: u32 = 0;
-
-    while tick < max_ticks && state.phase != Phase::Gone {
-        state.update(tick);
-        policy.act(&mut state, tick);
-        let next_wake = state.next_wake_tick();
-        let next_check = tick + check_interval;
-        // Always advance at least 1 tick to prevent infinite loops.
-        tick = next_wake.min(next_check).max(tick + 1).min(max_ticks);
-    }
-
-    state.age_ticks as f64 / ticks_per_day as f64
+    sim::run(&Every(policy, check_interval), seed, max_days, false).days
 }
 
 // ---------------------------------------------------------------------------
