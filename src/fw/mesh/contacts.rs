@@ -232,6 +232,23 @@ impl Contact {
         &self.name[..end]
     }
 
+    /// This contact as the companion protocol's contact record (`CONTACT`
+    /// / `NEW_ADVERT` body); the name is cut at the first zero byte.
+    pub fn as_companion(&self) -> meshcore_companion::response::NewAdvert<'_> {
+        meshcore_companion::response::NewAdvert {
+            pub_key: &self.pub_key,
+            adv_type: self.node_type,
+            flags: self.flags,
+            out_path_len: self.out_path_len,
+            out_path: &self.out_path,
+            name: self.name_bytes(),
+            last_advert_timestamp: self.last_advert_ts,
+            gps_lat: self.gps_lat,
+            gps_lon: self.gps_lon,
+            lastmod: self.lastmod,
+        }
+    }
+
     /// Parse from the raw `AddUpdateContact` (0x09) BLE payload.
     ///
     /// `buf` is the full write buffer starting with the 0x09 command byte.

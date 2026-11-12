@@ -915,7 +915,12 @@ async fn log_advert(
     // timestamps into the wall-clock seeder.  Only trust
     // signature-verified adverts; the seeder applies its own
     // year-2026 floor, ±10 min delta filter, and hop-count refinement.
-    if sig_ok && matches!(a.role.to_u8(), 1 | 2) {
+    if sig_ok
+        && matches!(
+        a.role,
+        advert::DeviceRole::ChatNode | advert::DeviceRole::Repeater
+    )
+    {
         let hops = if path_len_byte == contacts::OUT_PATH_UNKNOWN {
             0u8
         } else {

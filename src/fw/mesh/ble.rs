@@ -712,21 +712,9 @@ async fn nus_peripheral_loop<C>(
                         if c.lastmod > *most_recent_lastmod {
                             *most_recent_lastmod = c.lastmod;
                         }
-                        let name_end = c.name.iter().position(|&b| b == 0).unwrap_or(32);
                         outbox_push(
                             outbox,
-                            &companion::Response::ContactDetails(companion::response::NewAdvert {
-                                pub_key: &c.pub_key,
-                                adv_type: c.node_type,
-                                flags: c.flags,
-                                out_path_len: c.out_path_len,
-                                out_path: &c.out_path,
-                                name: &c.name[..name_end],
-                                last_advert_timestamp: c.last_advert_ts,
-                                gps_lat: c.gps_lat,
-                                gps_lon: c.gps_lon,
-                                lastmod: c.lastmod,
-                            }),
+                            &companion::Response::ContactDetails(c.as_companion()),
                         );
                         *remaining = remaining.saturating_sub(1);
                     }
@@ -1113,22 +1101,7 @@ async fn nus_peripheral_loop<C>(
                                 Ok(companion::cmd::Command::GetContactByKey(_key)) => {
                                     match contact_by_key {
                                         Some(ref c) => {
-                                            let name_end =
-                                                c.name.iter().position(|&b| b == 0).unwrap_or(32);
-                                            companion::Response::ContactDetails(
-                                                companion::response::NewAdvert {
-                                                    pub_key: &c.pub_key,
-                                                    adv_type: c.node_type,
-                                                    flags: c.flags,
-                                                    out_path_len: c.out_path_len,
-                                                    out_path: &c.out_path,
-                                                    name: &c.name[..name_end],
-                                                    last_advert_timestamp: c.last_advert_ts,
-                                                    gps_lat: c.gps_lat,
-                                                    gps_lon: c.gps_lon,
-                                                    lastmod: c.lastmod,
-                                                },
-                                            )
+                                            companion::Response::ContactDetails(c.as_companion())
                                         }
                                         None => {
                                             defmt::warn!("companion: GET_CONTACT_BY_KEY not found");
