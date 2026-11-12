@@ -665,53 +665,32 @@ where
         .draw(display)
 }
 
-fn draw_arrow_up<D>(display: &mut D) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = TriColor>,
-{
-    Triangle::new(
-        Point::new(KB_CX, KB_CY - 20),
-        Point::new(KB_CX - 6, KB_CY - 12),
-        Point::new(KB_CX + 6, KB_CY - 12),
-    )
-    .into_styled(PrimitiveStyle::with_fill(BLACK))
-    .draw(display)
+/// Direction of a keyboard-cluster arrow.
+#[derive(Clone, Copy)]
+enum Dir {
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
-fn draw_arrow_down<D>(display: &mut D) -> Result<(), D::Error>
+/// Draw the filled arrowhead pointing `dir` around the cluster centre
+/// (`KB_CX`, `KB_CY`).  Each entry is `[tip, base1, base2]` as offsets
+/// from the centre.
+fn draw_arrow<D>(display: &mut D, dir: Dir) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
+    let [tip, b1, b2]: [(i32, i32); 3] = match dir {
+        Dir::Up => [(0, -20), (-6, -12), (6, -12)],
+        Dir::Down => [(0, 20), (-6, 12), (6, 12)],
+        Dir::Left => [(-20, 0), (-12, -6), (-12, 6)],
+        Dir::Right => [(20, 0), (12, -6), (12, 6)],
+    };
     Triangle::new(
-        Point::new(KB_CX, KB_CY + 20),
-        Point::new(KB_CX - 6, KB_CY + 12),
-        Point::new(KB_CX + 6, KB_CY + 12),
-    )
-    .into_styled(PrimitiveStyle::with_fill(BLACK))
-    .draw(display)
-}
-
-fn draw_arrow_left<D>(display: &mut D) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = TriColor>,
-{
-    Triangle::new(
-        Point::new(KB_CX - 20, KB_CY),
-        Point::new(KB_CX - 12, KB_CY - 6),
-        Point::new(KB_CX - 12, KB_CY + 6),
-    )
-    .into_styled(PrimitiveStyle::with_fill(BLACK))
-    .draw(display)
-}
-
-fn draw_arrow_right<D>(display: &mut D) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = TriColor>,
-{
-    Triangle::new(
-        Point::new(KB_CX + 20, KB_CY),
-        Point::new(KB_CX + 12, KB_CY - 6),
-        Point::new(KB_CX + 12, KB_CY + 6),
+        Point::new(KB_CX + tip.0, KB_CY + tip.1),
+        Point::new(KB_CX + b1.0, KB_CY + b1.1),
+        Point::new(KB_CX + b2.0, KB_CY + b2.1),
     )
     .into_styled(PrimitiveStyle::with_fill(BLACK))
     .draw(display)
@@ -740,10 +719,10 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     draw_center_dot(display)?;
-    draw_arrow_left(display)?;
-    draw_arrow_right(display)?;
-    draw_arrow_up(display)?;
-    draw_arrow_down(display)?;
+    draw_arrow(display, Dir::Left)?;
+    draw_arrow(display, Dir::Right)?;
+    draw_arrow(display, Dir::Up)?;
+    draw_arrow(display, Dir::Down)?;
     draw_label(display, "A-I", KB_CX - 34, KB_CY, Alignment::Right)?;
     draw_label(display, "J-R", KB_CX, KB_CY - 28, Alignment::Center)?;
     draw_label(display, "S-Z", KB_CX + 34, KB_CY, Alignment::Left)?;
@@ -792,9 +771,9 @@ where
 
     // Draw back arrow + label
     match q {
-        Quadrant::Left => draw_arrow_right(display)?,
-        Quadrant::Up => draw_arrow_down(display)?,
-        Quadrant::Right => draw_arrow_left(display)?,
+        Quadrant::Left => draw_arrow(display, Dir::Right)?,
+        Quadrant::Up => draw_arrow(display, Dir::Down)?,
+        Quadrant::Right => draw_arrow(display, Dir::Left)?,
     }
     draw_label(
         display,
@@ -807,10 +786,10 @@ where
     // Draw sub-group arrows + labels
     for (i, &(dir, x, y, align)) in dirs.iter().enumerate() {
         match dir {
-            ButtonId::Left => draw_arrow_left(display)?,
-            ButtonId::Right => draw_arrow_right(display)?,
-            ButtonId::Up => draw_arrow_up(display)?,
-            ButtonId::Down => draw_arrow_down(display)?,
+            ButtonId::Left => draw_arrow(display, Dir::Left)?,
+            ButtonId::Right => draw_arrow(display, Dir::Right)?,
+            ButtonId::Up => draw_arrow(display, Dir::Up)?,
+            ButtonId::Down => draw_arrow(display, Dir::Down)?,
             _ => {}
         }
         draw_label(display, labels[i], x, y, align)?;
@@ -824,10 +803,10 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     draw_center_dot(display)?;
-    draw_arrow_up(display)?;
-    draw_arrow_left(display)?;
-    draw_arrow_down(display)?;
-    draw_arrow_right(display)?;
+    draw_arrow(display, Dir::Up)?;
+    draw_arrow(display, Dir::Left)?;
+    draw_arrow(display, Dir::Down)?;
+    draw_arrow(display, Dir::Right)?;
     draw_label(display, "<-", KB_CX, KB_CY - 28, Alignment::Center)?;
     draw_label(display, "!@#", KB_CX - 34, KB_CY, Alignment::Right)?;
     draw_label(display, "SP/BS", KB_CX, KB_CY + 28, Alignment::Center)?;
@@ -840,10 +819,10 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     draw_center_dot(display)?;
-    draw_arrow_up(display)?;
-    draw_arrow_left(display)?;
-    draw_arrow_down(display)?;
-    draw_arrow_right(display)?;
+    draw_arrow(display, Dir::Up)?;
+    draw_arrow(display, Dir::Left)?;
+    draw_arrow(display, Dir::Down)?;
+    draw_arrow(display, Dir::Right)?;
     draw_label(display, "<-", KB_CX - 34, KB_CY, Alignment::Right)?;
     draw_label(display, "Shift", KB_CX, KB_CY - 28, Alignment::Center)?;
     draw_label(display, "Clear", KB_CX, KB_CY + 28, Alignment::Center)?;
