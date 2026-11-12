@@ -183,27 +183,16 @@ static OBSERVATIONS: Mutex<
 pub fn note_observed(pub_key: &[u8; 32]) {
     let secs = embassy_time::Instant::now().as_secs();
     OBSERVATIONS.lock(|cell| {
-        let mut list = cell.borrow_mut();
-        // If we already have an entry for this key, just update it.
-        if let Some(e) = list.iter_mut().find(|e| &e.pub_key == pub_key) {
-            e.secs = secs;
-            return;
-        }
-        // New key — append, evicting the oldest if full.
-        if list.is_full() {
-            // Find min-secs index and remove.
-            let oldest_idx = list
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, e)| e.secs)
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-            let _ = list.swap_remove(oldest_idx);
-        }
-        let _ = list.push(Observation {
-            pub_key: *pub_key,
-            secs,
-        });
+        crate::evict_table::upsert_evict_oldest(
+            &mut cell.borrow_mut(),
+            |e| &e.pub_key == pub_key,
+            |e| e.secs,
+            |e| e.secs = secs,
+            || Observation {
+                pub_key: *pub_key,
+                secs,
+            },
+        );
     });
 }
 

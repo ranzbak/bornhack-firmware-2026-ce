@@ -163,6 +163,8 @@ pub mod epd_driver;
 pub mod button_seq;
 pub mod cfg_text;
 pub mod display_flush;
+#[cfg(feature = "heapless")]
+pub mod evict_table;
 pub mod hex;
 pub mod menu;
 pub mod lut_file;

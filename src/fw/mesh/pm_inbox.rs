@@ -416,24 +416,16 @@ pub fn mark_read(pub_key: &[u8; 32]) {
             .min(255) as u8
     });
     READ_CURSORS.lock(|cell| {
-        let mut list = cell.borrow_mut();
-        if let Some(c) = list.iter_mut().find(|c| &c.pub_key == pub_key) {
-            c.last_read_secs = now;
-            return;
-        }
-        if list.is_full() {
-            let oldest_idx = list
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, c)| c.last_read_secs)
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-            let _ = list.swap_remove(oldest_idx);
-        }
-        let _ = list.push(ReadCursor {
-            pub_key: *pub_key,
-            last_read_secs: now,
-        });
+        crate::evict_table::upsert_evict_oldest(
+            &mut cell.borrow_mut(),
+            |c| &c.pub_key == pub_key,
+            |c| c.last_read_secs,
+            |c| c.last_read_secs = now,
+            || ReadCursor {
+                pub_key: *pub_key,
+                last_read_secs: now,
+            },
+        );
     });
     drop_unread(cleared);
 }
