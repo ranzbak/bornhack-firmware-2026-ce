@@ -472,17 +472,7 @@ where
 
     // Title bar (if set).
     if !entry.title.is_empty() {
-        Rectangle::new(Point::zero(), Size::new(DISPLAY_W as u32, 18))
-            .into_styled(PrimitiveStyle::with_fill(BLACK))
-            .draw(display)?;
-        let ts = crate::ui::CENTERED;
-        Text::with_text_style(
-            entry.title,
-            Point::new(DISPLAY_W / 2, 9),
-            crate::ui::TEXT_BOLD_WHITE,
-            ts,
-        )
-        .draw(display)?;
+        crate::ui::draw_title_bar(display, entry.title, Point::zero(), DISPLAY_W as u32)?;
     }
 
     let text_offset = if entry.title.is_empty() { 0 } else { 18 };
