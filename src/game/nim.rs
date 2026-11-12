@@ -19,6 +19,7 @@
 //!
 //! State held in module-level atomics — no heap, no alloc.
 
+use crate::platform::entropy_byte;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use embedded_graphics::mono_font::MonoTextStyle;
@@ -363,20 +364,6 @@ fn all_empty() -> bool {
     ROWS.iter().all(|a| a.load(Ordering::Relaxed) == 0)
 }
 
-fn entropy_byte() -> u8 {
-    #[cfg(feature = "embassy-core")]
-    {
-        embassy_time::Instant::now().as_ticks() as u8
-    }
-    #[cfg(not(feature = "embassy-core"))]
-    {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u8)
-            .unwrap_or(0xCB)
-    }
-}
 
 // ── Drawing
 // ───────────────────────────────────────────────────────────────────

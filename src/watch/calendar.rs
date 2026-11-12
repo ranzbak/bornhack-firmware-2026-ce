@@ -388,21 +388,11 @@ fn dispatch_day_list(btn: ButtonId) -> bool {
 
 // ── Drawing ─────────────────────────────────────────────────────────────────
 
-#[cfg(feature = "embassy-core")]
-fn battery_pct() -> u8 {
-    crate::fw::battery::read_pct()
-}
-
-#[cfg(not(feature = "embassy-core"))]
-fn battery_pct() -> u8 {
-    100
-}
-
 pub fn draw<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let bat = battery_pct();
+    let bat = crate::platform::battery_pct();
     draw_frame(display, Some(("Calendar", &bat)), None)?;
 
     let mut events_buf = [EventRow {

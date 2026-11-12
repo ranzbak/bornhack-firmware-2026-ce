@@ -158,6 +158,7 @@ pub mod menu;
 pub mod lut_file;
 pub mod name_screen;
 pub mod nfc_ndef;
+pub mod platform;
 #[cfg(feature = "mesh")]
 pub mod qr_screen;
 #[cfg(feature = "signed-channel")]
