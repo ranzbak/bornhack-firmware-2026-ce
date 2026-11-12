@@ -117,10 +117,7 @@ pub fn draw<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    #[cfg(feature = "embassy-core")]
-    let bat = crate::fw::battery::read_pct();
-    #[cfg(not(feature = "embassy-core"))]
-    let bat: u8 = 0;
+    let bat = crate::platform::battery_pct();
 
     crate::draw_frame(display, Some(("Scan to add me", &bat)), None)?;
 

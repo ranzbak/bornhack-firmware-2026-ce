@@ -68,17 +68,6 @@ pub fn wants_full_refresh() -> bool {
     ACTIVE.load(Ordering::Relaxed) && STATE.load(Ordering::Relaxed) == STATE_RESULT
 }
 
-/// Low 32 bits of uptime in ms (firmware); 0 on the simulator, where the
-/// dismiss guard below is a no-op.
-#[cfg(feature = "embassy-core")]
-fn now_ms() -> u32 {
-    embassy_time::Instant::now().as_millis() as u32
-}
-#[cfg(not(feature = "embassy-core"))]
-fn now_ms() -> u32 {
-    0
-}
-
 /// When the result screen was shown, so the same button action that
 /// resolved the battle (or a joystick bounce right after) can't instantly
 /// dismiss it before the player sees it.
@@ -348,7 +337,7 @@ fn try_challenge() {
             outcome,
         });
     }
-    RESULT_SHOWN_MS.store(now_ms(), Ordering::Relaxed);
+    RESULT_SHOWN_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
     STATE.store(STATE_RESULT, Ordering::Relaxed);
 }
 
@@ -359,7 +348,7 @@ pub fn handle_input(btn: ButtonId) {
         // Any button dismisses the result — but not for a brief guard
         // window after it appears, so the Fire that resolved the battle
         // (or a joystick bounce) can't flick it away before it's seen.
-        let elapsed = now_ms().wrapping_sub(RESULT_SHOWN_MS.load(Ordering::Relaxed));
+        let elapsed = crate::platform::uptime_ms_u32().wrapping_sub(RESULT_SHOWN_MS.load(Ordering::Relaxed));
         if elapsed >= RESULT_DISMISS_GUARD_MS {
             close();
         }

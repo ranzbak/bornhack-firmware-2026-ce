@@ -894,10 +894,7 @@ where
     // drawn as inverted pixels — WHITE where fill is BLACK, BLACK
     // where the interior is empty (WHITE).  Visible regardless of
     // current charge level.
-    #[cfg(feature = "embassy-core")]
-    let charging = fw::battery::is_charging();
-    #[cfg(not(feature = "embassy-core"))]
-    let charging = false;
+    let charging = platform::is_charging();
 
     if charging {
         // 4×8 lightning bolt mask — top bit = leftmost pixel.

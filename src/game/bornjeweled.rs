@@ -62,7 +62,7 @@ static GAME_RNG: AtomicU32 = AtomicU32::new(0xDEAD_BEEF);
 fn seed_rng() {
     #[cfg(feature = "embassy-core")]
     {
-        let s = embassy_time::Instant::now().as_ticks() as u32;
+        let s = crate::platform::seed_ticks_or_fixed();
         GAME_RNG.store(s.max(1), Ordering::Relaxed);
     }
     #[cfg(all(feature = "simulator", not(feature = "embassy-core")))]
@@ -77,7 +77,7 @@ fn seed_rng() {
     }
 }
 
-fn entropy_byte() -> u8 {
+fn next_rand_byte() -> u8 {
     let mut s = GAME_RNG.load(Ordering::Relaxed);
     if s == 0 {
         s = 0xDEAD_BEEF;
@@ -88,7 +88,7 @@ fn entropy_byte() -> u8 {
 }
 
 fn random_gem() -> u8 {
-    (entropy_byte() % 6) + 1
+    (next_rand_byte() % 6) + 1
 }
 
 pub fn is_active() -> bool {

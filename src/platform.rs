@@ -75,6 +75,18 @@ pub fn battery_pct() -> u8 {
     }
 }
 
+/// `true` while the battery charger is active; always `false` on the simulator.
+pub fn is_charging() -> bool {
+    #[cfg(feature = "embassy-core")]
+    {
+        crate::fw::battery::is_charging()
+    }
+    #[cfg(not(feature = "embassy-core"))]
+    {
+        false
+    }
+}
+
 /// UNIX seconds if the wall clock is known (always on the simulator).
 pub fn unix_secs() -> Option<u32> {
     #[cfg(feature = "embassy-core")]
