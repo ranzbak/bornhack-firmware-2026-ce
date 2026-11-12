@@ -434,3 +434,16 @@ impl<'a, const N: usize> EpdDriver for Driver<'a, N> {
         self.display.power_off().await
     }
 }
+
+/// First-boot factory test on the SSD1680: full clean / ship image through
+/// [`RefreshMode::Full`], per-row updates through [`RefreshMode::Fast`] (the
+/// same unified-driver calls the UI uses).
+impl<const N: usize> crate::fw::factory_test::FactoryDisplay for Driver<'_, N> {
+    async fn refresh_full(&mut self) {
+        let _ = EpdDriver::refresh(self, RefreshMode::Full).await;
+    }
+
+    async fn refresh_fast(&mut self) {
+        let _ = EpdDriver::refresh(self, RefreshMode::Fast).await;
+    }
+}

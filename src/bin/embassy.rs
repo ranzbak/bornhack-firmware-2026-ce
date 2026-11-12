@@ -273,10 +273,15 @@ async fn main(spawner: Spawner) {
     // First-boot interactive sign-off path — only on a virgin badge.
     // Paints test status on `display` via the write-name-then-test
     // pattern so a hang leaves a forensic record on the e-paper.
-    // SSD1675 only (drives the raw `EpdGfx`); the 1680 build skips it.
+    // Both panels run it: the SSD1675 here on the raw `EpdGfx`, the SSD1680 further
+    // down once its unified driver exists (same position relative to the boot clear).
     #[cfg(feature = "ssd1675-driver")]
     if !bornhack_aegg::fw::factory_test::is_passed().await {
-        bornhack_aegg::fw::factory_test::run_first_boot_interactive(&hw, &mut display).await;
+        bornhack_aegg::fw::factory_test::run_first_boot_interactive(
+            &hw,
+            &mut bornhack_aegg::fw::epd_1675_driver::FactoryGfx(&mut display),
+        )
+        .await;
     }
 
     #[cfg(feature = "ssd1675-driver")]
@@ -379,6 +384,14 @@ async fn main(spawner: Spawner) {
         let _ = driver.refresh(RefreshMode::Full).await;
         // No deep_sleep: the SSD1680 driver intentionally keeps the controller
         // awake between refreshes (see `Driver::refresh`).
+    }
+
+    // First-boot interactive sign-off on the SSD1680 (see the SSD1675 call
+    // above): only on a badge without the `hwtest:passed` KV flag; halts
+    // forever on fail or on the ship image, exactly like the 1675 path.
+    #[cfg(feature = "ssd1680-driver")]
+    if !bornhack_aegg::fw::factory_test::is_passed().await {
+        bornhack_aegg::fw::factory_test::run_first_boot_interactive(&hw, &mut driver).await;
     }
 
     // ── Watch app — load persisted alarm state and start the persister ───

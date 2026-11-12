@@ -64,8 +64,11 @@
 //! because crystal contact is intermittent and "good once" doesn't
 //! mean "good always".
 
+use crate::color::TriColor;
 use crate::fw::kv;
 use embassy_time::Timer;
+use embedded_graphics::draw_target::DrawTarget;
+use embedded_graphics::prelude::OriginDimensions;
 
 // ---------------------------------------------------------------------------
 // nRF52840 CLOCK peripheral — raw register addresses (PAC-free).
@@ -462,12 +465,35 @@ pub async fn mark_passed() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Panel-agnostic display surface
+// ---------------------------------------------------------------------------
+
+/// What the first-boot interactive test needs from a panel: a tri-colour
+/// [`DrawTarget`] plus two flush calls.  Each panel provides it from its
+/// existing display path — the SSD1675 over the raw `EpdGfx`
+/// (`epd_1675_driver::FactoryGfx`), the SSD1680 over its unified
+/// [`crate::epd_driver::EpdDriver`] (`epd_1680_driver::Driver`) — so the test
+/// body is written once.
+// Single-executor embassy target — opaque futures need not be Send.
+#[allow(async_fn_in_trait)]
+pub trait FactoryDisplay: DrawTarget<Color = TriColor> + OriginDimensions {
+    /// Flush the whole frame with the panel's full-quality tri-colour
+    /// waveform (initial clean, ship image).  Bus errors are ignored: a dead
+    /// panel shows up as a blank screen, not as a code path to handle.
+    async fn refresh_full(&mut self);
+    /// Flush with the panel's quick per-row update (labels / results).
+    async fn refresh_fast(&mut self);
+}
+
 /// First-boot interactive test path.  Paints the test status to the
 /// e-paper using the write-test-name-*before*-test, write-`PASS`-*after*
 /// pattern so that a hang on any peripheral leaves a forensic record on
 /// the screen for factory-floor triage.  The e-ink retains state without
 /// power: if the firmware locks up mid-test, the last visible line
 /// *without* a `PASS` next to it is the broken step.
+///
+/// Runs on both panels (SSD1675 and SSD1680) through [`FactoryDisplay`].
 ///
 /// Strict factory mode: any test failure halts the badge in factory-test
 /// state forever.  KV flag is NOT stamped, so a power-cycle re-enters
@@ -476,9 +502,10 @@ pub async fn mark_passed() {
 ///
 /// ## Sequence
 ///
-/// 1. Full clean (`update_tc` Mode 2, tri-color full waveform) — wipes
-///    residual ghosting AND constitutes the first real EPD test.
-/// 2. Header → partial refresh (`update_bw` Mode 1, fast LUT) — second
+/// 1. Full clean ([`FactoryDisplay::refresh_full`], tri-color full
+///    waveform) — wipes residual ghosting AND constitutes the first real
+///    EPD test.
+/// 2. Header → quick refresh ([`FactoryDisplay::refresh_fast`]) — second
 ///    real EPD test.
 /// 3. `EPD            PASS` row stamped: implicit because we wouldn't
 ///    have reached this point if the SPI handshake, RESET pulse, OTP
@@ -490,41 +517,31 @@ pub async fn mark_passed() {
 ///    will use for tests that genuinely could hang mid-run.)
 /// 5. Footer + final refresh.  All-pass → wait for Fire → stamp KV.
 ///    Any fail → halt forever.
-#[cfg(feature = "ssd1675-driver")]
-pub async fn run_first_boot_interactive(hw: &HardwareInfo, display: &mut crate::fw::epd::EpdGfx<'_>) {
+pub async fn run_first_boot_interactive<D: FactoryDisplay>(hw: &HardwareInfo, display: &mut D) {
     use embedded_graphics::geometry::Point;
-    use embedded_graphics::mono_font::MonoTextStyle;
-    use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
-    use ssd1675::UpdateMode;
-    use ssd1675::graphics::Color;
 
     defmt::info!("hwtest: first-boot interactive entered (Phase 4)");
     defmt::info!("hwtest:   hardware seen at first boot: {:?}", hw);
 
-    let font = MonoTextStyle::new(&FONT_7X13_BOLD, Color::Black);
+    let font = crate::ui::TEXT_BOLD_BLACK;
     let style = crate::ui::TOP_LEFT;
 
-    // Use the fastest patched-LUT timing for the per-test partial
-    // refreshes — at the `EPD_LUT_SPEED_MIN` scale the waveform
-    // duration is ~30 % of normal (≈3× speedup).  Some ghosting
-    // between rows is acceptable since each row's text is the
-    // primary content; the final NEEDS REWORK / Press FIRE footer
-    // is the only line a worker dwell-reads.  The initial
-    // tri-color clear keeps full timing — its job is to wipe
+    // `refresh_fast` is the panel's quick per-row update (on the SSD1675 the
+    // fastest patched-LUT timing, ≈3× speedup; some ghosting between rows is
+    // acceptable since each row's text is the primary content).  The initial
+    // clean and the ship image use `refresh_full` — their job is to wipe
     // ghosting from the previous power-on session.
-    let full_lut = crate::fw::epd::current_lut_speed();
-    let fast_lut = crate::fw::epd::EPD_LUT_SPEED_MIN;
 
     // ── Step 1: full clean (tri-color Mode 2) ─────────────────────────
     // First real EPD test: if `update_tc` hangs or errors here, the
     // EPD line below never gets drawn — failure pin-pointed.
-    display.clear(Color::White);
-    let _ = display.update_tc(full_lut).await;
+    let _ = display.clear(TriColor::White);
+    display.refresh_full().await;
 
     // ── Step 2: header + partial refresh (Mode 1) ─────────────────────
     // Second real EPD test: validates the fast LUT path.
     draw_text(display, "FACTORY TEST", Point::new(20, 4), font, style);
-    let _ = display.update_bw(UpdateMode::Mode1, fast_lut).await;
+    display.refresh_fast().await;
 
     // ── Step 3: two-column test grid ──────────────────────────────────
     // 8 tests in 4 rows × 2 columns.  EPD is no longer a dedicated
@@ -560,7 +577,7 @@ pub async fn run_first_boot_interactive(hw: &HardwareInfo, display: &mut crate::
         draw_text(display, l1, Point::new(4, y),  font, style);
         draw_text(display, l2, Point::new(80, y), font, style);
     }
-    let _ = display.update_bw(UpdateMode::Mode1, fast_lut).await;
+    display.refresh_fast().await;
 
     // Second pass: stamp each result next to its label.  Single
     // refresh paints all 8 PASS/FAIL outcomes at once.
@@ -568,7 +585,7 @@ pub async fn run_first_boot_interactive(hw: &HardwareInfo, display: &mut crate::
         draw_text(display, if r1 { "PASS" } else { "FAIL" }, Point::new(44,  y), font, style);
         draw_text(display, if r2 { "PASS" } else { "FAIL" }, Point::new(120, y), font, style);
     }
-    let _ = display.update_bw(UpdateMode::Mode1, fast_lut).await;
+    display.refresh_fast().await;
 
     // ── Footer ───────────────────────────────────────────────────────
     let all_pass = hw.all_pass();
@@ -578,7 +595,7 @@ pub async fn run_first_boot_interactive(hw: &HardwareInfo, display: &mut crate::
         "NEEDS REWORK"
     };
     draw_text(display, footer, Point::new(4, 130), font, style);
-    let _ = display.update_bw(UpdateMode::Mode1, fast_lut).await;
+    display.refresh_fast().await;
 
     if !all_pass {
         // Visible-across-the-bench fault indicator so a worker can
@@ -624,7 +641,7 @@ pub async fn run_first_boot_interactive(hw: &HardwareInfo, display: &mut crate::
     // next time the badge powers up `is_passed()` returns true,
     // factory_test is skipped, and normal boot overwrites this
     // image with the regular app UI.
-    draw_ship_image(display, full_lut).await;
+    draw_ship_image(display).await;
 
     // Halt forever — factory worker powers off / unplugs to pack.
     // Watchdog task keeps the WDT fed.  Should the worker forget
@@ -644,34 +661,28 @@ pub async fn run_first_boot_interactive(hw: &HardwareInfo, display: &mut crate::
 /// e-ink retains this image with no power, so the badge ships in
 /// its box with the test confirmation already visible — no separate
 /// sticker / label needed.
-#[cfg(feature = "ssd1675-driver")]
-async fn draw_ship_image(display: &mut crate::fw::epd::EpdGfx<'_>, lut_speed: u8) {
+async fn draw_ship_image<D: FactoryDisplay>(display: &mut D) {
     use embedded_graphics::Drawable;
-    use embedded_graphics::geometry::Point;
+    use embedded_graphics::geometry::{Point, Size};
     use embedded_graphics::mono_font::MonoTextStyle;
     use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
     // Use the ASCII variant of FONT_10X20 — same one `name_screen.rs`
     // already pulls in — so we share the glyph table instead of
     // dragging in a separate iso_8859_1 copy (saves ~3 KB).
     use embedded_graphics::mono_font::ascii::FONT_10X20;
-    use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
     use embedded_graphics::primitives::StyledDrawable;
-    use embedded_graphics::geometry::Size;
-    use embedded_graphics::text::{Text};
-    use ssd1675::graphics::Color;
+    use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
+    use embedded_graphics::text::Text;
 
-    display.clear(Color::White);
+    let _ = display.clear(TriColor::White);
 
     let centered = crate::ui::CENTERED_TOP;
-    let big = MonoTextStyle::new(&FONT_10X20, Color::Black);
-    let small = MonoTextStyle::new(&FONT_7X13_BOLD, Color::Black);
+    let big = MonoTextStyle::new(&FONT_10X20, TriColor::Black);
+    let small = MonoTextStyle::new(&FONT_7X13_BOLD, TriColor::Black);
 
     // Decorative border so it reads like a stamped passed-QC label.
     let border = Rectangle::new(Point::new(4, 4), Size::new(144, 144));
-    let _ = border.draw_styled(
-        &PrimitiveStyle::with_stroke(Color::Black, 2),
-        display,
-    );
+    let _ = border.draw_styled(&PrimitiveStyle::with_stroke(TriColor::Black, 2), display);
 
     // Title block (top half).
     let _ = Text::with_text_style("BORNHACK", Point::new(76, 24), big, centered).draw(display);
@@ -679,31 +690,23 @@ async fn draw_ship_image(display: &mut crate::fw::epd::EpdGfx<'_>, lut_speed: u8
 
     // Separator line.
     let sep = Rectangle::new(Point::new(20, 76), Size::new(112, 1));
-    let _ = sep.draw_styled(
-        &PrimitiveStyle::with_stroke(Color::Black, 1),
-        display,
-    );
+    let _ = sep.draw_styled(&PrimitiveStyle::with_stroke(TriColor::Black, 1), display);
 
     // Stamp text (bottom half).
     let _ = Text::with_text_style("CyberAegg", Point::new(76, 86), small, centered).draw(display);
     let _ = Text::with_text_style("FIELD TESTED", Point::new(76, 106), small, centered).draw(display);
     let _ = Text::with_text_style("Ready to ship", Point::new(76, 126), small, centered).draw(display);
 
-    let _ = display.update_tc(lut_speed).await;
+    display.refresh_full().await;
 }
 
-/// Convenience: draw a single text string at the given position.
-#[cfg(feature = "ssd1675-driver")]
-fn draw_text(
-    display: &mut crate::fw::epd::EpdGfx<'_>,
+/// Draw a single text string at the given position (replacement-glyph aware).
+fn draw_text<D: FactoryDisplay>(
+    display: &mut D,
     text: &str,
     pos: embedded_graphics::geometry::Point,
-    font: embedded_graphics::mono_font::MonoTextStyle<'_, ssd1675::graphics::Color>,
+    font: embedded_graphics::mono_font::MonoTextStyle<'_, TriColor>,
     style: embedded_graphics::text::TextStyle,
 ) {
-    use embedded_graphics::Drawable;
-    use embedded_graphics::text::Text;
-    let _ = Text::with_text_style(text, pos, font, style).draw(display);
+    let _ = crate::ui::draw_text(display, text, pos, font, style);
 }
-
-

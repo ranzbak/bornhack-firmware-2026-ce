@@ -25,7 +25,7 @@ use ssd1675::partial::PartialState;
 ///
 /// Yellow is dropped to White (the panel has no yellow ink).
 #[inline]
-fn to_ssd1675(c: EpdColor) -> Color {
+pub(crate) fn to_ssd1675(c: EpdColor) -> Color {
     match c {
         EpdColor::Black => Color::Black,
         EpdColor::White | EpdColor::Yellow => Color::White,
@@ -152,5 +152,57 @@ impl EpdDriver for Ssd1675Driver<'_> {
     async fn deep_sleep(&mut self) -> Result<(), <Self as EpdDriver>::Error> {
         let _ = self.gfx.deep_sleep().await;
         Ok(())
+    }
+}
+
+/// Factory-test view of the raw [`EpdGfx`]: a tri-colour [`DrawTarget`] that
+/// flushes with the exact waveforms the first-boot test has always used on
+/// this panel (full `update_tc`; Mode 1 B/W at the fastest patched LUT speed
+/// for the per-row updates).
+///
+/// The test runs before [`Ssd1675Driver`] is built, so it borrows the bare
+/// `EpdGfx` instead of going through [`EpdDriver::refresh`] (which would swap
+/// the fast flush for the host-side partial-update path).
+pub struct FactoryGfx<'g, 'a>(pub &'g mut EpdGfx<'a>);
+
+impl OriginDimensions for FactoryGfx<'_, '_> {
+    fn size(&self) -> Size {
+        self.0.size()
+    }
+}
+
+impl DrawTarget for FactoryGfx<'_, '_> {
+    type Color = EpdColor;
+    type Error = core::convert::Infallible;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<EpdColor>>,
+    {
+        self.0
+            .draw_iter(pixels.into_iter().map(|Pixel(p, c)| Pixel(p, to_ssd1675(c))))
+    }
+
+    fn clear(&mut self, color: EpdColor) -> Result<(), Self::Error> {
+        // The inherent buffer fill, not the per-pixel default.
+        self.0.clear(to_ssd1675(color));
+        Ok(())
+    }
+
+    fn fill_solid(&mut self, area: &Rectangle, color: EpdColor) -> Result<(), Self::Error> {
+        self.0.fill_solid(area, to_ssd1675(color))
+    }
+}
+
+impl crate::fw::factory_test::FactoryDisplay for FactoryGfx<'_, '_> {
+    async fn refresh_full(&mut self) {
+        let _ = self.0.update_tc(current_lut_speed()).await;
+    }
+
+    async fn refresh_fast(&mut self) {
+        let _ = self
+            .0
+            .update_bw(ssd1675::UpdateMode::Mode1, crate::fw::epd::EPD_LUT_SPEED_MIN)
+            .await;
     }
 }
