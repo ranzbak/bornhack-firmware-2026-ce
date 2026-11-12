@@ -139,6 +139,11 @@ impl Policy for LimitedCarePolicy {
 // Main
 // ---------------------------------------------------------------------------
 
+/// Money is off, as in `tests/game_engine.rs`: the policies never earn HAX, so
+/// the affordability gate would starve the pet of feed/heal/play and the
+/// table would measure poverty rather than stat balance.
+const MONEY_ENABLED: bool = false;
+
 fn main() {
     let seed = 42u64;
     let max_days = 60u32;
@@ -199,7 +204,7 @@ fn main() {
     println!("{}", "─".repeat(102));
 
     for policy in &policies {
-        let r = sim::run(policy.as_ref(), seed, max_days, true);
+        let r = sim::run(policy.as_ref(), seed, max_days, MONEY_ENABLED);
         let day_str = if r.left {
             format!("{:.1}", r.days)
         } else {
