@@ -122,6 +122,19 @@ pub struct FriendRecord {
 }
 
 impl FriendRecord {
+    /// List label: `"Name (Species)"`, or just the species when unnamed.
+    pub fn label(&self) -> heapless::String<32> {
+        let kind_name = super::engine::PetKind::from_u8(self.pet_kind).name();
+        let name = self.name_str();
+        let mut label = heapless::String::new();
+        if !name.is_empty() {
+            let _ = core::fmt::Write::write_fmt(&mut label, format_args!("{} ({})", name, kind_name));
+        } else {
+            let _ = core::fmt::Write::write_fmt(&mut label, format_args!("{}", kind_name));
+        }
+        label
+    }
+
     const EMPTY: Self = Self {
         device_id: [0; 2],
         pet_kind: 0,
@@ -372,6 +385,21 @@ pub async fn save_if_needed() {}
 /// Number of known friends.
 pub fn count() -> u8 {
     unsafe { (*FRIENDS.get()).count }
+}
+
+/// Step a picker cursor to the previous friend, wrapping. Shared by the
+/// Friends list and the Battle picker so both scroll identically.
+pub fn cursor_prev(cur: &core::sync::atomic::AtomicU8) {
+    use core::sync::atomic::Ordering;
+    let c = cur.load(Ordering::Relaxed);
+    cur.store(crate::ui::wrap_prev(c, count()), Ordering::Relaxed);
+}
+
+/// Step a picker cursor to the next friend, wrapping.
+pub fn cursor_next(cur: &core::sync::atomic::AtomicU8) {
+    use core::sync::atomic::Ordering;
+    let c = cur.load(Ordering::Relaxed);
+    cur.store(crate::ui::wrap_next(c, count()), Ordering::Relaxed);
 }
 
 /// Get a known friend by index (0 = most recently *seen* — the list is

@@ -157,19 +157,8 @@ const ANIM_NAME_Y: i32 = 108;
 const ANIM_LEFT_CX: i32 = ANIM_LEFT_X + ANIM_PET_SIZE / 2;
 const ANIM_RIGHT_CX: i32 = (ANIM_RIGHT_X + 152) / 2;
 
-/// Clip a name to the 12 characters that fit a 72px column at 6px/char,
-/// on a UTF-8 boundary so a multi-byte codepoint is never split.
-fn fit_name(s: &str) -> &str {
-    const MAX: usize = 12;
-    if s.len() <= MAX {
-        return s;
-    }
-    let mut end = MAX;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
+/// Longest name that fits a 72px sprite column at 6px/char.
+const ANIM_NAME_MAX: usize = 12;
 
 /// Label both fighters under their sprites: the player's pet name on the
 /// left, the opponent's on the right. Falls back to the species name when a
@@ -192,7 +181,7 @@ where
         own
     };
     Text::with_text_style(
-        fit_name(own),
+        crate::truncate_str(own, ANIM_NAME_MAX),
         Point::new(ANIM_LEFT_CX, ANIM_NAME_Y),
         style,
         ts,
@@ -214,7 +203,7 @@ where
         opp
     };
     Text::with_text_style(
-        fit_name(opp),
+        crate::truncate_str(opp, ANIM_NAME_MAX),
         Point::new(ANIM_RIGHT_CX, ANIM_NAME_Y),
         style,
         ts,
@@ -330,18 +319,6 @@ pub fn close() {
     ACTIVE.store(false, Ordering::Relaxed);
 }
 
-fn cursor_up() {
-    clear_picker_msg();
-    let c = CURSOR.load(Ordering::Relaxed);
-    CURSOR.store(ui::wrap_prev(c, super::friends::count()), Ordering::Relaxed);
-}
-
-fn cursor_down() {
-    clear_picker_msg();
-    let c = CURSOR.load(Ordering::Relaxed);
-    CURSOR.store(ui::wrap_next(c, super::friends::count()), Ordering::Relaxed);
-}
-
 /// Challenge the highlighted friend, if any. No-op (stays on the picker)
 /// if there are no friends yet, no pet is active, or Battle is still on
 /// cooldown. That last check is normally already enforced by the Play
@@ -401,8 +378,14 @@ pub fn handle_input(btn: ButtonId) {
     }
 
     match btn {
-        ButtonId::Up => cursor_up(),
-        ButtonId::Down => cursor_down(),
+        ButtonId::Up => {
+            clear_picker_msg();
+            super::friends::cursor_prev(&CURSOR);
+        }
+        ButtonId::Down => {
+            clear_picker_msg();
+            super::friends::cursor_next(&CURSOR);
+        }
         // Both the joystick Fire and the Execute button confirm — players
         // reach for either, and only accepting Fire made Execute silently
         // close the screen ("no result").
@@ -463,15 +446,7 @@ where
                 .draw(display)?;
         }
 
-        let name = friend.name_str();
-        let kind_name = super::engine::PetKind::from_u8(friend.pet_kind).name();
-        let mut line: heapless::String<28> = heapless::String::new();
-        if !name.is_empty() {
-            let _ =
-                core::fmt::Write::write_fmt(&mut line, format_args!("{} ({})", name, kind_name));
-        } else {
-            let _ = core::fmt::Write::write_fmt(&mut line, format_args!("{}", kind_name));
-        }
+        let line = friend.label();
         let style = if is_selected {
             TEXT_BOLD_WHITE
         } else {
@@ -607,15 +582,15 @@ mod anim_tests {
     #[test]
     fn name_labels_fit_the_sprite_column() {
         // Short names pass through untouched.
-        assert_eq!(fit_name("Rex"), "Rex");
+        assert_eq!(crate::truncate_str("Rex", ANIM_NAME_MAX), "Rex");
         // 12 chars is exactly the 72px column at 6px/char — the longest
         // species name ("Bartholomeus") must survive intact.
-        assert_eq!(fit_name("Bartholomeus"), "Bartholomeus");
-        assert_eq!(fit_name("Bartholomeus").len(), 12);
+        assert_eq!(crate::truncate_str("Bartholomeus", ANIM_NAME_MAX), "Bartholomeus");
+        assert_eq!(crate::truncate_str("Bartholomeus", ANIM_NAME_MAX).len(), 12);
         // Longer names are clipped rather than overflowing the panel.
-        assert_eq!(fit_name("AAAAAAAAAAAAAAAA"), "AAAAAAAAAAAA");
+        assert_eq!(crate::truncate_str("AAAAAAAAAAAAAAAA", ANIM_NAME_MAX), "AAAAAAAAAAAA");
         // Multi-byte codepoints are never split mid-sequence.
-        let s = fit_name("ÆÆÆÆÆÆÆÆ"); // 8 x 2 bytes = 16
+        let s = crate::truncate_str("ÆÆÆÆÆÆÆÆ", ANIM_NAME_MAX); // 8 x 2 bytes = 16
         assert!(s.len() <= 12);
         assert_eq!(s, "ÆÆÆÆÆÆ");
     }

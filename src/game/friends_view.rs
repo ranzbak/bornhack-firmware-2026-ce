@@ -56,16 +56,6 @@ pub fn close() {
     ACTIVE.store(false, Ordering::Relaxed);
 }
 
-fn cursor_up() {
-    let c = CURSOR.load(Ordering::Relaxed);
-    CURSOR.store(ui::wrap_prev(c, super::friends::count()), Ordering::Relaxed);
-}
-
-fn cursor_down() {
-    let c = CURSOR.load(Ordering::Relaxed);
-    CURSOR.store(ui::wrap_next(c, super::friends::count()), Ordering::Relaxed);
-}
-
 /// Route a button press while the Friends screen is active. Owns its
 /// own input logic across the two sub-states (mirrors `battle_view`).
 pub fn handle_input(btn: ButtonId) {
@@ -76,8 +66,8 @@ pub fn handle_input(btn: ButtonId) {
     }
 
     match btn {
-        ButtonId::Up => cursor_up(),
-        ButtonId::Down => cursor_down(),
+        ButtonId::Up => super::friends::cursor_prev(&CURSOR),
+        ButtonId::Down => super::friends::cursor_next(&CURSOR),
         // Fire or Execute opens the detail view — accept both so Execute
         // doesn't silently close the list instead of confirming.
         ButtonId::Fire | ButtonId::Execute => {
@@ -120,16 +110,6 @@ where
         cursor_y += 13;
     }
     Ok(cursor_y)
-}
-
-fn friend_label(name: &str, kind_name: &str) -> heapless::String<32> {
-    let mut label = heapless::String::new();
-    if !name.is_empty() {
-        let _ = core::fmt::Write::write_fmt(&mut label, format_args!("{} ({})", name, kind_name));
-    } else {
-        let _ = core::fmt::Write::write_fmt(&mut label, format_args!("{}", kind_name));
-    }
-    label
 }
 
 pub fn draw<D>(display: &mut D) -> Result<(), D::Error>
@@ -180,8 +160,7 @@ where
                 .draw(display)?;
         }
 
-        let kind_name = super::engine::PetKind::from_u8(friend.pet_kind).name();
-        let label = friend_label(friend.name_str(), kind_name);
+        let label = friend.label();
         let style = if is_selected {
             TEXT_BOLD_WHITE
         } else {
@@ -225,8 +204,7 @@ where
     };
 
     let left = crate::ui::TOP_LEFT;
-    let kind_name = super::engine::PetKind::from_u8(friend.pet_kind).name();
-    let label = friend_label(friend.name_str(), kind_name);
+    let label = friend.label();
 
     let mut y = draw_wrapped(display, label.as_str(), 6, 22, TEXT_BOLD_BLACK)?;
     y += 2;
