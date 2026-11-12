@@ -310,6 +310,34 @@ pub static LORA_TX_POWER: AtomicI8 = AtomicI8::new(DEFAULT_RADIO.tx_power);
 /// Menu-togglable; runtime relay behavior is wired up via the BLE task.
 pub static LORA_CLIENT_REPEAT: AtomicBool = AtomicBool::new(DEFAULT_RADIO.client_repeat);
 
+impl RadioParams {
+    /// Snapshot of the live `LORA_*` atomics.
+    pub fn load_live() -> Self {
+        use core::sync::atomic::Ordering::Relaxed;
+        Self {
+            freq_hz: LORA_FREQ_HZ.load(Relaxed),
+            bw_hz: LORA_BW_HZ.load(Relaxed),
+            sf: LORA_SF.load(Relaxed),
+            cr: LORA_CR.load(Relaxed),
+            tx_power: LORA_TX_POWER.load(Relaxed),
+            client_repeat: LORA_CLIENT_REPEAT.load(Relaxed),
+        }
+    }
+
+    /// Write every field to the live `LORA_*` atomics. Does not signal the
+    /// persister or the radio; callers fire `LORA_RADIO_CHANGED_SIGNAL`
+    /// themselves when needed.
+    pub fn store_live(&self) {
+        use core::sync::atomic::Ordering::Relaxed;
+        LORA_FREQ_HZ.store(self.freq_hz, Relaxed);
+        LORA_BW_HZ.store(self.bw_hz, Relaxed);
+        LORA_SF.store(self.sf, Relaxed);
+        LORA_CR.store(self.cr, Relaxed);
+        LORA_TX_POWER.store(self.tx_power, Relaxed);
+        LORA_CLIENT_REPEAT.store(self.client_repeat, Relaxed);
+    }
+}
+
 /// `OtherParams.advert_loc_policy` — share this node's position in adverts.
 pub static ADVERT_LOC_POLICY: AtomicBool = AtomicBool::new(false);
 /// `OtherParams.multi_acks` — number of aggregated ACKs (1 or 2).

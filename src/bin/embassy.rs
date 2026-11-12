@@ -469,28 +469,12 @@ async fn main(spawner: Spawner) {
 
         {
             let rp = settings::get_radio_params_or_default().await;
-            use core::sync::atomic::Ordering::Relaxed;
-            bornhack_aegg::LORA_FREQ_HZ.store(rp.freq_hz, Relaxed);
-            bornhack_aegg::LORA_BW_HZ.store(rp.bw_hz, Relaxed);
-            bornhack_aegg::LORA_SF.store(rp.sf, Relaxed);
-            bornhack_aegg::LORA_CR.store(rp.cr, Relaxed);
-            bornhack_aegg::LORA_TX_POWER.store(rp.tx_power, Relaxed);
-            bornhack_aegg::LORA_CLIENT_REPEAT.store(rp.client_repeat, Relaxed);
+            rp.store_live();
         }
         {
             use core::sync::atomic::Ordering::Relaxed;
             if let Some(op) = settings::get_other_params().await {
-                bornhack_aegg::ADVERT_LOC_POLICY.store(op.advert_loc_policy != 0, Relaxed);
-                // Clamp persisted value into the menu-exposed range (1 or 2).
-                let ma = if op.multi_acks == 0 {
-                    1
-                } else {
-                    op.multi_acks.min(2)
-                };
-                bornhack_aegg::MULTI_ACKS.store(ma, Relaxed);
-                // Only telemetry_mode_base is exposed via the badge UI;
-                // loc/env stay 0 (no GPS, no env sensors).
-                bornhack_aegg::TELEMETRY_MODE_BASE.store(op.telemetry_mode_base.min(2), Relaxed);
+                op.store_live();
             }
             bornhack_aegg::fw::mesh::PATH_HASH_MODE
                 .store(settings::get_path_hash_mode().await.min(2), Relaxed);

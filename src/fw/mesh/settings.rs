@@ -325,6 +325,32 @@ pub struct OtherParams {
 }
 
 impl OtherParams {
+    /// Overlay the live atomics (`ADVERT_LOC_POLICY`, `MULTI_ACKS`,
+    /// `TELEMETRY_MODE_BASE`) onto this struct. `manual_add_contacts` is not
+    /// held in an atomic and is left untouched.
+    pub fn overlay_live(&mut self) {
+        use core::sync::atomic::Ordering::Relaxed;
+        self.advert_loc_policy = crate::ADVERT_LOC_POLICY.load(Relaxed) as u8;
+        self.multi_acks = crate::MULTI_ACKS.load(Relaxed);
+        self.telemetry_mode_base = crate::TELEMETRY_MODE_BASE.load(Relaxed);
+    }
+
+    /// Write the live atomics from this struct. `multi_acks` is clamped into
+    /// the menu-exposed range (0 -> 1, max 2) and `telemetry_mode_base` to
+    /// 0..=2. Only the base telemetry mode is exposed on the badge; loc/env
+    /// stay 0 (no GPS, no env sensors).
+    pub fn store_live(&self) {
+        use core::sync::atomic::Ordering::Relaxed;
+        crate::ADVERT_LOC_POLICY.store(self.advert_loc_policy != 0, Relaxed);
+        let ma = if self.multi_acks == 0 {
+            1
+        } else {
+            self.multi_acks.min(2)
+        };
+        crate::MULTI_ACKS.store(ma, Relaxed);
+        crate::TELEMETRY_MODE_BASE.store(self.telemetry_mode_base.min(2), Relaxed);
+    }
+
     fn to_bytes(self) -> [u8; 6] {
         [
             self.manual_add_contacts,

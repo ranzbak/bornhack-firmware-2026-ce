@@ -566,9 +566,11 @@ async fn nus_peripheral_loop<C>(
     // read and race with any edit the menu made while the BLE task was
     // starting up.
 
-    // Load the persisted radio parameters (set via CMD_SET_RADIO_PARAMS 0x0B /
-    // CMD_SET_RADIO_TX_POWER 0x0C).  Falls back to EU/UK narrow band defaults.
-    let mut radio_params = settings::get_radio_params_or_default().await;
+    // Radio parameters (set via CMD_SET_RADIO_PARAMS 0x0B /
+    // CMD_SET_RADIO_TX_POWER 0x0C).  Seeded from the live atomics at the top
+    // of the loop below; boot already loaded flash (or the EU/UK narrow band
+    // default) into them.
+    let mut radio_params: crate::RadioParams;
 
     // CMD_SIGN_START … CMD_SIGN_FINISH buffer; `None` outside such a run,
     // like upstream's `sign_data` pointer.
@@ -601,18 +603,8 @@ async fn nus_peripheral_loop<C>(
         // is reflected in subsequent companion BLE responses.  Same
         // visibility window as before — the previous code refreshed
         // these locals at the top of this same loop too.
-        {
-            use core::sync::atomic::Ordering::Relaxed;
-            radio_params.freq_hz = crate::LORA_FREQ_HZ.load(Relaxed);
-            radio_params.bw_hz = crate::LORA_BW_HZ.load(Relaxed);
-            radio_params.sf = crate::LORA_SF.load(Relaxed);
-            radio_params.cr = crate::LORA_CR.load(Relaxed);
-            radio_params.tx_power = crate::LORA_TX_POWER.load(Relaxed);
-            radio_params.client_repeat = crate::LORA_CLIENT_REPEAT.load(Relaxed);
-            other_params.advert_loc_policy = crate::ADVERT_LOC_POLICY.load(Relaxed) as u8;
-            other_params.multi_acks = crate::MULTI_ACKS.load(Relaxed);
-            other_params.telemetry_mode_base = crate::TELEMETRY_MODE_BASE.load(Relaxed);
-        }
+        radio_params = crate::RadioParams::load_live();
+        other_params.overlay_live();
 
         // When BLE is disabled, stop advertising and wait until re-enabled.
         // The persister task takes care of saving the flag; here we just
@@ -2568,14 +2560,7 @@ async fn nus_peripheral_loop<C>(
                             }
                             if let Some(new_radio) = pending_radio {
                                 radio_params = new_radio;
-                                use core::sync::atomic::Ordering::Relaxed;
-                                crate::LORA_FREQ_HZ.store(radio_params.freq_hz, Relaxed);
-                                crate::LORA_BW_HZ.store(radio_params.bw_hz, Relaxed);
-                                crate::LORA_SF.store(radio_params.sf, Relaxed);
-                                crate::LORA_CR.store(radio_params.cr, Relaxed);
-                                crate::LORA_TX_POWER.store(radio_params.tx_power, Relaxed);
-                                crate::LORA_CLIENT_REPEAT
-                                    .store(radio_params.client_repeat, Relaxed);
+                                radio_params.store_live();
                                 // Fire CHANGED so the persister writes the
                                 // new atomics to flash and then signals
                                 // APPLY → listener reprograms the SX1262
@@ -2597,17 +2582,7 @@ async fn nus_peripheral_loop<C>(
                             }
                             if let Some(new_other) = pending_other {
                                 other_params = new_other;
-                                use core::sync::atomic::Ordering::Relaxed;
-                                crate::ADVERT_LOC_POLICY
-                                    .store(other_params.advert_loc_policy != 0, Relaxed);
-                                let ma = if other_params.multi_acks == 0 {
-                                    1
-                                } else {
-                                    other_params.multi_acks.min(2)
-                                };
-                                crate::MULTI_ACKS.store(ma, Relaxed);
-                                crate::TELEMETRY_MODE_BASE
-                                    .store(other_params.telemetry_mode_base.min(2), Relaxed);
+                                other_params.store_live();
                                 match settings::set_other_params(other_params).await {
                                     Ok(()) => defmt::debug!("companion: other params persisted"),
                                     Err(e) => defmt::warn!(

@@ -316,15 +316,7 @@ pub async fn run_meshcore_listener<'a>(
         // never disagrees with what's persisted.
         if crate::LORA_RADIO_APPLY_SIGNAL.signaled() {
             crate::LORA_RADIO_APPLY_SIGNAL.reset();
-            use core::sync::atomic::Ordering::Relaxed;
-            let rp = settings::RadioParams {
-                freq_hz: crate::LORA_FREQ_HZ.load(Relaxed),
-                bw_hz: crate::LORA_BW_HZ.load(Relaxed),
-                sf: crate::LORA_SF.load(Relaxed),
-                cr: crate::LORA_CR.load(Relaxed),
-                tx_power: crate::LORA_TX_POWER.load(Relaxed),
-                client_repeat: crate::LORA_CLIENT_REPEAT.load(Relaxed),
-            };
+            let rp = crate::RadioParams::load_live();
             let cfg = MeshCoreConfig::from_radio_params(&rp);
             lora.reconfigure_radio(&cfg);
             defmt::info!(

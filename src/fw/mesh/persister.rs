@@ -170,13 +170,7 @@ async fn dispatch(which: Which) {
             crate::LORA_RADIO_APPLY_SIGNAL.signal(());
         }
         Which::LoraRadio => {
-            let mut rp = settings::get_radio_params_or_default().await;
-            rp.freq_hz = crate::LORA_FREQ_HZ.load(Relaxed);
-            rp.bw_hz = crate::LORA_BW_HZ.load(Relaxed);
-            rp.sf = crate::LORA_SF.load(Relaxed);
-            rp.cr = crate::LORA_CR.load(Relaxed);
-            rp.tx_power = crate::LORA_TX_POWER.load(Relaxed);
-            rp.client_repeat = crate::LORA_CLIENT_REPEAT.load(Relaxed);
+            let rp = crate::RadioParams::load_live();
             match settings::set_radio_params(rp).await {
                 Ok(()) => defmt::debug!("settings: radio params persisted"),
                 Err(e) => defmt::warn!("settings: radio params persist failed: {:?}", e),
@@ -195,9 +189,7 @@ async fn dispatch(which: Which) {
                     advert_loc_policy: 0,
                     multi_acks: 0,
                 });
-            op.advert_loc_policy = crate::ADVERT_LOC_POLICY.load(Relaxed) as u8;
-            op.multi_acks = crate::MULTI_ACKS.load(Relaxed);
-            op.telemetry_mode_base = crate::TELEMETRY_MODE_BASE.load(Relaxed);
+            op.overlay_live();
             match settings::set_other_params(op).await {
                 Ok(()) => defmt::debug!("settings: other_params persisted"),
                 Err(e) => defmt::warn!("settings: other_params persist failed: {:?}", e),
