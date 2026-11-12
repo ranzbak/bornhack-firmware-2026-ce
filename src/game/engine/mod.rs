@@ -1158,84 +1158,81 @@ impl GameState {
         self.phase == Phase::Active || self.phase == Phase::Leaving
     }
 
-    /// Start the feed action with the chosen food.  Returns false if not
-    /// available.
-    pub fn feed(&mut self, food: FoodKind) -> bool {
+    /// Shared gate for every timed action starter: the pet must be alive and
+    /// awake, no action running, and this action's cooldown expired. Then,
+    /// when money is enabled, the optional `price` is charged (only after
+    /// every other check passed, so a rejected action never costs HAX; an
+    /// unaffordable one is rejected outright, see `spend_money`). On success
+    /// the action and its duration are set. Callers with extra state
+    /// (`active_food`, `active_drink`) set it after a `true` return.
+    fn start_action(
+        &mut self,
+        action: Action,
+        cooldown: u16,
+        price: Option<u32>,
+        duration: u8,
+    ) -> bool {
         if !self.is_alive() || self.is_sleeping {
             return false;
         }
-        if self.active_action.is_some() || self.cooldown_feed > 0 {
+        if self.active_action.is_some() || cooldown > 0 {
             return false;
         }
-        // Affordability gate: reject the action outright when unaffordable
-        // rather than letting it proceed for free (see `spend_money`).
-        if self.money_enabled && !self.spend_money(food.hax_price(self.hard_mode)) {
+        if let Some(price) = price
+            && self.money_enabled
+            && !self.spend_money(price)
+        {
             return false; // can't afford — action rejected
         }
-        self.active_action = Some(Action::Feed);
-        self.active_food = Some(food);
-        self.action_ticks_remaining = FEED_DURATION();
+        self.active_action = Some(action);
+        self.action_ticks_remaining = duration;
         true
     }
 
-    /// Start the heal action.
-    pub fn heal(&mut self) -> bool {
-        if !self.is_alive() || self.is_sleeping {
+    /// Start the feed action with the chosen food.  Returns false if not
+    /// available.
+    pub fn feed(&mut self, food: FoodKind) -> bool {
+        let price = food.hax_price(self.hard_mode);
+        if !self.start_action(Action::Feed, self.cooldown_feed, Some(price), FEED_DURATION()) {
             return false;
         }
-        if self.active_action.is_some() || self.cooldown_heal > 0 {
-            return false;
-        }
-        // Aspirine costs HAX; Stage 5 affordability gate (reject if broke).
-        if self.money_enabled && !self.spend_money(ASPIRINE_HAX_COST) {
-            return false;
-        }
-        self.active_action = Some(Action::Heal);
-        self.action_ticks_remaining = HEAL_DURATION();
+        self.active_food = Some(food);
         true
+    }
+
+    /// Start the heal action (Aspirine costs HAX).
+    pub fn heal(&mut self) -> bool {
+        self.start_action(
+            Action::Heal,
+            self.cooldown_heal,
+            Some(ASPIRINE_HAX_COST),
+            HEAL_DURATION(),
+        )
     }
 
     /// Start the play action.
     pub fn play(&mut self) -> bool {
-        if !self.is_alive() || self.is_sleeping {
-            return false;
-        }
-        if self.active_action.is_some() || self.cooldown_play > 0 {
-            return false;
-        }
-        // Affordability gate — see the comment in `feed()`.
-        if self.money_enabled && !self.spend_money(PLAY_HAX_COST) {
-            return false; // can't afford — action rejected
-        }
-        self.active_action = Some(Action::Play);
-        self.action_ticks_remaining = PLAY_DURATION();
-        true
+        self.start_action(
+            Action::Play,
+            self.cooldown_play,
+            Some(PLAY_HAX_COST),
+            PLAY_DURATION(),
+        )
     }
 
     /// Send the pet to "Only pets" to earn HAX. Timed action like Play.
     pub fn only_pets(&mut self) -> bool {
-        if !self.is_alive() || self.is_sleeping {
-            return false;
-        }
-        if self.active_action.is_some() || self.cooldown_onlypets > 0 {
-            return false;
-        }
-        self.active_action = Some(Action::OnlyPets);
-        self.action_ticks_remaining = PLAY_DURATION();
-        true
+        self.start_action(Action::OnlyPets, self.cooldown_onlypets, None, PLAY_DURATION())
     }
 
     /// Start the exercise action — the primary relief valve for `weight`.
     pub fn exercise(&mut self) -> bool {
-        if !self.is_alive() || self.is_sleeping {
-            return false;
-        }
-        if self.active_action.is_some() || self.cooldown_exercise > 0 {
-            return false;
-        }
-        self.active_action = Some(Action::Exercise);
-        self.action_ticks_remaining = EXERCISE_DURATION();
-        true
+        self.start_action(
+            Action::Exercise,
+            self.cooldown_exercise,
+            None,
+            EXERCISE_DURATION(),
+        )
     }
 
     /// Administer diabetes medication.  Only meaningful once `diabetic`
@@ -1246,56 +1243,38 @@ impl GameState {
         if !self.diabetic {
             return false;
         }
-        if !self.is_alive() || self.is_sleeping {
-            return false;
-        }
-        if self.active_action.is_some() || self.cooldown_medicate > 0 {
-            return false;
-        }
-        // Affordability gate — see the comment in `feed()`.
-        if self.money_enabled && !self.spend_money(medication_price(self.hard_mode)) {
-            return false; // can't afford — action rejected
-        }
-        self.active_action = Some(Action::Medicate);
-        self.action_ticks_remaining = MEDICATE_DURATION();
-        true
+        self.start_action(
+            Action::Medicate,
+            self.cooldown_medicate,
+            Some(medication_price(self.hard_mode)),
+            MEDICATE_DURATION(),
+        )
     }
 
     /// Administer Ozempic — a stronger, faster-acting weight-loss
     /// treatment than Exercise. Unlike `medicate()`, this is *not*
     /// gated on being diabetic — any pet can take it.
     pub fn ozempic(&mut self) -> bool {
-        if !self.is_alive() || self.is_sleeping {
-            return false;
-        }
-        if self.active_action.is_some() || self.cooldown_ozempic > 0 {
-            return false;
-        }
-        // Affordability gate — see the comment in `feed()`.
-        if self.money_enabled && !self.spend_money(medication_price(self.hard_mode)) {
-            return false; // can't afford — action rejected
-        }
-        self.active_action = Some(Action::Ozempic);
-        self.action_ticks_remaining = OZEMPIC_DURATION();
-        true
+        self.start_action(
+            Action::Ozempic,
+            self.cooldown_ozempic,
+            Some(medication_price(self.hard_mode)),
+            OZEMPIC_DURATION(),
+        )
     }
 
     /// Start the drink action with the chosen drink.  Returns false if
     /// not available.
     pub fn drink(&mut self, drink: DrinkKind) -> bool {
-        if !self.is_alive() || self.is_sleeping {
+        if !self.start_action(
+            Action::Drink,
+            self.cooldown_drink,
+            Some(drink.hax_price()),
+            DRINK_DURATION(),
+        ) {
             return false;
         }
-        if self.active_action.is_some() || self.cooldown_drink > 0 {
-            return false;
-        }
-        // Affordability gate — see the comment in `feed()`.
-        if self.money_enabled && !self.spend_money(drink.hax_price()) {
-            return false; // can't afford — action rejected
-        }
-        self.active_action = Some(Action::Drink);
         self.active_drink = Some(drink);
-        self.action_ticks_remaining = DRINK_DURATION();
         true
     }
 
@@ -1305,19 +1284,12 @@ impl GameState {
         if !self.alcoholic {
             return false;
         }
-        if !self.is_alive() || self.is_sleeping {
-            return false;
-        }
-        if self.active_action.is_some() || self.cooldown_rehab > 0 {
-            return false;
-        }
-        // Affordability gate — see the comment in `feed()`.
-        if self.money_enabled && !self.spend_money(rehab_price(self.hard_mode)) {
-            return false; // can't afford — action rejected
-        }
-        self.active_action = Some(Action::Rehab);
-        self.action_ticks_remaining = REHAB_DURATION();
-        true
+        self.start_action(
+            Action::Rehab,
+            self.cooldown_rehab,
+            Some(rehab_price(self.hard_mode)),
+            REHAB_DURATION(),
+        )
     }
 
     /// Put the pet to sleep.
