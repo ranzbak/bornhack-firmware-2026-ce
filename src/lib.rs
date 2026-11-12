@@ -957,24 +957,8 @@ where
         return menu::draw_confirm(display, prompt);
     }
 
-    // Build the device ID string for the header title.
-    #[cfg(feature = "embassy-core")]
-    let device_id = {
-        let id = fw::device_id::get_bytes();
-        let mut s: heapless::String<15> = heapless::String::new();
-        let _ = s.push_str("Cyber ");
-        // Æ in UTF-8
-        let _ = s.push('\u{00C6}');
-        let _ = s.push_str("gg ");
-        let _ = s.push_str(core::str::from_utf8(&id).unwrap_or("????"));
-        s
-    };
-    #[cfg(not(feature = "embassy-core"))]
-    let device_id: heapless::String<15> = {
-        let mut s = heapless::String::new();
-        let _ = s.push_str("Cyber \u{00C6}gg A3F7");
-        s
-    };
+    // Device label ("Cyber Ægg <id>") for the header title.
+    let device_id = platform::device_label();
 
     // Build the footer: node name + time
     #[cfg(feature = "embassy-core")]

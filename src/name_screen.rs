@@ -167,8 +167,7 @@ where
     // ── Bottom footer — device ID ─────────────────────────────────────────
     // Uses the iso-8859-1 font so the `Æ` (U+00C6) renders properly —
     // the ascii font would emit the fallback glyph here.
-    let mut id_buf: heapless::String<16> = heapless::String::new();
-    write_device_id(&mut id_buf);
+    let id_buf = crate::platform::device_label();
     Text::with_text_style(
         id_buf.as_str(),
         Point::new(76, 142),
@@ -212,23 +211,6 @@ fn push_renderable(out: &mut heapless::String<31>, name: &str) {
         if out.push(mapped).is_err() {
             break;
         }
-    }
-}
-
-/// Build the "Cyber Ægg <id>" footer string.  Mirrors the title-bar
-/// builder in `lib::draw_screen_main`.
-fn write_device_id(out: &mut heapless::String<16>) {
-    let _ = out.push_str("Cyber ");
-    let _ = out.push('\u{00C6}');
-    let _ = out.push_str("gg ");
-    #[cfg(feature = "embassy-core")]
-    {
-        let id = crate::fw::device_id::get_bytes();
-        let _ = out.push_str(core::str::from_utf8(&id).unwrap_or("????"));
-    }
-    #[cfg(feature = "simulator")]
-    {
-        let _ = out.push_str("A3F7");
     }
 }
 

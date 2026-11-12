@@ -99,3 +99,20 @@ pub fn unix_secs() -> Option<u32> {
         Some(SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs() as u32)
     }
 }
+
+/// The "Cyber Ægg <id>" device label (title bar, name-entry footer): the
+/// 4-hex-digit device ID on firmware, `A3F7` on the simulator.
+pub fn device_label() -> heapless::String<16> {
+    let mut s = heapless::String::new();
+    let _ = s.push_str("Cyber \u{00C6}gg ");
+    #[cfg(feature = "embassy-core")]
+    {
+        let id = crate::fw::device_id::get_bytes();
+        let _ = s.push_str(core::str::from_utf8(&id).unwrap_or("????"));
+    }
+    #[cfg(not(feature = "embassy-core"))]
+    {
+        let _ = s.push_str("A3F7");
+    }
+    s
+}
