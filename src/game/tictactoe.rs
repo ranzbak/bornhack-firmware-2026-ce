@@ -355,9 +355,7 @@ where
     let result = RESULT.load(Ordering::Relaxed);
 
     // Background.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     // Grid lines (2 horizontal + 2 vertical).
     let grid_style = PrimitiveStyle::with_stroke(BLACK, 3);

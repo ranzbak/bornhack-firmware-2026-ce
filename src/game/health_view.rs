@@ -10,7 +10,7 @@ use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle, Triangle}
 use embedded_graphics::text::{Text};
 
 use crate::ui::{self, TEXT_BOLD_BLACK};
-use crate::{RED, TriColor, WHITE};
+use crate::{RED, TriColor};
 
 /// X of the per-row condition icon (right edge, 14px wide inside 152px).
 const ICON_X: i32 = 132;
@@ -92,9 +92,7 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     // Background.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     // Title bar.
     ui::draw_title_bar(display, "Health Status", Point::zero(), 152)?;

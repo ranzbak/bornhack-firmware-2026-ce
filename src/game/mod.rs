@@ -45,7 +45,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 pub use nav::{GameNav, Row};
 
-use crate::{BLACK, RED, WHITE, TriColor};
+use crate::{BLACK, RED, TriColor};
 
 /// Action feedback shown briefly after an action.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -436,9 +436,7 @@ where
     // mini-games and modals — a rare, one-shot event worth interrupting
     // whatever's on screen for.
     if DIABETES_ALERT_ACTIVE.load(Ordering::Relaxed) {
-        Rectangle::new(Point::new(0, 0), Size::new(152, 152))
-            .into_styled(PrimitiveStyle::with_fill(WHITE))
-            .draw(display)?;
+        crate::ui::clear_screen(display)?;
         Text::with_text_style("TYPE 2", Point::new(76, 56), font, centered).draw(display)?;
         Text::with_text_style("DIABETES", Point::new(76, 74), font, centered).draw(display)?;
         Text::with_text_style(
@@ -459,9 +457,7 @@ where
     // Alcoholism onset alert — same one-shot full-screen takeover as
     // diabetes, the twin permanent condition on the drink arc.
     if ALCOHOLISM_ALERT_ACTIVE.load(Ordering::Relaxed) {
-        Rectangle::new(Point::new(0, 0), Size::new(152, 152))
-            .into_styled(PrimitiveStyle::with_fill(WHITE))
-            .draw(display)?;
+        crate::ui::clear_screen(display)?;
         Text::with_text_style("ALCOHOL", Point::new(76, 56), font, centered).draw(display)?;
         Text::with_text_style("DEPENDENCE", Point::new(76, 74), font, centered).draw(display)?;
         Text::with_text_style("Give rehab soon", Point::new(76, 100), font_red, centered)

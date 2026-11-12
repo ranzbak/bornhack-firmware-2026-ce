@@ -29,7 +29,7 @@ use embedded_graphics::text::{Text};
 use crate::menu::ButtonId;
 use crate::text_wrap::word_wrap;
 use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_BLACK, TEXT_BOLD_WHITE};
-use crate::{BLACK, TriColor, WHITE};
+use crate::{BLACK, TriColor};
 
 const STATE_LIST: u8 = 0;
 const STATE_DETAIL: u8 = 1;
@@ -150,9 +150,7 @@ pub fn draw<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     if STATE.load(Ordering::Relaxed) == STATE_DETAIL {
         draw_detail(display)

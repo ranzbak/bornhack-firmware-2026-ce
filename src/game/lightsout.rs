@@ -228,9 +228,7 @@ where
     let moves = MOVES.load(Ordering::Relaxed);
 
     // Background.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     // Draw 5×5 grid.
     for i in 0..25 {

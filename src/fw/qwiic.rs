@@ -18,11 +18,10 @@ use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Text};
+use embedded_graphics::text::Text;
 
 use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_BLACK};
-use crate::{TriColor, WHITE};
+use crate::TriColor;
 
 bind_interrupts!(struct Irqs {
     TWISPI0 => twim::InterruptHandler<peripherals::TWISPI0>;
@@ -138,9 +137,7 @@ pub fn draw<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
     ui::draw_title_bar(display, "I2C Scan", Point::zero(), 152)?;
 
     let state = STATE.lock(|s| *s.borrow());

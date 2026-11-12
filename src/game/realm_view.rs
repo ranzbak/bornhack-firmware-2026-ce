@@ -10,7 +10,7 @@ use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 
 use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_BLACK};
-use crate::{BLACK, TriColor, WHITE};
+use crate::{BLACK, TriColor};
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static SCROLL: AtomicU8 = AtomicU8::new(0);
@@ -60,9 +60,7 @@ where
     let scroll = SCROLL.load(Ordering::Relaxed) as usize;
 
     // Background.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     // Title bar.
     ui::draw_title_bar(display, "Unicorn Realm", Point::zero(), 152)?;
