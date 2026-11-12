@@ -20,8 +20,9 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Circle, PrimitiveStyle};
 use embedded_graphics::text::Text;
 
+use super::minigame::DifficultyPicker;
 use crate::menu::ButtonId;
-use crate::{BLACK, TriColor, WHITE, ui};
+use crate::{BLACK, TriColor, WHITE};
 
 // ── Layout ────────────────────────────────────────────────────────────────────
 
@@ -61,11 +62,8 @@ static RNG: AtomicU32 = AtomicU32::new(0xDEAD_BEEF);
 
 /// Difficulty: 0 = Easy (positional only), 1 = Hard (full heuristic).
 const DIFFICULTY_HARD: u8 = 1;
-static DIFFICULTY: AtomicU8 = AtomicU8::new(DIFFICULTY_HARD);
-/// Difficulty-picker overlay open at the start of each game.
-static MENU_OPEN: AtomicBool = AtomicBool::new(false);
-/// Difficulty-picker selection (0 = Easy, 1 = Hard).
-static MENU_POS: AtomicU8 = AtomicU8::new(DIFFICULTY_HARD);
+/// Difficulty picker shown at the start of each game (0 = Easy, 1 = Hard).
+static PICKER: DifficultyPicker = DifficultyPicker::new(DIFFICULTY_HARD);
 
 // ── Public API
 // ────────────────────────────────────────────────────────────────
@@ -86,8 +84,7 @@ pub fn open() {
     SCORE_B.store(0, Ordering::Relaxed);
     RNG.store(crate::platform::seed_ticks_or_fixed(), Ordering::Relaxed);
     // Show the difficulty picker first; play starts after Fire.
-    MENU_POS.store(DIFFICULTY_HARD, Ordering::Relaxed);
-    MENU_OPEN.store(true, Ordering::Relaxed);
+    PICKER.show();
     ACTIVE.store(true, Ordering::Relaxed);
 }
 
@@ -144,7 +141,7 @@ pub fn dispatch(btn: ButtonId) {
 // ─────────────────────────────────────────────────────────
 
 fn cursor_left() {
-    if MENU_OPEN.load(Ordering::Relaxed) {
+    if PICKER.is_open() {
         return;
     }
     let i = CURSOR.load(Ordering::Relaxed);
@@ -155,7 +152,7 @@ fn cursor_left() {
 }
 
 fn cursor_right() {
-    if MENU_OPEN.load(Ordering::Relaxed) {
+    if PICKER.is_open() {
         return;
     }
     let i = CURSOR.load(Ordering::Relaxed);
@@ -167,11 +164,8 @@ fn cursor_right() {
 }
 
 fn cursor_up() {
-    if MENU_OPEN.load(Ordering::Relaxed) {
-        let p = MENU_POS.load(Ordering::Relaxed);
-        if p > 0 {
-            MENU_POS.store(p - 1, Ordering::Relaxed);
-        }
+    if PICKER.is_open() {
+        PICKER.up();
         return;
     }
     let i = CURSOR.load(Ordering::Relaxed);
@@ -188,11 +182,8 @@ fn cursor_up() {
 }
 
 fn cursor_down() {
-    if MENU_OPEN.load(Ordering::Relaxed) {
-        let p = MENU_POS.load(Ordering::Relaxed);
-        if p < 1 {
-            MENU_POS.store(p + 1, Ordering::Relaxed);
-        }
+    if PICKER.is_open() {
+        PICKER.down(2);
         return;
     }
     let i = CURSOR.load(Ordering::Relaxed);
@@ -209,9 +200,8 @@ fn cursor_down() {
 
 fn activate() {
     // Difficulty picker open: confirm selection and start the game.
-    if MENU_OPEN.load(Ordering::Relaxed) {
-        DIFFICULTY.store(MENU_POS.load(Ordering::Relaxed), Ordering::Relaxed);
-        MENU_OPEN.store(false, Ordering::Relaxed);
+    if PICKER.is_open() {
+        PICKER.confirm();
         return;
     }
 
@@ -394,7 +384,7 @@ const TERRITORY_BONUS: i32 = 2;
 fn ai_play(m: u8) {
     let n = m / 2 + 1;
     let board = read_board();
-    let hard = DIFFICULTY.load(Ordering::Relaxed) == DIFFICULTY_HARD;
+    let hard = PICKER.chosen() == DIFFICULTY_HARD;
 
     let mut best_score: i32 = i32::MIN;
     let mut best_cells = [0u8; CELLS];
@@ -581,14 +571,7 @@ where
         }
     }
 
-    if MENU_OPEN.load(Ordering::Relaxed) {
-        ui::draw_picker_menu(
-            display,
-            "Difficulty",
-            &["Easy", "Hard"],
-            MENU_POS.load(Ordering::Relaxed) as usize,
-        )?;
-    }
+    PICKER.draw(display, "Difficulty", &["Easy", "Hard"])?;
 
     Ok(())
 }

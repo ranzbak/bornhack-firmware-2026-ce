@@ -26,6 +26,7 @@ pub mod health_view;
 pub mod input;
 pub mod lifecycle;
 pub mod lightsout;
+pub mod minigame;
 pub mod modal;
 pub mod nav;
 pub mod nim;

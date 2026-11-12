@@ -15,6 +15,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 
+use super::minigame::DifficultyPicker;
 use crate::menu::ButtonId;
 use crate::{BLACK, TriColor, ui};
 
@@ -60,11 +61,9 @@ static PLAYER_TURN: AtomicBool = AtomicBool::new(true);
 /// Difficulty: 0 = Normal (mistakes possible), 1 = Impossible (perfect
 /// minimax).
 const DIFFICULTY_IMPOSSIBLE: u8 = 1;
-static DIFFICULTY: AtomicU8 = AtomicU8::new(DIFFICULTY_IMPOSSIBLE);
-/// Difficulty-picker overlay open at the start of each game.
-static MENU_OPEN: AtomicBool = AtomicBool::new(false);
-/// Difficulty-picker selection (0 = Normal, 1 = Impossible).
-static MENU_POS: AtomicU8 = AtomicU8::new(DIFFICULTY_IMPOSSIBLE);
+/// Difficulty picker shown at the start of each game (0 = Normal,
+/// 1 = Impossible).
+static PICKER: DifficultyPicker = DifficultyPicker::new(DIFFICULTY_IMPOSSIBLE);
 /// Probability (out of 100) that the Normal AI ignores minimax and
 /// plays a random legal move instead.  35 % gives the player a real
 /// shot at winning without making the AI feel completely braindead.
@@ -85,8 +84,7 @@ pub fn open() {
     RESULT.store(0, Ordering::Relaxed);
     PLAYER_TURN.store(true, Ordering::Relaxed);
     // Difficulty picker first; play starts after Fire confirms.
-    MENU_POS.store(DIFFICULTY_IMPOSSIBLE, Ordering::Relaxed);
-    MENU_OPEN.store(true, Ordering::Relaxed);
+    PICKER.show();
     ACTIVE.store(true, Ordering::Relaxed);
 }
 
@@ -113,11 +111,8 @@ pub fn dispatch(btn: ButtonId) {
 // ── Input handling ───────────────────────────────────────────────────────────
 
 fn cursor_up() {
-    if MENU_OPEN.load(Ordering::Relaxed) {
-        let p = MENU_POS.load(Ordering::Relaxed);
-        if p > 0 {
-            MENU_POS.store(p - 1, Ordering::Relaxed);
-        }
+    if PICKER.is_open() {
+        PICKER.up();
         return;
     }
     let c = CURSOR.load(Ordering::Relaxed);
@@ -127,11 +122,8 @@ fn cursor_up() {
 }
 
 fn cursor_down() {
-    if MENU_OPEN.load(Ordering::Relaxed) {
-        let p = MENU_POS.load(Ordering::Relaxed);
-        if p < 1 {
-            MENU_POS.store(p + 1, Ordering::Relaxed);
-        }
+    if PICKER.is_open() {
+        PICKER.down(2);
         return;
     }
     let c = CURSOR.load(Ordering::Relaxed);
@@ -141,7 +133,7 @@ fn cursor_down() {
 }
 
 fn cursor_left() {
-    if MENU_OPEN.load(Ordering::Relaxed) {
+    if PICKER.is_open() {
         return;
     }
     let c = CURSOR.load(Ordering::Relaxed);
@@ -151,7 +143,7 @@ fn cursor_left() {
 }
 
 fn cursor_right() {
-    if MENU_OPEN.load(Ordering::Relaxed) {
+    if PICKER.is_open() {
         return;
     }
     let c = CURSOR.load(Ordering::Relaxed);
@@ -163,9 +155,8 @@ fn cursor_right() {
 /// Player places their mark. Returns true if the game ended (win/draw).
 fn place() -> bool {
     // Difficulty picker open: confirm selection and start the game.
-    if MENU_OPEN.load(Ordering::Relaxed) {
-        DIFFICULTY.store(MENU_POS.load(Ordering::Relaxed), Ordering::Relaxed);
-        MENU_OPEN.store(false, Ordering::Relaxed);
+    if PICKER.is_open() {
+        PICKER.confirm();
         return false;
     }
 
@@ -255,7 +246,7 @@ fn check_board() -> Option<u8> {
 /// the Normal-mode coin flip; no persistent state needed.
 
 fn ai_move(board: &[u8; 9]) -> Option<usize> {
-    let perfect = DIFFICULTY.load(Ordering::Relaxed) == DIFFICULTY_IMPOSSIBLE;
+    let perfect = PICKER.chosen() == DIFFICULTY_IMPOSSIBLE;
 
     // Normal mode: roll a die.  On a "mistake" outcome, pick a random
     // legal cell instead of the minimax best.  Threats the player has
@@ -414,14 +405,7 @@ where
     };
     Text::with_text_style(msg, Point::new(76, 134), font, centered).draw(display)?;
 
-    if MENU_OPEN.load(Ordering::Relaxed) {
-        ui::draw_picker_menu(
-            display,
-            "Difficulty",
-            &["Normal", "Impossible"],
-            MENU_POS.load(Ordering::Relaxed) as usize,
-        )?;
-    }
+    PICKER.draw(display, "Difficulty", &["Normal", "Impossible"])?;
 
     Ok(())
 }
