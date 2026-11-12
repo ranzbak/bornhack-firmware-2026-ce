@@ -91,6 +91,8 @@ pub fn open() {
 
 pub fn close() {
     ACTIVE.store(false, Ordering::Relaxed);
+    // Clear ghosting from the many fast LUT refreshes during play.
+    crate::FULL_REFRESH_PENDING.store(true, Ordering::Relaxed);
 }
 
 // ── Input handling ───────────────────────────────────────────────────────────
