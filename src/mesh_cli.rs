@@ -35,7 +35,7 @@ pub const FIRMWARE_BUILD: &str = "dev";
 pub const BOARD_NAME: &str = "BornHack Cyber\u{c6}gg";
 
 /// Node-name limit — same as `settings::MAX_NODE_NAME` (`node_name[32]`).
-pub const MAX_NAME: usize = 31;
+pub const MAX_NAME: usize = crate::MAX_NODE_NAME;
 /// Reply buffer size; a reply never comes close.
 pub const MAX_REPLY: usize = 160;
 pub type Reply = heapless::String<MAX_REPLY>;

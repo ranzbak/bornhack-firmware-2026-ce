@@ -229,8 +229,8 @@ async fn dispatch(which: Which) {
         Which::NodeName => {
             let (buf, n) = crate::NODE_NAME.lock(|cell| {
                 let s = cell.borrow();
-                let mut buf = [0u8; 31];
-                let n = s.len().min(31);
+                let mut buf = [0u8; crate::MAX_NODE_NAME];
+                let n = s.len().min(crate::MAX_NODE_NAME);
                 buf[..n].copy_from_slice(s.as_bytes().get(..n).unwrap_or(&[]));
                 (buf, n)
             });

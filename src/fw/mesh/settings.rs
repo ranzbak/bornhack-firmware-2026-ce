@@ -77,8 +77,7 @@ pub async fn delete_identity() {
 // Node name  (CMD_SET_ADVERT_NAME  0x08)
 // ---------------------------------------------------------------------------
 
-/// Maximum node name length in bytes (matches MeshCore `node_name[32] - 1`).
-pub const MAX_NODE_NAME: usize = 31;
+pub use crate::MAX_NODE_NAME;
 
 /// Read the persisted node name into `buf`.
 ///

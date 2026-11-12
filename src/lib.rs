@@ -506,11 +506,14 @@ pub fn unix_now_unique() -> Option<u32> {
     Some(if now <= prev { prev + 1 } else { now })
 }
 
+/// Maximum node-name length in bytes (MeshCore `node_name[32] - 1`).
+pub const MAX_NODE_NAME: usize = 31;
+
 /// MeshCore node name cached from KV for synchronous access by the display
 /// renderer. Populated by the BLE task at startup (after reading from flash)
 /// and on every SET_ADVERT_NAME update.  Empty until the BLE task has
 /// initialized.
-pub static NODE_NAME: sync::SharedCell<heapless::String<31>> =
+pub static NODE_NAME: sync::SharedCell<heapless::String<MAX_NODE_NAME>> =
     sync::SharedCell::new(heapless::String::new());
 
 /// This badge's Ed25519 public key, populated once at boot by

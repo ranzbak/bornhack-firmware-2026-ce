@@ -1342,14 +1342,14 @@ fn action_show_qr() {
 
 fn action_set_name() {
     let prefill = crate::NODE_NAME.with(|s| {
-        let mut buf = [0u8; 31];
-        let n = s.len().min(31);
+        let mut buf = [0u8; crate::MAX_NODE_NAME];
+        let n = s.len().min(crate::MAX_NODE_NAME);
         buf[..n].copy_from_slice(s.as_bytes().get(..n).unwrap_or(&[]));
         (buf, n)
     });
     crate::text_entry::begin(
         &prefill.0[..prefill.1],
-        31,
+        crate::MAX_NODE_NAME as u8,
         on_name_complete,
         "Set Node Name",
         true,
