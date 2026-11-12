@@ -1081,13 +1081,13 @@ where
             ),
         );
     }
-    Text::with_text_style(
+    crate::ui::draw_text(
+        display,
         footer.as_str(),
         Point::new(MARGIN + MODAL_W as i32 / 2, footer_y),
         TEXT_BOLD_BLACK,
         crate::ui::CENTERED_BOTTOM,
-    )
-    .draw(display)?;
+    )?;
 
     Ok(())
 }

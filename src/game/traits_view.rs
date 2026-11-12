@@ -6,7 +6,6 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use embedded_graphics::prelude::*;
-use embedded_graphics::text::Text;
 
 use super::stat_bar::draw_stat_bar;
 use crate::ui::{self, TEXT_BOLD_BLACK};
@@ -59,8 +58,7 @@ where
             format_args!("{} Gen {}{}", kind_name, generation, custom_mark),
         );
     }
-    Text::with_text_style(header.as_str(), Point::new(4, 24), TEXT_BOLD_BLACK, left)
-        .draw(display)?;
+    crate::ui::draw_text(display, header.as_str(), Point::new(4, 24), TEXT_BOLD_BLACK, left)?;
 
     // Fetch traits — if no game is active, show a placeholder.
     let Some((vit, cur, res)) = super::lifecycle::pet_traits() else {

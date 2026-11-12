@@ -96,7 +96,7 @@ where
     let mut cursor_y = y;
     for (s, e) in word_wrap(bytes, CHARS_PER_LINE).iter().take(2) {
         let slice = core::str::from_utf8(&bytes[*s as usize..*e as usize]).unwrap_or("");
-        Text::with_text_style(slice, Point::new(x, cursor_y), style, left).draw(display)?;
+        crate::ui::draw_text(display, slice, Point::new(x, cursor_y), style, left)?;
         cursor_y += 13;
     }
     Ok(cursor_y)

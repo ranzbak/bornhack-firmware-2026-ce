@@ -159,13 +159,13 @@ where
     } else {
         own
     };
-    Text::with_text_style(
+    crate::ui::draw_text(
+        display,
         crate::truncate_str(own, ANIM_NAME_MAX),
         Point::new(ANIM_LEFT_CX, ANIM_NAME_Y),
         style,
         ts,
-    )
-    .draw(display)?;
+    )?;
 
     let opp_buf;
     let opp = match super::friends::name_of(super::battle_anim_opp_id()) {
@@ -180,13 +180,13 @@ where
     } else {
         opp
     };
-    Text::with_text_style(
+    crate::ui::draw_text(
+        display,
         crate::truncate_str(opp, ANIM_NAME_MAX),
         Point::new(ANIM_RIGHT_CX, ANIM_NAME_Y),
         style,
         ts,
-    )
-    .draw(display)?;
+    )?;
 
     Ok(())
 }
@@ -430,7 +430,7 @@ where
         } else {
             TEXT_BOLD_BLACK
         };
-        Text::with_text_style(line.as_str(), Point::new(6, y + 3), style, left).draw(display)?;
+        crate::ui::draw_text(display, line.as_str(), Point::new(6, y + 3), style, left)?;
     }
 
     // Feedback line when a previous Fire couldn't start a battle.
@@ -490,7 +490,7 @@ where
         },
     )?;
 
-    Text::with_text_style(friend_label, Point::new(6, 66), TEXT_BOLD_BLACK, left).draw(display)?;
+    crate::ui::draw_text(display, friend_label, Point::new(6, 66), TEXT_BOLD_BLACK, left)?;
     super::stat_bar::draw_stat_bar(
         display,
         "HP",

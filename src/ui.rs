@@ -121,17 +121,16 @@ where
         .into_styled(PrimitiveStyle::with_fill(BLACK))
         .draw(display)?;
 
-    let style = CENTERED;
-    Text::with_text_style(
+    draw_text(
+        display,
         title,
         Point::new(
             origin.x + width as i32 / 2,
             origin.y + TITLE_BAR_H as i32 / 2,
         ),
         TEXT_BOLD_WHITE,
-        style,
-    )
-    .draw(display)?;
+        CENTERED,
+    )?;
     Ok(())
 }
 
@@ -244,8 +243,7 @@ pub fn draw_centered_message<D>(display: &mut D, text: &str, pos: Point) -> Resu
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let style = CENTERED;
-    Text::with_text_style(text, pos, TEXT_BLACK, style).draw(display)?;
+    draw_text(display, text, pos, TEXT_BLACK, CENTERED)?;
     Ok(())
 }
 
@@ -343,21 +341,21 @@ where
             )
             .into_styled(PrimitiveStyle::with_fill(BLACK))
             .draw(display)?;
-            Text::with_text_style(
+            draw_text(
+                display,
                 label,
                 Point::new(inner_x + 6, row_mid),
                 TEXT_WHITE,
                 left_style,
-            )
-            .draw(display)?;
+            )?;
         } else {
-            Text::with_text_style(
+            draw_text(
+                display,
                 label,
                 Point::new(inner_x + 6, row_mid),
                 TEXT_BLACK,
                 left_style,
-            )
-            .draw(display)?;
+            )?;
         }
     }
 

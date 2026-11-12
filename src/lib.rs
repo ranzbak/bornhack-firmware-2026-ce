@@ -767,8 +767,7 @@ where
     let bottom = crate::ui::BOTTOM_LEFT;
 
     let body_start = if let Some((title, bat_prc)) = header {
-        Text::with_text_style(title, Point::new(4, 14), ui::TEXT_BOLD_BLACK, bottom)
-            .draw(display)?;
+        ui::draw_text(display, title, Point::new(4, 14), ui::TEXT_BOLD_BLACK, bottom)?;
         draw_battery_icon(display, 128, 2, *bat_prc)?;
         Rectangle::new(Point::new(0, 16), Size::new(152, 1))
             .into_styled(PrimitiveStyle::with_fill(BLACK))
@@ -783,13 +782,13 @@ where
         Rectangle::new(Point::new(0, footer_y - 2), Size::new(152, 1))
             .into_styled(PrimitiveStyle::with_fill(BLACK))
             .draw(display)?;
-        Text::with_text_style(
+        ui::draw_text(
+            display,
             text,
             Point::new(76, footer_y + 5),
             ui::TEXT_BOLD_BLACK,
             crate::ui::CENTERED,
-        )
-        .draw(display)?;
+        )?;
         footer_y - 4
     } else {
         152

@@ -2455,13 +2455,13 @@ where
                         let _ = label.push_str(" >");
                     }
                 }
-                Text::with_text_style(
+                crate::ui::draw_text(
+                    display,
                     &label,
                     Point::new(MENU_X + MENU_W as i32 / 2, text_y),
                     MonoTextStyle::new(&FONT_7X13_BOLD, fg),
                     text_style,
-                )
-                .draw(display)?;
+                )?;
             }
         }
     }

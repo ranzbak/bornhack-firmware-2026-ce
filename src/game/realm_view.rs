@@ -85,8 +85,7 @@ where
                 format_args!("{} Gen {} - {}", kind_name, pet.generation, pet.age_str()),
             );
         }
-        Text::with_text_style(line.as_str(), Point::new(4, y), TEXT_BOLD_BLACK, left)
-            .draw(display)?;
+        crate::ui::draw_text(display, line.as_str(), Point::new(4, y), TEXT_BOLD_BLACK, left)?;
 
         // Traits line.
         let mut traits: heapless::String<32> = heapless::String::new();

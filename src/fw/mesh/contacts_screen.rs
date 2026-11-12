@@ -1091,13 +1091,13 @@ where
                 Text::with_text_style(g, Point::new(name_x, row_mid + 5), txt_style, bottom)
                     .draw(display)?;
             }
-            Text::with_text_style(
+            crate::ui::draw_text(
+                display,
                 truncated,
                 Point::new(name_x + name_offset, row_mid + 5),
                 txt_style,
                 bottom,
-            )
-            .draw(display)?;
+            )?;
 
             // Last-seen, right-aligned.
             let rel = fmt_relative(entry.observed_at_secs);
