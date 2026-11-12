@@ -2,9 +2,9 @@
 //!
 //! These pin the exact byte layout of everything the firmware writes to flash
 //! (game state, Unicorn Realm, friends list) or sends over the mesh (pet
-//! beacon, battle result). The literals were captured from the encoders as
-//! they stood before the byte-cursor refactor; they must never change, or
-//! saves written by an older firmware stop loading.
+//! beacon, battle result). The literals were captured from the encoders at
+//! main 978eabf; they must never change, or saves written by an older
+//! firmware stop loading.
 
 use bornhack_aegg::game::battle::{BattleResultMsg, KIND_UNKNOWN};
 use bornhack_aegg::game::engine::{
