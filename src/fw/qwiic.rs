@@ -19,7 +19,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_BLACK};
 use crate::{TriColor, WHITE};
@@ -154,7 +154,7 @@ where
         return Ok(());
     }
 
-    let left = TextStyleBuilder::new().baseline(Baseline::Top).build();
+    let left = crate::ui::TOP_LEFT;
 
     let mut header: heapless::String<20> = heapless::String::new();
     let _ = core::fmt::Write::write_fmt(&mut header, format_args!("{} device(s):", state.count));

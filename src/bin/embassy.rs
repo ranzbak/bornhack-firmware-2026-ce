@@ -1746,14 +1746,11 @@ where
     use embedded_graphics::mono_font::MonoTextStyle;
     use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
     use embedded_graphics::prelude::*;
-    use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+    use embedded_graphics::text::{Text};
 
     let _ = display.clear(Color::White);
 
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = bornhack_aegg::ui::CENTERED;
     let font = MonoTextStyle::new(&FONT_7X13_BOLD, Color::Black);
 
     let _ =

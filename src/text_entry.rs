@@ -479,10 +479,7 @@ where
         Rectangle::new(Point::zero(), Size::new(DISPLAY_W as u32, 18))
             .into_styled(PrimitiveStyle::with_fill(BLACK))
             .draw(display)?;
-        let ts = TextStyleBuilder::new()
-            .baseline(Baseline::Middle)
-            .alignment(Alignment::Center)
-            .build();
+        let ts = crate::ui::CENTERED;
         Text::with_text_style(
             entry.title,
             Point::new(DISPLAY_W / 2, 9),
@@ -544,10 +541,7 @@ fn draw_confirm<D>(display: &mut D, entry: &TextEntry) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let ts = crate::ui::CENTERED;
     let cx = DISPLAY_W / 2;
     let text = core::str::from_utf8(&entry.text).unwrap_or("");
     Text::with_text_style("Save name?", Point::new(cx, KB_Y + 16), FONT, ts).draw(display)?;
@@ -570,10 +564,7 @@ where
     Rectangle::new(Point::new(x, KB_Y), Size::new(14, 14))
         .into_styled(PrimitiveStyle::with_fill(BLACK))
         .draw(display)?;
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
+    let ts = crate::ui::CENTERED_TOP;
     Text::with_text_style(label, Point::new(x + 7, KB_Y + 1), FONT_INV, ts).draw(display)?;
     Ok(())
 }
@@ -584,10 +575,7 @@ fn draw_keyboard_hint<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let ts = crate::ui::CENTERED;
     let cx = DISPLAY_W / 2;
     Text::with_text_style("- Keyboard -", Point::new(cx, KB_Y + 16), FONT, ts).draw(display)?;
     Text::with_text_style("type to enter", Point::new(cx, KB_Y + 34), FONT, ts).draw(display)?;
@@ -609,10 +597,7 @@ where
     .into_styled(PrimitiveStyle::with_stroke(BLACK, 1))
     .draw(display)?;
 
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Left)
-        .build();
+    let ts = crate::ui::TOP_LEFT;
 
     let text = core::str::from_utf8(&entry.text).unwrap_or("");
 
@@ -871,10 +856,7 @@ fn draw_char_picker<D>(display: &mut D, chars: &[u8], cursor: u8) -> Result<(), 
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let ts = crate::ui::CENTERED;
 
     let total_w = chars.len() as i32 * 16;
     let start_x = KB_CX - total_w / 2 + 8;
@@ -905,10 +887,7 @@ where
     // would draw down to y=157 and clip.  Use `Baseline::Bottom` at
     // y=151 instead so the glyphs sit flush against the bottom edge
     // with one pixel of breathing room.
-    let hint_ts = TextStyleBuilder::new()
-        .baseline(Baseline::Bottom)
-        .alignment(Alignment::Center)
-        .build();
+    let hint_ts = crate::ui::CENTERED_BOTTOM;
     Text::with_text_style(
         "</>: move  Fire: select",
         Point::new(KB_CX, 151),

@@ -14,7 +14,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{
     Circle, Line, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, Triangle,
 };
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::menu::ButtonId;
 use crate::{BLACK, RED, TriColor, WHITE};
@@ -447,10 +447,7 @@ fn draw_analog_day_complication<D>(display: &mut D, clock: &Clock) -> Result<(),
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
 
     let weekday_idx = (clock.weekday as usize).min(6);
     Text::with_text_style(
@@ -467,10 +464,7 @@ fn draw_analog_date_complication<D>(display: &mut D, clock: &Clock) -> Result<()
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
 
     let month_idx = (clock.month as usize).saturating_sub(1).min(11);
     let mon = MONTH_ABBR[month_idx];
@@ -492,10 +486,7 @@ fn draw_date<D>(display: &mut D, clock: &Clock) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
 
     let mut date_buf: heapless::String<12> = heapless::String::new();
     let _ = core::fmt::write(
@@ -516,10 +507,7 @@ fn draw_day_strip<D>(display: &mut D, weekday: u8) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
 
     for (i, name) in DAY_NAMES.iter().enumerate() {
         let x = DAY_X_START + i as i32 * (DAY_W + DAY_GAP);
@@ -552,10 +540,7 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     let Some(clock) = wall_clock() else {
-        let centered = TextStyleBuilder::new()
-            .baseline(Baseline::Middle)
-            .alignment(Alignment::Center)
-            .build();
+        let centered = crate::ui::CENTERED;
         Text::with_text_style(
             "Clock not set",
             Point::new(76, 80),

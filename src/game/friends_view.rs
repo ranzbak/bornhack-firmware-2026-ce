@@ -24,7 +24,7 @@ use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::menu::ButtonId;
 use crate::text_wrap::word_wrap;
@@ -125,7 +125,7 @@ fn draw_wrapped<D>(
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let left = TextStyleBuilder::new().baseline(Baseline::Top).build();
+    let left = crate::ui::TOP_LEFT;
     let bytes = label.as_bytes();
     let mut cursor_y = y;
     for (s, e) in word_wrap(bytes, CHARS_PER_LINE).iter().take(2) {
@@ -211,15 +211,12 @@ where
         let mut indicator: heapless::String<8> = heapless::String::new();
         let _ =
             core::fmt::Write::write_fmt(&mut indicator, format_args!("{}/{}", cursor + 1, count));
-        let right = TextStyleBuilder::new()
-            .baseline(Baseline::Bottom)
-            .alignment(Alignment::Right)
-            .build();
+        let right = crate::ui::BOTTOM_RIGHT;
         Text::with_text_style(indicator.as_str(), Point::new(148, 150), TEXT_BLACK, right)
             .draw(display)?;
     }
 
-    let left_hint = TextStyleBuilder::new().baseline(Baseline::Bottom).build();
+    let left_hint = crate::ui::BOTTOM_LEFT;
     Text::with_text_style(
         "Fire for details",
         Point::new(4, 150),
@@ -243,7 +240,7 @@ where
         return Ok(());
     };
 
-    let left = TextStyleBuilder::new().baseline(Baseline::Top).build();
+    let left = crate::ui::TOP_LEFT;
     let kind_name = super::engine::PetKind::from_u8(friend.pet_kind).name();
     let label = friend_label(friend.name_str(), kind_name);
 
@@ -308,14 +305,11 @@ where
         &mut record,
         format_args!("Battles: {}W-{}L", friend.wins, friend.losses),
     );
-    let bottom_left = TextStyleBuilder::new().baseline(Baseline::Bottom).build();
+    let bottom_left = crate::ui::BOTTOM_LEFT;
     Text::with_text_style(record.as_str(), Point::new(6, 150), TEXT_BOLD_BLACK, bottom_left)
         .draw(display)?;
 
-    let bottom_right = TextStyleBuilder::new()
-        .baseline(Baseline::Bottom)
-        .alignment(Alignment::Right)
-        .build();
+    let bottom_right = crate::ui::BOTTOM_RIGHT;
     Text::with_text_style("Back", Point::new(148, 150), TEXT_BLACK, bottom_right).draw(display)?;
 
     Ok(())

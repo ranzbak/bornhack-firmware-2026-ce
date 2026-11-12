@@ -25,7 +25,7 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::{BLACK, TriColor, WHITE, ui};
 
@@ -432,10 +432,7 @@ where
     }
 
     // Status line.
-    let centred = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
+    let centred = crate::ui::CENTERED_TOP;
     let font = MonoTextStyle::new(&FONT_6X10, BLACK);
     let msg: &str = match result {
         RESULT_HUMAN_WINS => "You win!",

@@ -12,7 +12,7 @@ use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use super::battle::BattleOutcome;
 use super::engine::PET_NAME_MAX;
@@ -137,10 +137,7 @@ where
     use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
 
     let text = if viewer_won { "YOU WON!" } else { "YOU LOST" };
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let ts = crate::ui::CENTERED;
     // White strip behind the banner so it reads over either pet.
     Rectangle::new(Point::new(0, 122), Size::new(152, 22))
         .into_styled(PrimitiveStyle::with_fill(WHITE))
@@ -185,10 +182,7 @@ where
     use embedded_graphics::mono_font::MonoTextStyle;
     use embedded_graphics::mono_font::iso_8859_1::FONT_6X10;
 
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
+    let ts = crate::ui::CENTERED_TOP;
     let style = MonoTextStyle::new(&FONT_6X10, BLACK);
 
     let own = super::lifecycle::pet_name();
@@ -462,7 +456,7 @@ where
     }
 
     let cursor = CURSOR.load(Ordering::Relaxed) as usize;
-    let left = TextStyleBuilder::new().baseline(Baseline::Top).build();
+    let left = crate::ui::TOP_LEFT;
     let row_h = 24i32;
     let start_y = 22;
 
@@ -517,10 +511,7 @@ where
         _ => {}
     }
 
-    let hint = TextStyleBuilder::new()
-        .baseline(Baseline::Bottom)
-        .alignment(Alignment::Center)
-        .build();
+    let hint = crate::ui::CENTERED_BOTTOM;
     Text::with_text_style("Fire to challenge", Point::new(76, 150), TEXT_BLACK, hint)
         .draw(display)?;
 
@@ -539,7 +530,7 @@ where
         return Ok(());
     };
 
-    let left = TextStyleBuilder::new().baseline(Baseline::Top).build();
+    let left = crate::ui::TOP_LEFT;
     let n = (result.friend_name_len as usize).min(PET_NAME_MAX);
     let friend_name = core::str::from_utf8(&result.friend_name[..n]).unwrap_or("Friend");
     let friend_label = if friend_name.is_empty() {
@@ -583,10 +574,7 @@ where
     } else {
         "YOU LOST"
     };
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
     let banner_color = if result.outcome.challenger_won {
         TEXT_BOLD_BLACK
     } else {
@@ -608,10 +596,7 @@ where
             .draw(display)?;
     }
 
-    let hint = TextStyleBuilder::new()
-        .baseline(Baseline::Bottom)
-        .alignment(Alignment::Center)
-        .build();
+    let hint = crate::ui::CENTERED_BOTTOM;
     Text::with_text_style("Any button to close", Point::new(76, 148), TEXT_BLACK, hint)
         .draw(display)?;
 

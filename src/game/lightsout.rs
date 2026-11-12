@@ -14,7 +14,7 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::{BLACK, TriColor, WHITE};
 
@@ -282,10 +282,7 @@ where
     }
 
     // Status text below the grid.
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED_TOP;
     let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
 
     let unsolvable = UNSOLVABLE.load(Ordering::Relaxed);

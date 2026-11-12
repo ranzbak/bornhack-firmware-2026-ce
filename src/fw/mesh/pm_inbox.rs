@@ -475,7 +475,7 @@ pub fn unread_total() -> u8 {
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::menu::ButtonId;
 use crate::{BLACK, TriColor, WHITE, draw_header, ui};
@@ -671,11 +671,8 @@ where
     }
 
     let list_top: i32 = ui::TITLE_BAR_H as i32 + 2;
-    let bottom = TextStyleBuilder::new().baseline(Baseline::Bottom).build();
-    let right = TextStyleBuilder::new()
-        .baseline(Baseline::Bottom)
-        .alignment(Alignment::Right)
-        .build();
+    let bottom = crate::ui::BOTTOM_LEFT;
+    let right = crate::ui::BOTTOM_RIGHT;
     let total = summary.len() as u8;
     // The peer list can shrink (eviction) after `scroll` was set; re-clamp so
     // `total - scroll` can't underflow and the index below stays in range.
@@ -778,7 +775,7 @@ where
     // rows).  First line of each message gets `< 3m  ` prefix; the
     // rest indent to `BODY_X`.  Render the [scroll .. scroll +
     // THREAD_VISIBLE_LINES) window.
-    let bottom = TextStyleBuilder::new().baseline(Baseline::Bottom).build();
+    let bottom = crate::ui::BOTTOM_LEFT;
     let mut painted: u8 = 0;
     let mut skipped: u32 = 0;
     let body_top: i32 = ui::TITLE_BAR_H as i32 + 4;
