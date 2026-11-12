@@ -16,7 +16,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 
-use super::meshcore::truncate_bytes;
+use super::meshcore::truncate_str;
 use crate::menu::ButtonId;
 use crate::{BLACK, TriColor, WHITE};
 
@@ -249,7 +249,7 @@ fn start_region_entry(channel_idx: u8) {
         let name = name.strip_prefix('#').unwrap_or(name);
         let mut region: heapless::String<{ super::channels::REGION_NAME_MAX }> =
             heapless::String::new();
-        let _ = region.push_str(truncate_bytes(name, super::channels::REGION_NAME_MAX));
+        let _ = region.push_str(truncate_str(name, super::channels::REGION_NAME_MAX));
         // Update the UI mirror now; the meshcore task persists the change
         // and reloads its channel table.
         crate::CACHED_CHANNELS.lock(|c| {
@@ -358,7 +358,7 @@ where
                 let _ = title.push_str(if region.is_empty() {
                     "default"
                 } else {
-                    truncate_bytes(region.as_str(), 12)
+                    truncate_str(region.as_str(), 12)
                 });
                 crate::ui::draw_picker_menu(display, &title, &POPUP_ITEMS, pos as usize)
             }
@@ -434,7 +434,7 @@ where
 
         let mut label: heapless::String<24> = heapless::String::new();
         let name = &channels[idx].1;
-        let name_cap = truncate_bytes(name.as_str(), 16);
+        let name_cap = truncate_str(name.as_str(), 16);
         let _ = label.push_str(name_cap);
         if msg_count > 0 {
             let _ = core::fmt::Write::write_fmt(&mut label, format_args!(" ({})", msg_count));
@@ -498,7 +498,7 @@ where
 
     // Header: channel name (capped at 16 chars) + message count
     let mut header: heapless::String<24> = heapless::String::new();
-    let name_cap = truncate_bytes(ch_name.as_str(), 16);
+    let name_cap = truncate_str(ch_name.as_str(), 16);
     let _ = core::fmt::Write::write_fmt(&mut header, format_args!("{} ({})", name_cap, msg_total));
     Rectangle::new(Point::new(0, 0), Size::new(152, 16))
         .into_styled(PrimitiveStyle::with_fill(BLACK))
@@ -595,7 +595,7 @@ where
             } else {
                 let mut lbl: heapless::String<24> = heapless::String::new();
                 let s = sender.as_str();
-                let _ = lbl.push_str(truncate_bytes(s, 16));
+                let _ = lbl.push_str(truncate_str(s, 16));
                 lbl
             };
             let nick_w = (nick.len() as u32 * 7).min(144) + 4;

@@ -96,7 +96,7 @@ async fn load_channels() -> heapless::Vec<LoadedChannel, { channels::NUM_CHANNEL
     v
 }
 
-pub(super) use crate::truncate_str as truncate_bytes;
+pub(super) use crate::truncate_str;
 
 fn update_cached_channels(loaded: &heapless::Vec<LoadedChannel, { channels::NUM_CHANNELS }>) {
     crate::CACHED_CHANNELS.lock(|cell| {
@@ -117,7 +117,7 @@ fn update_cached_channels(loaded: &heapless::Vec<LoadedChannel, { channels::NUM_
                 .unwrap_or("?")
                 .trim_end_matches('\0');
             let mut name = heapless::String::new();
-            let _ = name.push_str(truncate_bytes(name_str, 20));
+            let _ = name.push_str(truncate_str(name_str, 20));
             let _ = list.push(crate::CachedChannel {
                 slot_idx: ch.slot_idx,
                 name,
@@ -129,6 +129,18 @@ fn update_cached_channels(loaded: &heapless::Vec<LoadedChannel, { channels::NUM_
 
 static CONTACTS: Mutex<CriticalSectionRawMutex, RefCell<Contacts<20>>> =
     Mutex::new(RefCell::new(Contacts::new()));
+
+/// Record `hash` in a dedup ring unless it is already there. Returns `true`
+/// when it was new. (The ring type lives in the `meshcore` submodule, so this
+/// is a free function rather than a `MsgHashRing` method.)
+pub(super) fn insert_if_new<const N: usize>(ring: &mut MsgHashRing<N>, hash: u32) -> bool {
+    if ring.contains(hash) {
+        false
+    } else {
+        ring.insert(hash);
+        true
+    }
+}
 
 static MSG_SEEN: Mutex<CriticalSectionRawMutex, RefCell<MsgHashRing<50>>> =
     Mutex::new(RefCell::new(MsgHashRing::new()));
@@ -672,15 +684,8 @@ async fn push_grp_txt(
             super::repeater_time::observe_timestamp(dec.timestamp, path_len & 0x3F);
 
             let content_hash = msg_hash(grp.channel_hash, text.as_bytes(), dec.timestamp);
-            let is_new = MSG_SEEN.lock(|cell| {
-                let mut ring = cell.borrow_mut();
-                if ring.contains(content_hash) {
-                    false
-                } else {
-                    ring.insert(content_hash);
-                    true
-                }
-            });
+            let is_new =
+                MSG_SEEN.lock(|cell| insert_if_new(&mut cell.borrow_mut(), content_hash));
             if !is_new {
                 // Check if this is our own message echoed back by a repeater.
                 crate::CHANNEL_MSG_RING.lock(|cell| {
@@ -726,10 +731,10 @@ async fn push_grp_txt(
             // Add to the channel message ring for the on-device browser.
             {
                 let mut s: heapless::String<16> = heapless::String::new();
-                let _ = s.push_str(truncate_bytes(sender_str, 16));
+                let _ = s.push_str(truncate_str(sender_str, 16));
                 let mut t: heapless::String<{ crate::CHANNEL_MSG_TEXT_MAX }> =
                     heapless::String::new();
-                let _ = t.push_str(truncate_bytes(msg_str, crate::CHANNEL_MSG_TEXT_MAX));
+                let _ = t.push_str(truncate_str(msg_str, crate::CHANNEL_MSG_TEXT_MAX));
                 crate::CHANNEL_MSG_RING.lock(|cell| {
                     cell.borrow_mut().push(crate::ChannelMsgEntry {
                         channel_idx: ch.slot_idx,
@@ -824,15 +829,7 @@ async fn push_grp_data(
     // `GRP_DATA_SEEN`'s doc comment. Must happen before any of the
     // stateful handlers below (beacon boost, Battle result) run.
     let dh = relay_hash(PayloadType::GrpData.to_u8(), payload);
-    let is_new = GRP_DATA_SEEN.lock(|cell| {
-        let mut ring = cell.borrow_mut();
-        if ring.contains(dh) {
-            false
-        } else {
-            ring.insert(dh);
-            true
-        }
-    });
+    let is_new = GRP_DATA_SEEN.lock(|cell| insert_if_new(&mut cell.borrow_mut(), dh));
     if !is_new {
         defmt::debug!("GrpData: duplicate suppressed (hash={=u32:#010x})", dh);
         return;
@@ -1902,7 +1899,7 @@ async fn send_grp_txt(
         let body = core::str::from_utf8(&req.text).unwrap_or("");
         let mut t: heapless::String<{ crate::CHANNEL_MSG_TEXT_MAX }> =
             heapless::String::new();
-        let _ = t.push_str(truncate_bytes(body, crate::CHANNEL_MSG_TEXT_MAX));
+        let _ = t.push_str(truncate_str(body, crate::CHANNEL_MSG_TEXT_MAX));
         crate::CHANNEL_MSG_RING.lock(|cell| {
             cell.borrow_mut().push(crate::ChannelMsgEntry {
                 channel_idx: req.channel_idx,
