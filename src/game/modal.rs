@@ -368,6 +368,14 @@ impl Item {
         }
     }
 
+    /// Can the cursor rest on this row?  Cancel always can (so every
+    /// list has at least one selectable row); everything else needs an
+    /// engine snapshot that says it's available.  Missing snapshot
+    /// (very early boot) locks out everything but Cancel.
+    fn selectable(self, stats: Option<&super::engine::PetStats>) -> bool {
+        matches!(self, Self::Cancel) || stats.is_some_and(|s| self.available(s))
+    }
+
     /// Time-until-ready in 10-second ticks for a disabled item.
     /// During the in-progress action this is `action_ticks_remaining`;
     /// after the action ends, the post-action cooldown takes over and
@@ -611,7 +619,12 @@ static MODAL_POS: AtomicU8 = AtomicU8::new(0);
 static STATS_VIEW: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 pub fn open(kind: ModalKind) {
-    MODAL_POS.store(0, Ordering::Relaxed);
+    // Start on the first row that can be used, so a disabled first row
+    // (e.g. Battle on cooldown) doesn't need to be stepped past.
+    let stats = super::lifecycle::cycle();
+    let items = kind.items();
+    let pos = first_selectable(items.len(), |i| items[i].selectable(stats.as_ref()));
+    MODAL_POS.store(pos as u8, Ordering::Relaxed);
     MODAL_KIND.store(kind as u8, Ordering::Relaxed);
     // Menu open → redraw the whole frame next refresh (grey-out overlay
     // covers everything); avoids partial-delta artifacts at the overlay edge.
@@ -633,7 +646,28 @@ pub fn is_open() -> bool {
 // ── Cursor navigation
 // ─────────────────────────────────────────────────────────
 
-pub fn cursor_up() {
+/// Index of the first row `selectable` accepts, or 0 when none does.
+fn first_selectable(len: usize, selectable: impl Fn(usize) -> bool) -> usize {
+    (0..len).find(|&i| selectable(i)).unwrap_or(0)
+}
+
+/// Next row after `from` (or before it when `forward` is false) that
+/// `selectable` accepts, wrapping around the ends of the list.  Returns
+/// `from` when no other row is selectable.
+fn step_selectable(
+    len: usize,
+    from: usize,
+    forward: bool,
+    selectable: impl Fn(usize) -> bool,
+) -> usize {
+    (1..len)
+        .map(|n| if forward { (from + n) % len } else { (from + len - n) % len })
+        .find(|&i| selectable(i))
+        .unwrap_or(from)
+}
+
+/// Move the cursor one selectable row up or down, skipping disabled rows.
+fn move_cursor(forward: bool) {
     // While the stats-bar sub-view is showing there's no item list on
     // screen to move a cursor through — ignore Up/Down so it doesn't
     // silently advance MODAL_POS underneath the bars (surfacing as a
@@ -641,32 +675,25 @@ pub fn cursor_up() {
     if STATS_VIEW.load(Ordering::Relaxed) {
         return;
     }
-    let pos = MODAL_POS.load(Ordering::Relaxed);
-    if pos > 0 {
-        MODAL_POS.store(pos - 1, Ordering::Relaxed);
-    } else {
-        // Wrap to the last item instead of doing nothing at the top.
-        let kind = ModalKind::from_u8(MODAL_KIND.load(Ordering::Relaxed));
-        let len = kind.items().len() as u8;
-        if len > 0 {
-            MODAL_POS.store(len - 1, Ordering::Relaxed);
-        }
+    let kind = ModalKind::from_u8(MODAL_KIND.load(Ordering::Relaxed));
+    let items = kind.items();
+    if items.is_empty() {
+        return;
     }
+    let stats = super::lifecycle::cycle();
+    let pos = (MODAL_POS.load(Ordering::Relaxed) as usize).min(items.len() - 1);
+    let next = step_selectable(items.len(), pos, forward, |i| {
+        items[i].selectable(stats.as_ref())
+    });
+    MODAL_POS.store(next as u8, Ordering::Relaxed);
+}
+
+pub fn cursor_up() {
+    move_cursor(false);
 }
 
 pub fn cursor_down() {
-    if STATS_VIEW.load(Ordering::Relaxed) {
-        return;
-    }
-    let kind = ModalKind::from_u8(MODAL_KIND.load(Ordering::Relaxed));
-    let len = kind.items().len() as u8;
-    let pos = MODAL_POS.load(Ordering::Relaxed);
-    if pos + 1 < len {
-        MODAL_POS.store(pos + 1, Ordering::Relaxed);
-    } else if len > 0 {
-        // Wrap to the top instead of doing nothing at the bottom.
-        MODAL_POS.store(0, Ordering::Relaxed);
-    }
+    move_cursor(true);
 }
 
 /// Activate the currently selected item.
@@ -791,11 +818,11 @@ where
             break;
         }
 
-        // Cancel is always available; other items defer to the engine
-        // snapshot.  When the snapshot is missing (very early boot)
-        // treat everything-but-Cancel as locked out.
-        let available =
-            matches!(item, Item::Cancel) || stats.as_ref().is_some_and(|s| item.available(s));
+        // The cursor normally skips disabled rows, but one can still be
+        // under it when it became unavailable while the modal was open
+        // (e.g. a cooldown started elsewhere) — the "selected but locked
+        // out" rendering below covers that case.
+        let available = item.selectable(stats.as_ref());
 
         // Build display text: append " (Ns)" with the remaining
         // cooldown seconds when the item has a known cooldown source,
@@ -1090,4 +1117,53 @@ where
     .draw(display)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{first_selectable, step_selectable};
+
+    /// Rows 0 and 2 disabled, like a Play list with Battle and a
+    /// paid game locked out.
+    fn sel(i: usize) -> bool {
+        !matches!(i, 0 | 2)
+    }
+
+    #[test]
+    fn open_skips_disabled_first_row() {
+        assert_eq!(first_selectable(5, sel), 1);
+        assert_eq!(first_selectable(5, |_| true), 0);
+        assert_eq!(first_selectable(5, |_| false), 0);
+        assert_eq!(first_selectable(0, |_| true), 0);
+    }
+
+    #[test]
+    fn down_skips_disabled_and_wraps() {
+        assert_eq!(step_selectable(5, 1, true, sel), 3);
+        assert_eq!(step_selectable(5, 3, true, sel), 4);
+        // Past the end: row 0 is disabled, lands on 1.
+        assert_eq!(step_selectable(5, 4, true, sel), 1);
+    }
+
+    #[test]
+    fn up_skips_disabled_and_wraps() {
+        assert_eq!(step_selectable(5, 3, false, sel), 1);
+        // Past the top: wraps to the last row.
+        assert_eq!(step_selectable(5, 1, false, sel), 4);
+    }
+
+    #[test]
+    fn stays_put_when_nothing_else_selectable() {
+        let only_last = |i: usize| i == 4;
+        assert_eq!(step_selectable(5, 4, true, only_last), 4);
+        assert_eq!(step_selectable(5, 4, false, only_last), 4);
+        assert_eq!(step_selectable(1, 0, true, |_| true), 0);
+    }
+
+    #[test]
+    fn leaves_a_disabled_row_the_cursor_is_on() {
+        // Row 2 went disabled under the cursor; moving still works.
+        assert_eq!(step_selectable(5, 2, true, sel), 3);
+        assert_eq!(step_selectable(5, 2, false, sel), 1);
+    }
 }
