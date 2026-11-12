@@ -83,7 +83,7 @@ pub fn open() {
     BLACK_HOLE.store(0, Ordering::Relaxed);
     SCORE_A.store(0, Ordering::Relaxed);
     SCORE_B.store(0, Ordering::Relaxed);
-    RNG.store(seed(), Ordering::Relaxed);
+    RNG.store(crate::platform::seed_ticks_or_fixed(), Ordering::Relaxed);
     // Show the difficulty picker first; play starts after Fire.
     MENU_POS.store(DIFFICULTY_HARD, Ordering::Relaxed);
     MENU_OPEN.store(true, Ordering::Relaxed);
@@ -369,24 +369,6 @@ const CONNECTIVITY_BONUS: i32 = 60;
 /// black hole, so a big AI number is safe there.
 const TERRITORY_BONUS: i32 = 2;
 
-fn xorshift(mut x: u32) -> u32 {
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    x
-}
-
-fn seed() -> u32 {
-    #[cfg(feature = "embassy-core")]
-    {
-        embassy_time::Instant::now().as_ticks() as u32
-    }
-    #[cfg(not(feature = "embassy-core"))]
-    {
-        0xCAFE_BABE
-    }
-}
-
 /// AI places number `m/2 + 1` on the board.  `m` must be odd (B's turn).
 ///
 /// Heuristic: simulate placing B's number on each empty candidate cell
@@ -466,7 +448,7 @@ fn ai_play(m: u8) {
     }
 
     let mut rng = RNG.load(Ordering::Relaxed);
-    rng = xorshift(rng | 1);
+    rng = crate::platform::xorshift32(rng | 1);
     RNG.store(rng, Ordering::Relaxed);
     let pick = if best_count > 0 {
         best_cells[(rng as usize) % best_count] as usize

@@ -97,12 +97,8 @@ pub struct BattleOutcome {
 
 /// Tiny xorshift32 step — deterministic, no external RNG crate needed.
 fn next_rng(state: &mut u32) -> u32 {
-    let mut x = *state;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    *state = x;
-    x
+    *state = crate::platform::xorshift32(*state);
+    *state
 }
 
 /// Damage = attacker's Attack minus roughly half the defender's Defense

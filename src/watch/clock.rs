@@ -207,32 +207,8 @@ fn build_clock(unix_secs: u32, offset_secs: i64) -> Option<Clock> {
     })
 }
 
-#[cfg(feature = "embassy-core")]
 pub(super) fn wall_clock() -> Option<Clock> {
-    let unix = crate::unix_now()?;
-    build_clock(unix, crate::tz_offset_secs())
-}
-
-#[cfg(all(feature = "simulator", not(feature = "embassy-core")))]
-pub(super) fn wall_clock() -> Option<Clock> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let unix = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs() as u32;
-    build_clock(unix, crate::tz_offset_secs())
-}
-
-#[cfg(not(any(feature = "embassy-core", feature = "simulator")))]
-pub(super) fn wall_clock() -> Option<Clock> {
-    None
-}
-
-#[cfg(feature = "embassy-core")]
-pub(super) fn battery_pct() -> u8 {
-    crate::fw::battery::read_pct()
-}
-
-#[cfg(not(feature = "embassy-core"))]
-pub(super) fn battery_pct() -> u8 {
-    100
+    build_clock(crate::platform::unix_secs()?, crate::tz_offset_secs())
 }
 
 // ── Hex (lozenge) segment primitives ─────────────────────────────────────────

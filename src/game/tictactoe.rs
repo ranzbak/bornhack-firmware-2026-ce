@@ -6,6 +6,7 @@
 //! State is held in module-level atomics so it integrates with the
 //! existing single-threaded game loop without allocations.
 
+use crate::platform::entropy_byte;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use embedded_graphics::mono_font::MonoTextStyle;
@@ -235,20 +236,6 @@ fn check_board() -> Option<u8> {
 
 /// Pseudo-random byte derived from the current uptime — good enough for
 /// the Normal-mode coin flip; no persistent state needed.
-fn entropy_byte() -> u8 {
-    #[cfg(feature = "embassy-core")]
-    {
-        embassy_time::Instant::now().as_ticks() as u8
-    }
-    #[cfg(not(feature = "embassy-core"))]
-    {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u8)
-            .unwrap_or(0xCB)
-    }
-}
 
 fn ai_move(board: &[u8; 9]) -> Option<usize> {
     let perfect = DIFFICULTY.load(Ordering::Relaxed) == DIFFICULTY_IMPOSSIBLE;

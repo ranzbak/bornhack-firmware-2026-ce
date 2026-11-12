@@ -198,7 +198,7 @@ const DIABETES_ALERT_MIN_VISIBLE_MS: u32 = 3000;
 /// `DIABETES_ALERT_MIN_VISIBLE_MS`. Called once, the instant diabetes
 /// triggers — see `lifecycle::check_diabetes_onset`.
 pub fn show_diabetes_alert() {
-    DIABETES_ALERT_STARTED_MS.store(now_ms_u32(), Ordering::Relaxed);
+    DIABETES_ALERT_STARTED_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
     DIABETES_ALERT_ACTIVE.store(true, Ordering::Relaxed);
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
@@ -212,7 +212,7 @@ static ALCOHOLISM_ALERT_STARTED_MS: AtomicU32 = AtomicU32::new(0);
 /// Show the full-screen "now alcoholic" alert, fired once the instant
 /// alcoholism triggers — see `lifecycle::check_alcoholism_onset`.
 pub fn show_alcoholism_alert() {
-    ALCOHOLISM_ALERT_STARTED_MS.store(now_ms_u32(), Ordering::Relaxed);
+    ALCOHOLISM_ALERT_STARTED_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
     ALCOHOLISM_ALERT_ACTIVE.store(true, Ordering::Relaxed);
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
@@ -287,7 +287,7 @@ pub fn show_battle_anim(
         | ((viewer_won as u32) << 30);
     BATTLE_ANIM_CTX.store(ctx, Ordering::Relaxed);
     BATTLE_ANIM_OPP_ID.store(u16::from_le_bytes(opp_id), Ordering::Relaxed);
-    BATTLE_ANIM_STARTED_MS.store(now_ms_u32(), Ordering::Relaxed);
+    BATTLE_ANIM_STARTED_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
     BATTLE_ANIM_ACTIVE.store(true, Ordering::Relaxed);
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
@@ -300,7 +300,7 @@ pub fn battle_anim_active() -> bool {
 
 /// Current stage from the elapsed time since [`show_battle_anim`].
 pub fn battle_anim_stage() -> BattleStage {
-    let elapsed = now_ms_u32().wrapping_sub(BATTLE_ANIM_STARTED_MS.load(Ordering::Relaxed));
+    let elapsed = crate::platform::uptime_ms_u32().wrapping_sub(BATTLE_ANIM_STARTED_MS.load(Ordering::Relaxed));
     battle_stage_from_elapsed(elapsed)
 }
 
@@ -326,24 +326,6 @@ pub fn clear_battle_anim() {
     BATTLE_ANIM_ACTIVE.store(false, Ordering::Relaxed);
 }
 
-/// Low 32 bits of the current uptime in milliseconds.  Cross-platform
-/// wrapper so `mod.rs` compiles on both firmware (`embassy_time`) and
-/// simulator (`lifecycle::sim_elapsed_ms`).
-fn now_ms_u32() -> u32 {
-    #[cfg(feature = "embassy-core")]
-    {
-        embassy_time::Instant::now().as_millis() as u32
-    }
-    #[cfg(all(feature = "simulator", not(feature = "embassy-core")))]
-    {
-        lifecycle::sim_elapsed_ms() as u32
-    }
-    #[cfg(not(any(feature = "embassy-core", feature = "simulator")))]
-    {
-        0
-    }
-}
-
 /// Show a feedback toast.  Becomes visible on the next display
 /// refresh and stays visible until the first refresh at or after
 /// `TOAST_MIN_VISIBLE_MS` elapsed.  Fires `TOAST_SIGNAL` so the
@@ -352,7 +334,7 @@ fn now_ms_u32() -> u32 {
 /// the display task is parked).
 pub fn show_toast(toast: Toast) {
     TOAST_MSG.store(toast as u8, Ordering::Relaxed);
-    TOAST_STARTED_MS.store(now_ms_u32(), Ordering::Relaxed);
+    TOAST_STARTED_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
     TOAST_ACTIVE.store(true, Ordering::Relaxed);
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
@@ -447,7 +429,7 @@ where
         )
         .draw(display)?;
 
-        let elapsed = now_ms_u32().wrapping_sub(DIABETES_ALERT_STARTED_MS.load(Ordering::Relaxed));
+        let elapsed = crate::platform::uptime_ms_u32().wrapping_sub(DIABETES_ALERT_STARTED_MS.load(Ordering::Relaxed));
         if elapsed >= DIABETES_ALERT_MIN_VISIBLE_MS {
             DIABETES_ALERT_ACTIVE.store(false, Ordering::Relaxed);
         }
@@ -464,7 +446,7 @@ where
             .draw(display)?;
 
         let elapsed =
-            now_ms_u32().wrapping_sub(ALCOHOLISM_ALERT_STARTED_MS.load(Ordering::Relaxed));
+            crate::platform::uptime_ms_u32().wrapping_sub(ALCOHOLISM_ALERT_STARTED_MS.load(Ordering::Relaxed));
         if elapsed >= DIABETES_ALERT_MIN_VISIBLE_MS {
             ALCOHOLISM_ALERT_ACTIVE.store(false, Ordering::Relaxed);
         }
@@ -540,7 +522,7 @@ where
             let anim = lifecycle::display_anim();
             let count = anim_files::frame_count(kind, anim);
             if count > 0 {
-                let elapsed_ms = lifecycle::sim_elapsed_ms();
+                let elapsed_ms = crate::platform::uptime_ms();
                 let id = anim_files::anim_id_for(anim);
                 if LAST_ANIM_ID.load(Ordering::Relaxed) != id {
                     LAST_ANIM_ID.store(id, Ordering::Relaxed);
@@ -678,7 +660,7 @@ where
         // Wrapping subtraction handles the once-per-49-days uptime
         // wraparound correctly: if start was before wrap and now after,
         // `now - start` still yields the true elapsed delta (mod 2^32).
-        let elapsed = now_ms_u32().wrapping_sub(TOAST_STARTED_MS.load(Ordering::Relaxed));
+        let elapsed = crate::platform::uptime_ms_u32().wrapping_sub(TOAST_STARTED_MS.load(Ordering::Relaxed));
         if elapsed >= TOAST_MIN_VISIBLE_MS {
             TOAST_ACTIVE.store(false, Ordering::Relaxed);
         }

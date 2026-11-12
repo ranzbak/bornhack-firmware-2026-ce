@@ -278,7 +278,7 @@ pub fn draw<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let bat = clock::battery_pct();
+    let bat = crate::platform::battery_pct();
     let title = match alarm::current_mode() {
         alarm::WatchMode::AlarmEdit => "Edit Alarm",
         alarm::WatchMode::Normal => "Clock",
