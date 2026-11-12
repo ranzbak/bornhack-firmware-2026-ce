@@ -20,11 +20,9 @@
 //!   ↑Shift  ↓Clear  →Enter/Submit
 
 
-use embedded_graphics::mono_font::MonoTextStyle;
-use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle, Triangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Alignment, Text};
 
 use crate::menu::ButtonId;
 use crate::{BLACK, TriColor, WHITE};
@@ -449,8 +447,7 @@ impl TextEntry {
 
 // ── Rendering ────────────────────────────────────────────────────────────────
 
-const FONT: MonoTextStyle<'static, TriColor> = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
-const FONT_INV: MonoTextStyle<'static, TriColor> = MonoTextStyle::new(&FONT_7X13_BOLD, WHITE);
+use crate::ui::{TEXT_BOLD_BLACK as FONT, TEXT_BOLD_WHITE as FONT_INV};
 
 const CHAR_W: i32 = 7;
 const LINE_H: i32 = 14;
@@ -482,7 +479,7 @@ where
         Text::with_text_style(
             entry.title,
             Point::new(DISPLAY_W / 2, 9),
-            MonoTextStyle::new(&FONT_7X13_BOLD, WHITE),
+            crate::ui::TEXT_BOLD_WHITE,
             ts,
         )
         .draw(display)?;
@@ -705,10 +702,11 @@ fn draw_label<D>(
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(align)
-        .build();
+    let ts = match align {
+        Alignment::Left => crate::ui::MIDDLE_LEFT,
+        Alignment::Center => crate::ui::CENTERED,
+        Alignment::Right => crate::ui::MIDDLE_RIGHT,
+    };
     Text::with_text_style(text, Point::new(x, y), FONT, ts).draw(display)?;
     Ok(())
 }

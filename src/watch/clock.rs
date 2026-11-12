@@ -9,7 +9,6 @@ use core::sync::atomic::{AtomicU8, Ordering};
 
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::{FONT_6X10, FONT_8X13_BOLD, FONT_9X18_BOLD};
-use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{
     Circle, Line, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, Triangle,
@@ -520,7 +519,7 @@ where
         Text::with_text_style(
             "Clock not set",
             Point::new(76, 80),
-            MonoTextStyle::new(&FONT_7X13_BOLD, BLACK),
+            crate::ui::TEXT_BOLD_BLACK,
             centered,
         )
         .draw(display)?;

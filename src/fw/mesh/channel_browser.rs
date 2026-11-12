@@ -10,15 +10,13 @@ use core::sync::atomic::Ordering::Relaxed;
 
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embedded_graphics::mono_font::MonoTextStyle;
-use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 
 use super::meshcore::truncate_str;
 use crate::menu::ButtonId;
-use crate::{BLACK, TriColor, WHITE};
+use crate::{BLACK, TriColor};
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -273,8 +271,7 @@ fn start_region_entry(channel_idx: u8) {
 
 // ── Rendering ────────────────────────────────────────────────────────────────
 
-const FONT: MonoTextStyle<'static, TriColor> = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
-const FONT_INV: MonoTextStyle<'static, TriColor> = MonoTextStyle::new(&FONT_7X13_BOLD, WHITE);
+use crate::ui::{TEXT_BOLD_BLACK as FONT, TEXT_BOLD_WHITE as FONT_INV};
 const LH: i32 = 14;
 
 /// Resolve `anchor` to a position in the channel's oldest→newest

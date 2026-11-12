@@ -49,7 +49,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 pub use nav::{GameNav, Row};
 
-use crate::{BLACK, RED, TriColor};
+use crate::{BLACK, TriColor};
 use timed_flag::TimedFlag;
 
 /// Action feedback shown briefly after an action.
@@ -344,13 +344,13 @@ fn draw_alert<D>(
 where
     D: DrawTarget<Color = TriColor>,
 {
-    use embedded_graphics::mono_font::MonoTextStyle;
-    use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
+    
+    
     use embedded_graphics::text::Text;
 
     let centered = crate::ui::CENTERED;
-    let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
-    let font_red = MonoTextStyle::new(&FONT_7X13_BOLD, RED);
+    let font = crate::ui::TEXT_BOLD_BLACK;
+    let font_red = crate::ui::TEXT_BOLD_RED;
     crate::ui::clear_screen(display)?;
     Text::with_text_style(lines[0], Point::new(76, 56), font, centered).draw(display)?;
     Text::with_text_style(lines[1], Point::new(76, 74), font, centered).draw(display)?;
@@ -415,8 +415,8 @@ pub fn draw_screen_game<D>(display: &mut D, nav: GameNav) -> Result<(), D::Error
 where
     D: DrawTarget<Color = TriColor>,
 {
-    use embedded_graphics::mono_font::MonoTextStyle;
-    use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
+    
+    
     use embedded_graphics::text::{Text};
     use engine::to_display::DisplayAnim;
 
@@ -427,10 +427,10 @@ where
     let _ = &nav;
 
     let centered = crate::ui::CENTERED;
-    let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
+    let font = crate::ui::TEXT_BOLD_BLACK;
     // Red style for pet status prompts (the "gone / new egg" screen) so they
     // stand out from the black countdown timer / labels.
-    let font_red = MonoTextStyle::new(&FONT_7X13_BOLD, RED);
+    let font_red = crate::ui::TEXT_BOLD_RED;
 
     // ── Full-screen takeover screens ───────────────────────────────────
     // Diabetes onset alert takes priority over everything else, including
@@ -638,8 +638,8 @@ where
             toast.message()
         };
         if !msg.is_empty() {
-            use embedded_graphics::mono_font::MonoTextStyle;
-            use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
+            
+            
             use embedded_graphics::text::{Text};
             let style = crate::ui::TOP_LEFT;
             Text::with_text_style(
@@ -647,7 +647,7 @@ where
                 Point::new(2, SEP_TOP + 2),
                 // Red so the action feedback (-hunger / -sick / +inspired /
                 // bonus) pops against the black UI.
-                MonoTextStyle::new(&FONT_7X13_BOLD, RED),
+                crate::ui::TEXT_BOLD_RED,
                 style,
             )
             .draw(display)?;
@@ -663,11 +663,11 @@ where
     // ongoing-damage banners come first, then the pre-permanence
     // warnings that let the player course-correct before it's too late.
     {
-        use embedded_graphics::mono_font::MonoTextStyle;
-        use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
+        
+        
         use embedded_graphics::text::{Text};
         let style = crate::ui::TOP_RIGHT;
-        let font = MonoTextStyle::new(&FONT_7X13_BOLD, RED);
+        let font = crate::ui::TEXT_BOLD_RED;
         let banners = [
             (lifecycle::is_diabetic_unmedicated(), "NEEDS MEDS"),
             (lifecycle::is_alcoholic_untreated(), "NEEDS REHAB"),
@@ -769,10 +769,7 @@ where
 
     // Debug: show animation name when no artwork loaded.
     if !has_sprite && lifecycle::is_started() {
-        use embedded_graphics::mono_font::MonoTextStyle;
-        use embedded_graphics::mono_font::iso_8859_1::FONT_7X13;
         use embedded_graphics::text::{Text};
-        use crate::EpdColor as Color;
 
         let anim = lifecycle::display_anim();
         let anim_name: &str = match anim {
@@ -804,7 +801,7 @@ where
         let _ = Text::with_text_style(
             anim_name,
             Point::new(150, 36),
-            MonoTextStyle::new(&FONT_7X13, Color::Black),
+            crate::ui::TEXT_BLACK,
             style,
         )
         .draw(display);

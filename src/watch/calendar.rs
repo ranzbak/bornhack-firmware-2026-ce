@@ -35,7 +35,7 @@ use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::mono_font::iso_8859_1::{FONT_6X13_BOLD, FONT_7X13_BOLD};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::Text;
 
 use super::alarm::{
     N_ALARMS, alarm_day_n, alarm_enabled_n, alarm_end_hour_n, alarm_end_minute_n, alarm_hour_n,
@@ -403,7 +403,7 @@ where
     Text::with_text_style(
         &buf,
         Point::new(76, MONTH_LABEL_Y),
-        MonoTextStyle::new(&FONT_7X13_BOLD, BLACK),
+        crate::ui::TEXT_BOLD_BLACK,
         centered,
     )
     .draw(display)?;
@@ -663,10 +663,7 @@ where
     // a FONT_6X13_BOLD line with comfortable headroom; the bold weight
     // prints noticeably crisper on the e-paper's grey-ish whites).
     let label_style = MonoTextStyle::new(&FONT_6X13_BOLD, BLACK);
-    let right_align = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Right)
-        .build();
+    let right_align = crate::ui::MIDDLE_RIGHT;
     let mut h = tl_start_hour;
     while h <= tl_start_hour + HOURS_VISIBLE {
         let label_y = TL_TOP_Y + (h - tl_start_hour) * PX_PER_HOUR + 6;
@@ -803,7 +800,7 @@ where
         Text::with_text_style(
             "(no events)",
             Point::new(85, 90),
-            MonoTextStyle::new(&FONT_7X13_BOLD, BLACK),
+            crate::ui::TEXT_BOLD_BLACK,
             centered,
         )
         .draw(display)?;
@@ -861,7 +858,7 @@ where
         Text::with_text_style(
             "(no events)",
             Point::new(76, 90),
-            MonoTextStyle::new(&FONT_7X13_BOLD, BLACK),
+            crate::ui::TEXT_BOLD_BLACK,
             centered,
         )
         .draw(display)?;

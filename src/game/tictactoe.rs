@@ -9,8 +9,6 @@
 use crate::platform::entropy_byte;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-use embedded_graphics::mono_font::MonoTextStyle;
-use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
@@ -396,7 +394,7 @@ where
 
     // Status text below the grid.
     let centered = crate::ui::CENTERED_TOP;
-    let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
+    let font = crate::ui::TEXT_BOLD_BLACK;
     let msg = match result {
         1 => "You win!",
         2 => "EI wins!",

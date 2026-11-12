@@ -2481,7 +2481,7 @@ pub fn draw_about<D>(display: &mut D, page: u8) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
+    let font = crate::ui::TEXT_BOLD_BLACK;
     let center = crate::ui::CENTERED_TOP;
 
     let x = 76; // center
@@ -2619,7 +2619,7 @@ pub fn draw_lora_radio<D>(display: &mut D, page: u8) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let font_bold = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
+    let font_bold = crate::ui::TEXT_BOLD_BLACK;
     let center = crate::ui::CENTERED_TOP;
     let left = crate::ui::TOP_LEFT;
 
@@ -2671,7 +2671,7 @@ where
     Rectangle::new(Point::new(6, y - 2), Size::new(140, 18))
         .into_styled(PrimitiveStyle::with_fill(BLACK))
         .draw(display)?;
-    let font_white = MonoTextStyle::new(&FONT_7X13_BOLD, WHITE);
+    let font_white = crate::ui::TEXT_BOLD_WHITE;
     let mut title_line: heapless::String<40> = heapless::String::new();
     let _ = title_line.push_str(if is_active { "* " } else { "  " });
     let _ = title_line.push_str(title);
@@ -2737,7 +2737,7 @@ pub fn draw_confirm<D>(display: &mut D, prompt: &str) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
+    let font = crate::ui::TEXT_BOLD_BLACK;
     let center = crate::ui::CENTERED_TOP;
     let x = 76;
 
@@ -2763,7 +2763,7 @@ where
         Rectangle::new(Point::new(6, 56), Size::new(140, 20))
             .into_styled(PrimitiveStyle::with_fill(BLACK))
             .draw(display)?;
-        let font_white = MonoTextStyle::new(&FONT_7X13_BOLD, WHITE);
+        let font_white = crate::ui::TEXT_BOLD_WHITE;
         Text::with_text_style(prompt, Point::new(x, 60), font_white, center).draw(display)?;
     } else {
         let mut y = 54;

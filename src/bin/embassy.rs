@@ -1740,15 +1740,13 @@ where
     D: bornhack_aegg::epd_driver::EpdDriver,
 {
     use bornhack_aegg::EpdColor as Color;
-    use embedded_graphics::mono_font::MonoTextStyle;
-    use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
     use embedded_graphics::prelude::*;
     use embedded_graphics::text::{Text};
 
     let _ = display.clear(Color::White);
 
     let centered = bornhack_aegg::ui::CENTERED;
-    let font = MonoTextStyle::new(&FONT_7X13_BOLD, Color::Black);
+    let font = bornhack_aegg::ui::TEXT_BOLD_BLACK;
 
     let _ =
         Text::with_text_style("Battery voltage", Point::new(76, 50), font, centered).draw(display);

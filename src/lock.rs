@@ -18,8 +18,6 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use embedded_graphics::mono_font::MonoTextStyle;
-use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
@@ -73,7 +71,7 @@ where
 
     // Unlock hint below the padlock, red + bold. Fits one centred line at
     // 7 px/char within the 152 px panel.
-    let bold_red = MonoTextStyle::new(&FONT_7X13_BOLD, RED);
+    let bold_red = crate::ui::TEXT_BOLD_RED;
     let centered = crate::ui::CENTERED;
     Text::with_text_style("Hold cancel to unlock", Point::new(76, 122), bold_red, centered)
         .draw(display)?;

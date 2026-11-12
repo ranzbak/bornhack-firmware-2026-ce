@@ -123,10 +123,7 @@ where
     for (i, (label, is_bad)) in rows.iter().enumerate() {
         let y = ROWS_Y + i as i32 * ROW_H;
         Text::with_text_style(label, Point::new(ROW_X, y), TEXT_BOLD_BLACK, left).draw(display)?;
-        let value_style = embedded_graphics::mono_font::MonoTextStyle::new(
-            &embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD,
-            if *is_bad { RED } else { crate::BLACK },
-        );
+        let value_style = if *is_bad { crate::ui::TEXT_BOLD_RED } else { TEXT_BOLD_BLACK };
         let value = if *is_bad { "Yes" } else { "No" };
         Text::with_text_style(
             value,

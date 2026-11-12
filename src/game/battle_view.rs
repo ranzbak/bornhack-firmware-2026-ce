@@ -123,8 +123,8 @@ fn draw_anim_banner<D>(display: &mut D, viewer_won: bool) -> Result<(), D::Error
 where
     D: DrawTarget<Color = TriColor>,
 {
-    use embedded_graphics::mono_font::MonoTextStyle;
-    use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
+    
+    
 
     let text = if viewer_won { "YOU WON!" } else { "YOU LOST" };
     let ts = crate::ui::CENTERED;
@@ -132,7 +132,7 @@ where
     Rectangle::new(Point::new(0, 122), Size::new(152, 22))
         .into_styled(PrimitiveStyle::with_fill(WHITE))
         .draw(display)?;
-    let style = MonoTextStyle::new(&FONT_7X13_BOLD, RED);
+    let style = crate::ui::TEXT_BOLD_RED;
     Text::with_text_style(text, Point::new(76, 133), style, ts).draw(display)?;
     Ok(())
 }
@@ -525,10 +525,7 @@ where
     let banner_color = if result.outcome.challenger_won {
         TEXT_BOLD_BLACK
     } else {
-        embedded_graphics::mono_font::MonoTextStyle::new(
-            &embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD,
-            RED,
-        )
+        crate::ui::TEXT_BOLD_RED
     };
     Text::with_text_style(banner, Point::new(76, 112), banner_color, centered).draw(display)?;
 

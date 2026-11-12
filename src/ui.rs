@@ -54,6 +54,12 @@ pub const TOP_RIGHT: TextStyle = TextStyleBuilder::new()
     .alignment(Alignment::Right)
     .build();
 
+/// Right-aligned, `Baseline::Middle`.
+pub const MIDDLE_RIGHT: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Middle)
+    .alignment(Alignment::Right)
+    .build();
+
 /// Left-aligned, `Baseline::Middle`.
 pub const MIDDLE_LEFT: TextStyle = TextStyleBuilder::new()
     .baseline(Baseline::Middle)
@@ -82,6 +88,9 @@ pub const TEXT_BOLD_BLACK: MonoTextStyle<'static, TriColor> =
 /// 7×13 bold, drawn in `WHITE` — title-bar text on black.
 pub const TEXT_BOLD_WHITE: MonoTextStyle<'static, TriColor> =
     MonoTextStyle::new(&FONT_7X13_BOLD, WHITE);
+
+/// 7×13 bold, drawn in `RED` — warnings / emphasis on white.
+pub const TEXT_BOLD_RED: MonoTextStyle<'static, TriColor> = MonoTextStyle::new(&FONT_7X13_BOLD, RED);
 
 /// 7×13 regular weight, drawn in `RED` — used for invalid-signature
 /// notices on the advert screen and any other "warning" body text.

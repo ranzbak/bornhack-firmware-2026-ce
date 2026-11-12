@@ -17,13 +17,11 @@
 //! shows half-and-half but stays readable on both halves.
 
 use embedded_graphics::draw_target::DrawTargetExt;
-use embedded_graphics::mono_font::MonoTextStyle;
-use embedded_graphics::mono_font::iso_8859_1::{FONT_7X13, FONT_7X13_BOLD};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 
-use crate::{BLACK, TriColor, WHITE};
+use crate::{BLACK, TriColor};
 
 /// Draw a labelled bar with `pct%` (0–100) centred inside it.
 ///
@@ -53,9 +51,9 @@ where
     // Inline percentage uses the bold variant of FONT_7X13 — bolder
     // glyphs survive the half-and-half clipping at the fill boundary
     // with better legibility than the regular weight.
-    let label_font = MonoTextStyle::new(&FONT_7X13, BLACK);
-    let pct_font_black = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
-    let pct_font_white = MonoTextStyle::new(&FONT_7X13_BOLD, WHITE);
+    let label_font = crate::ui::TEXT_BLACK;
+    let pct_font_black = crate::ui::TEXT_BOLD_BLACK;
+    let pct_font_white = crate::ui::TEXT_BOLD_WHITE;
     let left_top = crate::ui::TOP_LEFT;
     let centred = crate::ui::CENTERED;
 

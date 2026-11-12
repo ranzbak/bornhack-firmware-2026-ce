@@ -665,7 +665,6 @@ async fn draw_ship_image<D: FactoryDisplay>(display: &mut D) {
     use embedded_graphics::Drawable;
     use embedded_graphics::geometry::{Point, Size};
     use embedded_graphics::mono_font::MonoTextStyle;
-    use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
     // Use the ASCII variant of FONT_10X20 — same one `name_screen.rs`
     // already pulls in — so we share the glyph table instead of
     // dragging in a separate iso_8859_1 copy (saves ~3 KB).
@@ -678,7 +677,7 @@ async fn draw_ship_image<D: FactoryDisplay>(display: &mut D) {
 
     let centered = crate::ui::CENTERED_TOP;
     let big = MonoTextStyle::new(&FONT_10X20, TriColor::Black);
-    let small = MonoTextStyle::new(&FONT_7X13_BOLD, TriColor::Black);
+    let small = crate::ui::TEXT_BOLD_BLACK;
 
     // Decorative border so it reads like a stamped passed-QC label.
     let border = Rectangle::new(Point::new(4, 4), Size::new(144, 144));
