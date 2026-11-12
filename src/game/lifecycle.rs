@@ -530,9 +530,7 @@ pub fn drink(kind: super::engine::DrinkKind) -> bool {
 /// `big` = true for a brand-new friend, false for a cooldown-gated
 /// recurring reunion. No-op if no game is active.
 pub fn friend_boost(big: bool) {
-    if let Some(state) = unsafe { (*GAME.get()).as_mut() } {
-        state.friend_boost(big);
-    }
+    with_game(|s| s.friend_boost(big));
 }
 
 pub fn rehab() -> bool {
@@ -544,62 +542,38 @@ pub fn rehab() -> bool {
 // ---------------------------------------------------------------------------
 
 pub fn debug_force_overweight() {
-    let state = unsafe { (*GAME.get()).as_mut() };
-    if let Some(s) = state {
-        s.debug_force_overweight();
-    }
+    with_game(|s| s.debug_force_overweight());
 }
 
 pub fn debug_force_diabetic() {
-    let state = unsafe { (*GAME.get()).as_mut() };
-    if let Some(s) = state {
-        s.debug_force_diabetic();
-    }
+    with_game(|s| s.debug_force_diabetic());
 }
 
 pub fn debug_clear_diabetes() {
-    let state = unsafe { (*GAME.get()).as_mut() };
-    if let Some(s) = state {
-        s.debug_clear_diabetes();
-    }
+    with_game(|s| s.debug_clear_diabetes());
 }
 
 pub fn debug_skip_ticks(ticks: u32) {
-    let state = unsafe { (*GAME.get()).as_mut() };
-    if let Some(s) = state {
-        s.debug_skip_ticks(ticks);
-    }
+    with_game(|s| s.debug_skip_ticks(ticks));
 }
 
 pub fn debug_force_drunk() {
-    let state = unsafe { (*GAME.get()).as_mut() };
-    if let Some(s) = state {
-        s.debug_force_drunk();
-    }
+    with_game(|s| s.debug_force_drunk());
 }
 
 pub fn debug_force_alcoholic() {
-    let state = unsafe { (*GAME.get()).as_mut() };
-    if let Some(s) = state {
-        s.debug_force_alcoholic();
-    }
+    with_game(|s| s.debug_force_alcoholic());
 }
 
 pub fn debug_clear_alcoholism() {
-    let state = unsafe { (*GAME.get()).as_mut() };
-    if let Some(s) = state {
-        s.debug_clear_alcoholism();
-    }
+    with_game(|s| s.debug_clear_alcoholism());
 }
 
 /// Reset both halves of the mesh Battle record — this pet's own
 /// lifetime tally and every known friend's head-to-head numbers — back
 /// to zero. See `GameState::debug_reset_battle_record`.
 pub fn debug_reset_battle_record() {
-    let state = unsafe { (*GAME.get()).as_mut() };
-    if let Some(s) = state {
-        s.debug_reset_battle_record();
-    }
+    with_game(|s| s.debug_reset_battle_record());
     super::friends::reset_all_battle_records();
 }
 
@@ -637,8 +611,7 @@ pub fn is_hibernating() -> bool {
 /// Award the mini-game win reward (HAX + cooldown + hunger cost).
 /// Starts only the matching game's cooldown so other games stay playable.
 pub fn award_inspiration(game: super::engine::MiniGame) {
-    let state = unsafe { (*GAME.get()).as_mut() };
-    if let Some(s) = state {
+    with_game(|s| {
         s.award_inspiration(game);
         // Celebratory jingle on a mini-game win — the main
         // active-engagement reward previously had no audio, only a toast.
@@ -646,7 +619,7 @@ pub fn award_inspiration(game: super::engine::MiniGame) {
         if !crate::GAME_MUTE.load(Ordering::Relaxed) {
             crate::fw::buzzer::play(crate::MINIGAME_WIN_INDEX);
         }
-    }
+    });
 }
 
 /// Start a new generation (after pet has left or manual reset).
@@ -780,6 +753,13 @@ pub fn hard_mode() -> bool {
     match state {
         Some(s) => s.hard_mode,
         None => false,
+    }
+}
+
+/// Run `f` on the active game; no-op when no game has been started.
+fn with_game(f: impl FnOnce(&mut GameState)) {
+    if let Some(s) = unsafe { (*GAME.get()).as_mut() } {
+        f(s);
     }
 }
 
