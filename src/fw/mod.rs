@@ -38,6 +38,8 @@ pub mod power;
 pub mod pets_cfg;
 pub mod storage;
 pub mod temperature;
+/// nRF52840 hardware TRNG register reader (`seed32`).
+pub mod trng;
 
 /// MeshCore networking stack (LoRa radio, BLE companion, contacts, channels, KV
 /// store).

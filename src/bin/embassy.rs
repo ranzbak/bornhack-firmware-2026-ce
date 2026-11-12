@@ -503,7 +503,7 @@ async fn main(spawner: Spawner) {
         // probe found a working crystal; otherwise log + skip and the
         // rest of the firmware (LoRa, watch, game, display) carries on.
         if hw.hfxo_ok {
-            let ble_prng_seed = bornhack_aegg::fw::mesh::device_identity::trng_seed();
+            let ble_prng_seed = bornhack_aegg::fw::trng::seed32();
             static SDC_MEM: StaticCell<
                 nrf_sdc::Mem<{ bornhack_aegg::fw::mesh::ble::SDC_MEM_SIZE }>,
             > = StaticCell::new();
