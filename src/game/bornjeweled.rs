@@ -12,7 +12,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle, Triangle};
 use embedded_graphics::text::{Alignment, Text};
 
-use crate::{BLACK, TriColor, WHITE};
+use crate::{BLACK, TriColor};
 
 // ── Layout ──────────────────────────────────────────────────────────────────
 
@@ -493,12 +493,7 @@ where
     if RESULT.load(Ordering::Relaxed) == RESULT_GAME_OVER {
         // Frame the centre of the board in white so the overlay text is
         // readable on top of whatever gem layout was last shown.
-        Rectangle::new(Point::new(20, 60), Size::new(112, 50))
-            .into_styled(PrimitiveStyle::with_fill(WHITE))
-            .draw(display)?;
-        Rectangle::new(Point::new(20, 60), Size::new(112, 50))
-            .into_styled(PrimitiveStyle::with_stroke(BLACK, 2))
-            .draw(display)?;
+        crate::ui::draw_popover_frame(display, Point::new(20, 60), Size::new(112, 50), 2)?;
         Text::with_alignment(
             "Game Over",
             Point::new(76, 78),
