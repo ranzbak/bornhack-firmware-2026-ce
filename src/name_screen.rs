@@ -195,19 +195,7 @@ where
 /// on-screen snapshot.
 fn snapshot_name(out: &mut heapless::String<31>) {
     out.clear();
-    #[cfg(feature = "embassy-core")]
-    {
-        crate::NODE_NAME.lock(|cell| {
-            let name = cell.borrow();
-            push_renderable(out, name.as_str());
-        });
-    }
-    #[cfg(feature = "simulator")]
-    {
-        let guard = crate::NODE_NAME.lock().unwrap();
-        let name = guard.borrow();
-        push_renderable(out, name.as_str());
-    }
+    crate::NODE_NAME.with(|name| push_renderable(out, name.as_str()));
 }
 
 /// Push the drawable characters of `name` into `out`, stopping if the buffer
