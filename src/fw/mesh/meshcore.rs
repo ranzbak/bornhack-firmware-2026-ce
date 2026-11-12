@@ -1556,6 +1556,80 @@ fn route_for_contact(
     }
 }
 
+/// A serialized packet ready for the radio: the 255-byte frame and its length.
+struct Frame {
+    buf: [u8; meshcore::MAX_TRANS_UNIT],
+    len: usize,
+}
+
+impl Frame {
+    fn bytes(&self) -> &[u8] {
+        &self.buf[..self.len]
+    }
+}
+
+/// Assemble the header (`version` 0, no second transport code) and serialize
+/// the packet. On failure logs `who: packet serialize failed` and returns
+/// `None`. Split from [`send_frame`] so callers can set a `PENDING_*` tag
+/// after a successful serialize and before the TX.
+fn build_frame(
+    who: &'static str,
+    payload_type: meshcore::packet::PayloadType,
+    route: Route,
+    payload: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }>,
+) -> Option<Frame> {
+    let msg = meshcore::packet::Message {
+        payload_type,
+        route: route.route,
+        version: 0,
+        transport_code: route.transport_code,
+        transport_code_2: 0,
+        path_len_byte: route.path_len_byte,
+        path: route.path,
+        payload,
+    };
+    let mut buf = [0u8; meshcore::MAX_TRANS_UNIT];
+    match meshcore::packet::serialize(&msg, &mut buf) {
+        Ok(len) => Some(Frame { buf, len }),
+        Err(e) => {
+            defmt::warn!(
+                "{=str}: packet serialize failed: {:?}",
+                who,
+                defmt::Debug2Format(&e)
+            );
+            None
+        }
+    }
+}
+
+/// Transmit a built frame. Logs `who: TX failed` and returns `false` on error.
+async fn send_frame(lora: &mut SimpleLoRa<'_>, who: &'static str, frame: &Frame) -> bool {
+    if let Err(e) = lora.send_message(frame.bytes()).await {
+        defmt::warn!("{=str}: TX failed: {:?}", who, e);
+        false
+    } else {
+        true
+    }
+}
+
+/// [`build_frame`] then [`send_frame`]. Returns the frame on success so the
+/// caller can log its length or bytes; `None` if either step failed (already
+/// logged).
+async fn tx_packet(
+    lora: &mut SimpleLoRa<'_>,
+    who: &'static str,
+    payload_type: meshcore::packet::PayloadType,
+    route: Route,
+    payload: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }>,
+) -> Option<Frame> {
+    let frame = build_frame(who, payload_type, route, payload)?;
+    if send_frame(lora, who, &frame).await {
+        Some(frame)
+    } else {
+        None
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Channel message transmission
 // ---------------------------------------------------------------------------
@@ -1606,9 +1680,9 @@ async fn send_grp_txt(
     loaded_channels: &[LoadedChannel],
     req: crate::TxChannelMsg,
 ) {
-    use meshcore::packet::{Message, PayloadType};
+    use meshcore::packet::PayloadType;
     use meshcore::payload::grp_txt;
-    use meshcore::{MAX_PAYLOAD_SIZE, MAX_TRANS_UNIT};
+    use meshcore::MAX_PAYLOAD_SIZE;
 
     // Resolve the channel key from the in-RAM table (kept current via
     // CHANNELS_CHANGED_SIGNAL).
@@ -1677,71 +1751,52 @@ async fn send_grp_txt(
     let mut msg_payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
     let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
-    let Route {
+    let route = Route::flood_scoped(scope, PayloadType::GrpTxt, &msg_payload);
+    let Some(frame) = tx_packet(
+        lora,
+        "send_grp_txt",
+        PayloadType::GrpTxt,
         route,
-        path_len_byte,
-        path,
-        transport_code,
-    } = Route::flood_scoped(scope, PayloadType::GrpTxt, &msg_payload);
-    let msg = Message {
-        payload_type: PayloadType::GrpTxt,
-        route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path,
-        payload: msg_payload,
+        msg_payload,
+    )
+    .await
+    else {
+        return;
     };
+    let len = frame.len;
+    defmt::info!(
+        "GrpTxt sent: ch={=u8} ts={=u32} len={=usize}B frame={=[u8]:02x}",
+        req.channel_idx,
+        req.timestamp,
+        len,
+        frame.bytes(),
+    );
 
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_grp_txt: TX failed: {:?}", e);
-            } else {
-                defmt::info!(
-                    "GrpTxt sent: ch={=u8} ts={=u32} len={=usize}B frame={=[u8]:02x}",
-                    req.channel_idx,
-                    req.timestamp,
-                    len,
-                    &frame[..len],
-                );
+    // Seed MSG_SEEN so relay-bounces of our own packet are
+    // suppressed.  We do NOT push to the companion queue — the
+    // companion app already knows it sent this message.
+    let content_hash = msg_hash(hash, &wire_text, req.timestamp);
+    MSG_SEEN.lock(|cell| cell.borrow_mut().insert(content_hash));
 
-                // Seed MSG_SEEN so relay-bounces of our own packet are
-                // suppressed.  We do NOT push to the companion queue — the
-                // companion app already knows it sent this message.
-                let content_hash = msg_hash(hash, &wire_text, req.timestamp);
-                MSG_SEEN.lock(|cell| cell.borrow_mut().insert(content_hash));
-
-                // Add to the channel message ring so the on-device browser
-                // shows our own sent messages.
-                {
-                    let body = core::str::from_utf8(&req.text).unwrap_or("");
-                    let mut t: heapless::String<{ crate::CHANNEL_MSG_TEXT_MAX }> =
-                        heapless::String::new();
-                    let _ = t.push_str(truncate_bytes(body, crate::CHANNEL_MSG_TEXT_MAX));
-                    crate::CHANNEL_MSG_RING.lock(|cell| {
-                        cell.borrow_mut().push(crate::ChannelMsgEntry {
-                            channel_idx: req.channel_idx,
-                            sender: heapless::String::new(),
-                            text: t,
-                            timestamp: req.timestamp,
-                            content_hash,
-                            is_own: true,
-                            repeat_count: 0,
-                        });
-                    });
-                    crate::LORA_MSG_SIGNAL.signal(());
-                }
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_grp_txt: packet serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
+    // Add to the channel message ring so the on-device browser
+    // shows our own sent messages.
+    {
+        let body = core::str::from_utf8(&req.text).unwrap_or("");
+        let mut t: heapless::String<{ crate::CHANNEL_MSG_TEXT_MAX }> =
+            heapless::String::new();
+        let _ = t.push_str(truncate_bytes(body, crate::CHANNEL_MSG_TEXT_MAX));
+        crate::CHANNEL_MSG_RING.lock(|cell| {
+            cell.borrow_mut().push(crate::ChannelMsgEntry {
+                channel_idx: req.channel_idx,
+                sender: heapless::String::new(),
+                text: t,
+                timestamp: req.timestamp,
+                content_hash,
+                is_own: true,
+                repeat_count: 0,
+            });
+        });
+        crate::LORA_MSG_SIGNAL.signal(());
     }
 }
 
@@ -1760,9 +1815,9 @@ async fn send_grp_data(
     loaded_channels: &[LoadedChannel],
     req: crate::TxChannelData,
 ) {
-    use meshcore::packet::{Message, PayloadType, RouteType};
+    use meshcore::packet::{PayloadType, RouteType};
     use meshcore::payload::grp_data;
-    use meshcore::{MAX_PAYLOAD_SIZE, MAX_TRANS_UNIT};
+    use meshcore::MAX_PAYLOAD_SIZE;
 
     let Some(ch) = loaded_channels
         .iter()
@@ -1800,12 +1855,7 @@ async fn send_grp_data(
     let mut msg_payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
     let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
-    let Route {
-        route,
-        path_len_byte,
-        path: path_bytes,
-        transport_code,
-    } = if req.path_len == contacts::OUT_PATH_UNKNOWN {
+    let route = if req.path_len == contacts::OUT_PATH_UNKNOWN {
         Route::flood(PayloadType::GrpData, &msg_payload)
     } else {
         // `path_len` is the encoded byte ((hash_size-1)<<6 | hops), not a
@@ -1813,44 +1863,31 @@ async fn send_grp_data(
         Route::direct(req.path_len, &req.path)
     };
 
-    let msg = Message {
-        payload_type: PayloadType::GrpData,
+    let direct = route.route == RouteType::Direct;
+    let Some(frame) = tx_packet(
+        lora,
+        "send_grp_data",
+        PayloadType::GrpData,
         route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path: path_bytes,
-        payload: msg_payload,
+        msg_payload,
+    )
+    .await
+    else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_grp_data: TX failed: {:?}", e);
-            } else {
-                defmt::info!(
-                    "GrpData sent: ch={=u8} type={=u16:#06x} blob={=usize}B route={=str} len={=usize}B",
-                    req.channel_idx,
-                    req.data_type,
-                    req.data.len(),
-                    if route == RouteType::Direct {
-                        "direct"
-                    } else {
-                        "flood"
-                    },
-                    len,
-                );
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_grp_data: packet serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
-    }
+    let len = frame.len;
+    defmt::info!(
+        "GrpData sent: ch={=u8} type={=u16:#06x} blob={=usize}B route={=str} len={=usize}B",
+        req.channel_idx,
+        req.data_type,
+        req.data.len(),
+        if direct {
+            "direct"
+        } else {
+            "flood"
+        },
+        len,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1866,9 +1903,9 @@ async fn send_txt_msg(
     req: crate::TxPrivateMsg,
     identity: &DeviceIdentity,
 ) {
-    use meshcore::packet::{Message, PayloadType, RouteType};
+    use meshcore::packet::{PayloadType, RouteType};
     use meshcore::payload::txt_msg;
-    use meshcore::{MAX_PAYLOAD_SIZE, MAX_TRANS_UNIT};
+    use meshcore::MAX_PAYLOAD_SIZE;
 
     // Hint for the RX fast path so the CLI reply (or plain-chat reply) lands
     // on a single O(1) find_by_key instead of a 300-slot linear scan.
@@ -1911,66 +1948,48 @@ async fn send_txt_msg(
     let mut msg_payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
     let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
-    let Route {
+    let route = route_for_contact(contact.as_ref(), PayloadType::TxtMsg, &msg_payload);
+    let direct = route.route == RouteType::Direct;
+    let Some(frame) = tx_packet(
+        lora,
+        "send_txt_msg",
+        PayloadType::TxtMsg,
         route,
-        path_len_byte,
-        path: path_bytes,
-        transport_code,
-    } = route_for_contact(contact.as_ref(), PayloadType::TxtMsg, &msg_payload);
-    let msg = Message {
-        payload_type: PayloadType::TxtMsg,
-        route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path: path_bytes,
-        payload: msg_payload,
+        msg_payload,
+    )
+    .await
+    else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_txt_msg: TX failed: {:?}", e);
-            } else {
-                defmt::info!(
-                    "TxtMsg sent: to={=[u8]:02x} attempt={=u8} route={=str} len={=usize}B ack={=u32:#010x}",
-                    &req.recipient_pub_key[..6],
-                    req.attempt,
-                    if route == RouteType::Direct {
-                        "direct"
-                    } else {
-                        "flood"
-                    },
-                    len,
-                    expected_ack,
-                );
-                // Record pending ACK so we can compute round-trip time when the
-                // mesh ACKs back. CLI commands are not ACKed by the receiver
-                // (matches C++ `MyMesh::onPeerDataRecv` which only ACKs TXT_TYPE_PLAIN),
-                // so we skip the pending-ACK slot for them.
-                if req.txt_type == txt_msg::TXT_TYPE_PLAIN {
-                    crate::PENDING_ACK.lock(|cell| {
-                        cell.set(Some(crate::PendingAck {
-                            ack_hash: expected_ack,
-                            sent_at: embassy_time::Instant::now(),
-                        }));
-                    });
-                    // Stamp the matching outgoing PmEntry so the
-                    // thread view's delivery marker can flip from
-                    // "in-flight" to "delivered" when the ACK comes
-                    // back via `handle_ack_recv`.
-                    super::pm_inbox::stamp_outgoing_ack(&req.recipient_pub_key, expected_ack);
-                }
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_txt_msg: packet serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
+    let len = frame.len;
+    defmt::info!(
+        "TxtMsg sent: to={=[u8]:02x} attempt={=u8} route={=str} len={=usize}B ack={=u32:#010x}",
+        &req.recipient_pub_key[..6],
+        req.attempt,
+        if direct {
+            "direct"
+        } else {
+            "flood"
+        },
+        len,
+        expected_ack,
+    );
+    // Record pending ACK so we can compute round-trip time when the
+    // mesh ACKs back. CLI commands are not ACKed by the receiver
+    // (matches C++ `MyMesh::onPeerDataRecv` which only ACKs TXT_TYPE_PLAIN),
+    // so we skip the pending-ACK slot for them.
+    if req.txt_type == txt_msg::TXT_TYPE_PLAIN {
+        crate::PENDING_ACK.lock(|cell| {
+            cell.set(Some(crate::PendingAck {
+                ack_hash: expected_ack,
+                sent_at: embassy_time::Instant::now(),
+            }));
+        });
+        // Stamp the matching outgoing PmEntry so the
+        // thread view's delivery marker can flip from
+        // "in-flight" to "delivered" when the ACK comes
+        // back via `handle_ack_recv`.
+        super::pm_inbox::stamp_outgoing_ack(&req.recipient_pub_key, expected_ack);
     }
 }
 
@@ -1989,8 +2008,7 @@ pub async fn send_advert(
     timestamp: u32,
     mode: AdvertMode,
 ) {
-    use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType, RouteType};
+    use meshcore::packet::{PayloadType, RouteType};
 
     let Some(msg_payload) = self_advert_payload(&identity.sec_key, name, timestamp) else {
         return;
@@ -1998,12 +2016,7 @@ pub async fn send_advert(
 
     // Both modes carry `flood_path_len_byte()` and an empty path (0 hops);
     // zero-hop only differs in the route type and having no transport code.
-    let Route {
-        route,
-        path_len_byte,
-        path,
-        transport_code,
-    } = match mode {
+    let route = match mode {
         AdvertMode::Flood => Route::flood(PayloadType::Advert, &msg_payload),
         AdvertMode::ZeroHop => Route {
             route: RouteType::Direct, // path_len=0 → zero-hop direct
@@ -2013,41 +2026,27 @@ pub async fn send_advert(
         },
     };
 
-    let msg = Message {
-        payload_type: PayloadType::Advert,
+    let Some(frame) = tx_packet(
+        lora,
+        "send_advert",
+        PayloadType::Advert,
         route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path,
-        payload: msg_payload,
+        msg_payload,
+    )
+    .await
+    else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_advert: TX failed: {:?}", e);
-            } else {
-                defmt::info!(
-                    "MeshCore advert sent ({=usize}B, {=str})",
-                    len,
-                    if mode == AdvertMode::Flood {
-                        "flood"
-                    } else {
-                        "zero-hop"
-                    },
-                );
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_advert: packet serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
-    }
+    let len = frame.len;
+    defmt::info!(
+        "MeshCore advert sent ({=usize}B, {=str})",
+        len,
+        if mode == AdvertMode::Flood {
+            "flood"
+        } else {
+            "zero-hop"
+        },
+    );
 }
 
 /// Our signed advert payload: pub_key, timestamp, signature and app data
@@ -2131,9 +2130,9 @@ pub async fn send_pm(
     text: &[u8],
     timestamp: u32,
 ) {
-    use meshcore::packet::{Message, PayloadType};
+    use meshcore::packet::PayloadType;
     use meshcore::payload::txt_msg;
-    use meshcore::{MAX_PAYLOAD_SIZE, MAX_TRANS_UNIT};
+    use meshcore::MAX_PAYLOAD_SIZE;
 
     let (msg, expected_ack) = match txt_msg::encrypt(
         &identity.sec_key,
@@ -2165,39 +2164,20 @@ pub async fn send_pm(
 
     // TxtMsg uses Direct route so the full path to the recipient is embedded.
     // For now we send as Flood — the recipient will filter on dest_pub_key.
-    let Route {
+    let route = Route::flood(PayloadType::TxtMsg, &msg_payload);
+    let Some(frame) = tx_packet(
+        lora,
+        "send_pm",
+        PayloadType::TxtMsg,
         route,
-        path_len_byte,
-        path,
-        transport_code,
-    } = Route::flood(PayloadType::TxtMsg, &msg_payload);
-    let packet = Message {
-        payload_type: PayloadType::TxtMsg,
-        route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path,
-        payload: msg_payload,
+        msg_payload,
+    )
+    .await
+    else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&packet, &mut frame) {
-        Ok(len) => {
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_pm: TX failed: {:?}", e);
-            } else {
-                defmt::info!("PM sent ({=usize}B)", len);
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_pm: packet serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
-    }
+    let len = frame.len;
+    defmt::info!("PM sent ({=usize}B)", len);
 }
 
 // ---------------------------------------------------------------------------
@@ -2216,8 +2196,7 @@ async fn send_ack(
     _recv_path: &heapless::Vec<u8, { meshcore::MAX_PATH_SIZE }>,
     ack: &[u8],
 ) {
-    use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType};
+    use meshcore::packet::PayloadType;
 
     // The first four bytes are the ACK hash; receivers match on those only.
     let ack_hash = u32::from_le_bytes([ack[0], ack[1], ack[2], ack[3]]);
@@ -2227,37 +2206,13 @@ async fn send_ack(
 
     // Route: Direct if we have a stored path, Flood otherwise.
     let contact = contacts::ContactStore::new().find_by_key(sender_pk).await;
-    let Route {
-        route,
-        path_len_byte,
-        path: path_bytes,
-        transport_code,
-    } = route_for_contact(contact.as_ref(), PayloadType::Ack, &payload);
+    let route = route_for_contact(contact.as_ref(), PayloadType::Ack, &payload);
 
-    let msg = Message {
-        payload_type: PayloadType::Ack,
-        route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path: path_bytes,
-        payload,
+    let Some(frame) = tx_packet(lora, "send_ack", PayloadType::Ack, route, payload).await else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_ack: TX failed: {:?}", e);
-            } else {
-                defmt::info!("ACK sent ack={=u32:#010x} ({=usize}B)", ack_hash, len);
-            }
-        }
-        Err(e) => {
-            defmt::warn!("send_ack: serialize failed: {:?}", defmt::Debug2Format(&e));
-        }
-    }
+    let len = frame.len;
+    defmt::info!("ACK sent ack={=u32:#010x} ({=usize}B)", ack_hash, len);
 }
 
 // ---------------------------------------------------------------------------
@@ -2322,8 +2277,8 @@ fn handle_ack_recv(payload: &[u8], rssi: i16) {
 ///
 /// Wire payload: `[tag:4 LE][auth:4 LE][flags:1][path_hashes...]`
 async fn send_trace(lora: &mut SimpleLoRa<'_>, req: crate::TxTracePath) {
-    use meshcore::packet::{Message, PayloadType, RouteType};
-    use meshcore::{MAX_PAYLOAD_SIZE, MAX_TRANS_UNIT};
+    use meshcore::packet::PayloadType;
+    use meshcore::MAX_PAYLOAD_SIZE;
 
     let mut payload: heapless::Vec<u8, MAX_PAYLOAD_SIZE> = heapless::Vec::new();
     let _ = payload.extend_from_slice(&req.tag.to_le_bytes());
@@ -2331,38 +2286,22 @@ async fn send_trace(lora: &mut SimpleLoRa<'_>, req: crate::TxTracePath) {
     let _ = payload.push(req.flags);
     let _ = payload.extend_from_slice(&req.path);
 
-    let msg = Message {
-        payload_type: PayloadType::Trace,
-        route: RouteType::Direct,
-        version: 0,
-        transport_code: 0,
-        transport_code_2: 0,
-        path_len_byte: 0,
-        path: heapless::Vec::new(),
+    let Some(frame) = tx_packet(
+        lora,
+        "send_trace",
+        PayloadType::Trace,
+        Route::direct(0, &[]),
         payload,
+    ).await else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_trace: TX failed: {:?}", e);
-            } else {
-                defmt::info!(
-                    "Trace sent: tag={=u32:#010x} path_len={=usize}B len={=usize}B",
-                    req.tag,
-                    req.path.len(),
-                    len,
-                );
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_trace: packet serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
-    }
+    let len = frame.len;
+    defmt::info!(
+        "Trace sent: tag={=u32:#010x} path_len={=usize}B len={=usize}B",
+        req.tag,
+        req.path.len(),
+        len,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2376,8 +2315,7 @@ async fn send_trace(lora: &mut SimpleLoRa<'_>, req: crate::TxTracePath) {
 /// This mirrors C++ `BaseChatMesh::sendLogin`: flood when `out_path_len ==
 /// OUT_PATH_UNKNOWN`.
 async fn send_login(lora: &mut SimpleLoRa<'_>, req: crate::TxLogin, identity: &DeviceIdentity) {
-    use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType};
+    use meshcore::packet::PayloadType;
 
     // Hint for the RX fast path so we skip the 300-slot contact scan.
     crate::LAST_REQ_TARGET.lock(|cell| cell.set(Some(req.pub_key)));
@@ -2438,49 +2376,25 @@ async fn send_login(lora: &mut SimpleLoRa<'_>, req: crate::TxLogin, identity: &D
     };
 
     // Flood when no path is known; direct when a stored path exists.
-    let Route {
-        route,
-        path_len_byte,
-        path: path_bytes,
-        transport_code,
-    } = route_for_contact(contact.as_ref(), PayloadType::AnonReq, &payload);
-    let msg = Message {
-        payload_type: PayloadType::AnonReq,
-        route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path: path_bytes,
-        payload,
+    let route = route_for_contact(contact.as_ref(), PayloadType::AnonReq, &payload);
+    let Some(frame) = build_frame("send_login", PayloadType::AnonReq, route, payload) else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            crate::PENDING_LOGIN.set(crate::login_tag(&req.pub_key));
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_login: TX failed: {:?}", e);
-                crate::PENDING_LOGIN.clear();
-            } else {
-                defmt::info!(
-                    "Login sent to {=[u8]:02x} node_type={=u8} is_room={=bool} ts={=u32} sync_since={=u32} ({=usize}B) frame={=[u8]:02x}",
-                    &req.pub_key[..6],
-                    contact.as_ref().map(|c| c.node_type).unwrap_or(0xff),
-                    is_room,
-                    timestamp,
-                    sync_since.unwrap_or(0),
-                    len,
-                    &frame[..len],
-                );
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_login: packet serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
+    crate::PENDING_LOGIN.set(crate::login_tag(&req.pub_key));
+    if send_frame(lora, "send_login", &frame).await {
+        let len = frame.len;
+        defmt::info!(
+            "Login sent to {=[u8]:02x} node_type={=u8} is_room={=bool} ts={=u32} sync_since={=u32} ({=usize}B) frame={=[u8]:02x}",
+            &req.pub_key[..6],
+            contact.as_ref().map(|c| c.node_type).unwrap_or(0xff),
+            is_room,
+            timestamp,
+            sync_since.unwrap_or(0),
+            len,
+            frame.bytes(),
+        );
+    } else {
+        crate::PENDING_LOGIN.clear();
     }
 }
 
@@ -2505,8 +2419,7 @@ async fn send_telem_request(
     req: crate::TxTelemReq,
     identity: &DeviceIdentity,
 ) {
-    use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType};
+    use meshcore::packet::PayloadType;
 
     crate::LAST_REQ_TARGET.lock(|cell| cell.set(Some(req.pub_key)));
 
@@ -2555,45 +2468,21 @@ async fn send_telem_request(
     let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
     let _ = payload_vec.extend_from_slice(&payload_buf[..payload_len]);
 
-    let Route {
-        route,
-        path_len_byte,
-        path: path_bytes,
-        transport_code,
-    } = route_for_contact(contact.as_ref(), PayloadType::Req, &payload_vec);
-    let msg = Message {
-        payload_type: PayloadType::Req,
-        route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path: path_bytes,
-        payload: payload_vec,
+    let route = route_for_contact(contact.as_ref(), PayloadType::Req, &payload_vec);
+    let Some(frame) = build_frame("send_telem_req", PayloadType::Req, route, payload_vec) else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            crate::PENDING_TELEM_TAG.set(req.tag);
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_telem_req: TX failed: {:?}", e);
-                crate::PENDING_TELEM_TAG.clear();
-            } else {
-                defmt::info!(
-                    "Telem req sent to {=[u8]:02x} tag={=u32:#010x} ({=usize}B)",
-                    &req.pub_key[..6],
-                    req.tag,
-                    len
-                );
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_telem_req: packet serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
+    crate::PENDING_TELEM_TAG.set(req.tag);
+    if send_frame(lora, "send_telem_req", &frame).await {
+        let len = frame.len;
+        defmt::info!(
+            "Telem req sent to {=[u8]:02x} tag={=u32:#010x} ({=usize}B)",
+            &req.pub_key[..6],
+            req.tag,
+            len
+        );
+    } else {
+        crate::PENDING_TELEM_TAG.clear();
     }
 }
 
@@ -2671,8 +2560,7 @@ async fn send_admin_status_request(
     req: crate::TxAdminStatusReq,
     identity: &DeviceIdentity,
 ) {
-    use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType};
+    use meshcore::packet::PayloadType;
     use meshcore::payload::txt_msg;
 
     const REQ_TYPE_GET_STATUS: u8 = 0x01;
@@ -2715,46 +2603,27 @@ async fn send_admin_status_request(
     let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
     let _ = payload_vec.extend_from_slice(&payload_buf[..payload_len]);
 
-    let Route {
+    let route = route_for_contact(contact.as_ref(), PayloadType::Req, &payload_vec);
+    let Some(frame) = build_frame(
+        "send_admin_status_req",
+        PayloadType::Req,
         route,
-        path_len_byte,
-        path: path_bytes,
-        transport_code,
-    } = route_for_contact(contact.as_ref(), PayloadType::Req, &payload_vec);
-    let msg = Message {
-        payload_type: PayloadType::Req,
-        route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path: path_bytes,
-        payload: payload_vec,
+        payload_vec,
+    ) else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            crate::PENDING_ADMIN_STATUS_TAG.set(req.tag);
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_admin_status_req: TX failed: {:?}", e);
-                crate::PENDING_ADMIN_STATUS_TAG.clear();
-            } else {
-                defmt::info!(
-                    "Admin status req sent to {=[u8]:02x} tag={=u32:#010x} ({=usize}B) frame={=[u8]:02x}",
-                    &req.pub_key[..6],
-                    req.tag,
-                    len,
-                    &frame[..len],
-                );
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_admin_status_req: packet serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
+    crate::PENDING_ADMIN_STATUS_TAG.set(req.tag);
+    if send_frame(lora, "send_admin_status_req", &frame).await {
+        let len = frame.len;
+        defmt::info!(
+            "Admin status req sent to {=[u8]:02x} tag={=u32:#010x} ({=usize}B) frame={=[u8]:02x}",
+            &req.pub_key[..6],
+            req.tag,
+            len,
+            frame.bytes(),
+        );
+    } else {
+        crate::PENDING_ADMIN_STATUS_TAG.clear();
     }
 }
 
@@ -2778,8 +2647,7 @@ async fn send_anon_request(
     req: crate::TxAnonReq,
     identity: &DeviceIdentity,
 ) {
-    use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType, RouteType};
+    use meshcore::packet::{PayloadType, RouteType};
 
     if req.data.is_empty() {
         defmt::warn!("send_anon_req: empty data — dropping");
@@ -2837,12 +2705,7 @@ async fn send_anon_request(
     // `out_path_len = 0`) goes zero-hop direct. (This is the one request that
     // does not flood for an unknown contact.)
     let contact = contacts::ContactStore::new().find_by_key(&req.pub_key).await;
-    let Route {
-        route,
-        path_len_byte,
-        path: path_bytes,
-        transport_code,
-    } = match contact {
+    let route = match contact {
         None => Route::direct(0, &[]),
         Some(ref c) => route_for_contact(Some(c), PayloadType::AnonReq, &payload_vec),
     };
@@ -2851,7 +2714,7 @@ async fn send_anon_request(
     // `packet->isRouteDirect()` — a flooded request is silently ignored, which
     // looks identical to "discovery returns nothing". Say so rather than let it
     // fail quietly; the fix is to establish a path to the repeater first.
-    if route != RouteType::Direct {
+    if route.route != RouteType::Direct {
         defmt::warn!(
             "send_anon_req: no path to {=[u8]:02x} — sending FLOOD, but the repeater \
              only answers anon type {=u8:#04x} on a DIRECT route; expect no reply",
@@ -2860,44 +2723,26 @@ async fn send_anon_request(
         );
     }
 
-    let msg = Message {
-        payload_type: PayloadType::AnonReq,
-        route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path: path_bytes,
-        payload: payload_vec,
+    let direct = route.route == RouteType::Direct;
+    let Some(frame) = build_frame("send_anon_req", PayloadType::AnonReq, route, payload_vec) else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            // The reply comes back as a plain RESPONSE echoing our tag, which is
-            // the same shape a binary request gets — so reuse that pending slot
-            // and the app sees the reference's PUSH_CODE_BINARY_RESPONSE (0x8C).
-            crate::PENDING_BINARY_REQ_TAG.set(req.tag);
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_anon_req: TX failed: {:?}", e);
-                crate::PENDING_BINARY_REQ_TAG.clear();
-            } else {
-                defmt::info!(
-                    "Anon req sent to {=[u8]:02x} tag={=u32:#010x} anon_type={=u8:#04x} direct={=bool} ({=usize}B)",
-                    &req.pub_key[..6],
-                    req.tag,
-                    req.data[0],
-                    msg.route == RouteType::Direct,
-                    len,
-                );
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_anon_req: packet serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
+    // The reply comes back as a plain RESPONSE echoing our tag, which is
+    // the same shape a binary request gets — so reuse that pending slot
+    // and the app sees the reference's PUSH_CODE_BINARY_RESPONSE (0x8C).
+    crate::PENDING_BINARY_REQ_TAG.set(req.tag);
+    if send_frame(lora, "send_anon_req", &frame).await {
+        let len = frame.len;
+        defmt::info!(
+            "Anon req sent to {=[u8]:02x} tag={=u32:#010x} anon_type={=u8:#04x} direct={=bool} ({=usize}B)",
+            &req.pub_key[..6],
+            req.tag,
+            req.data[0],
+            direct,
+            len,
+        );
+    } else {
+        crate::PENDING_BINARY_REQ_TAG.clear();
     }
 }
 
@@ -2923,8 +2768,7 @@ async fn send_binary_request(
     req: crate::TxBinaryReq,
     identity: &DeviceIdentity,
 ) {
-    use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType};
+    use meshcore::packet::PayloadType;
     use meshcore::payload::txt_msg;
 
     if req.req_data.is_empty() {
@@ -2974,48 +2818,24 @@ async fn send_binary_request(
     let mut payload_vec: heapless::Vec<u8, { meshcore::MAX_PAYLOAD_SIZE }> = heapless::Vec::new();
     let _ = payload_vec.extend_from_slice(&payload_buf[..payload_len]);
 
-    let Route {
-        route,
-        path_len_byte,
-        path: path_bytes,
-        transport_code,
-    } = route_for_contact(contact.as_ref(), PayloadType::Req, &payload_vec);
-    let msg = Message {
-        payload_type: PayloadType::Req,
-        route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path: path_bytes,
-        payload: payload_vec,
+    let route = route_for_contact(contact.as_ref(), PayloadType::Req, &payload_vec);
+    let Some(frame) = build_frame("send_binary_req", PayloadType::Req, route, payload_vec) else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            crate::PENDING_BINARY_REQ_TAG.set(req.tag);
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_binary_req: TX failed: {:?}", e);
-                crate::PENDING_BINARY_REQ_TAG.clear();
-            } else {
-                defmt::info!(
-                    "Binary req sent to {=[u8]:02x} tag={=u32:#010x} req_type={=u8:#04x} params={=usize}B ({=usize}B) frame={=[u8]:02x}",
-                    &req.pub_key[..6],
-                    req.tag,
-                    req_type,
-                    params.len(),
-                    len,
-                    &frame[..len],
-                );
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_binary_req: packet serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
+    crate::PENDING_BINARY_REQ_TAG.set(req.tag);
+    if send_frame(lora, "send_binary_req", &frame).await {
+        let len = frame.len;
+        defmt::info!(
+            "Binary req sent to {=[u8]:02x} tag={=u32:#010x} req_type={=u8:#04x} params={=usize}B ({=usize}B) frame={=[u8]:02x}",
+            &req.pub_key[..6],
+            req.tag,
+            req_type,
+            params.len(),
+            len,
+            frame.bytes(),
+        );
+    } else {
+        crate::PENDING_BINARY_REQ_TAG.clear();
     }
 }
 
@@ -3040,8 +2860,7 @@ async fn send_discovery_request(
     req: crate::TxDiscoveryReq,
     identity: &DeviceIdentity,
 ) {
-    use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType};
+    use meshcore::packet::PayloadType;
 
     crate::LAST_REQ_TARGET.lock(|cell| cell.set(Some(req.pub_key)));
 
@@ -3088,45 +2907,21 @@ async fn send_discovery_request(
     let _ = payload_vec.extend_from_slice(&payload_buf[..payload_len]);
 
     // Always flood for discovery — the whole point is to find new paths.
-    let Route {
-        route,
-        path_len_byte,
-        path,
-        transport_code,
-    } = Route::flood(PayloadType::Req, &payload_vec);
-    let msg = Message {
-        payload_type: PayloadType::Req,
-        route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path,
-        payload: payload_vec,
+    let route = Route::flood(PayloadType::Req, &payload_vec);
+    let Some(frame) = build_frame("send_discovery_req", PayloadType::Req, route, payload_vec) else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            crate::PENDING_DISCOVERY_TAG.set(req.tag);
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_discovery_req: TX failed: {:?}", e);
-                crate::PENDING_DISCOVERY_TAG.clear();
-            } else {
-                defmt::info!(
-                    "Discovery req sent to {=[u8]:02x} tag={=u32:#010x} ({=usize}B) [flood]",
-                    &req.pub_key[..6],
-                    req.tag,
-                    len
-                );
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_discovery_req: packet serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
+    crate::PENDING_DISCOVERY_TAG.set(req.tag);
+    if send_frame(lora, "send_discovery_req", &frame).await {
+        let len = frame.len;
+        defmt::info!(
+            "Discovery req sent to {=[u8]:02x} tag={=u32:#010x} ({=usize}B) [flood]",
+            &req.pub_key[..6],
+            req.tag,
+            len
+        );
+    } else {
+        crate::PENDING_DISCOVERY_TAG.clear();
     }
 }
 
@@ -3956,8 +3751,7 @@ async fn handle_telem_request_recv(
     req_data: &[u8],
 ) {
     use meshcore::MAX_PAYLOAD_SIZE;
-    use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType, RouteType};
+    use meshcore::packet::{PayloadType, RouteType};
     use meshcore::payload::response;
 
     // Permission check — matches upstream `MyMesh::onContactRequest`.
@@ -4016,43 +3810,26 @@ async fn handle_telem_request_recv(
     let _ = msg_payload.extend_from_slice(&payload_buf[..payload_len]);
 
     // Route: prefer Direct with the sender's stored out_path; else flood.
-    let Route {
-        route,
-        path_len_byte,
-        path: path_bytes,
-        transport_code,
-    } = route_for_contact(Some(sender), PayloadType::Response, &msg_payload);
+    let route = route_for_contact(Some(sender), PayloadType::Response, &msg_payload);
 
-    let msg = Message {
-        payload_type: PayloadType::Response,
+    let direct = route.route == RouteType::Direct;
+    let Some(_) = tx_packet(
+        lora,
+        "Telem resp",
+        PayloadType::Response,
         route,
-        version: 0,
-        transport_code,
-        transport_code_2: 0,
-        path_len_byte,
-        path: path_bytes,
-        payload: msg_payload,
+        msg_payload,
+    )
+    .await
+    else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("Telem resp TX failed: {:?}", e);
-            } else {
-                defmt::info!(
-                    "Telem resp sent: {=u32}mV to {=[u8]:02x} via {=str}",
-                    battery_mv,
-                    &sender.pub_key[..6],
-                    if route == RouteType::Direct { "direct" } else { "flood" },
-                );
-            }
-        }
-        Err(e) => defmt::warn!(
-            "Telem resp serialize failed: {:?}",
-            defmt::Debug2Format(&e),
-        ),
-    }
+    defmt::info!(
+        "Telem resp sent: {=u32}mV to {=[u8]:02x} via {=str}",
+        battery_mv,
+        &sender.pub_key[..6],
+        if direct { "direct" } else { "flood" },
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -4066,38 +3843,24 @@ async fn handle_telem_request_recv(
 /// CTL_TYPE_NODE_DISCOVER_REQ) and may carry additional bytes.  This mirrors
 /// `Mesh::createControlData` + `sendZeroHop` from the reference C firmware.
 async fn send_control_data(lora: &mut SimpleLoRa<'_>, req: crate::TxControlData) {
-    use meshcore::MAX_TRANS_UNIT;
-    use meshcore::packet::{Message, PayloadType, RouteType};
+    use meshcore::packet::PayloadType;
 
-    let msg = Message {
-        payload_type: PayloadType::Unknown(0x0B), // PAYLOAD_TYPE_CONTROL
-        route: RouteType::Direct,                 // zero-hop (path_len_byte = 0)
-        version: 0,
-        transport_code: 0,
-        transport_code_2: 0,
-        path_len_byte: 0,
-        path: heapless::Vec::new(),
-        payload: req.payload,
+    // The companion handler only queues non-empty payloads.
+    let ctl_type = req.payload[0];
+    let Some(frame) = tx_packet(
+        lora,
+        "send_control_data",
+        PayloadType::Unknown(0x0B), // PAYLOAD_TYPE_CONTROL
+        // Zero-hop: Direct with path_len_byte = 0.
+        Route::direct(0, &[]),
+        req.payload,
+    ).await else {
+        return;
     };
-
-    let mut frame = [0u8; MAX_TRANS_UNIT];
-    match meshcore::packet::serialize(&msg, &mut frame) {
-        Ok(len) => {
-            if let Err(e) = lora.send_message(&frame[..len]).await {
-                defmt::warn!("send_control_data: TX failed: {:?}", e);
-            } else {
-                defmt::info!(
-                    "send_control_data: sent {=usize}B ctl_type={=u8:#04x}",
-                    len,
-                    msg.payload[0],
-                );
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "send_control_data: serialize failed: {:?}",
-                defmt::Debug2Format(&e)
-            );
-        }
-    }
+    let len = frame.len;
+    defmt::info!(
+        "send_control_data: sent {=usize}B ctl_type={=u8:#04x}",
+        len,
+        ctl_type,
+    );
 }
