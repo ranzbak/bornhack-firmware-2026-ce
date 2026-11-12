@@ -17,7 +17,7 @@ use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 
 use crate::menu::ButtonId;
-use crate::{BLACK, TriColor, WHITE};
+use crate::{BLACK, TriColor, ui};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -252,25 +252,14 @@ where
         // survives the fast LUT refresh — the previous red stroke needed a
         // tri-colour update that's too slow for an interactive cursor.
         if i == cursor && !solved {
-            const THICK: i32 = 6;
-            let outer_x = x + 1;
-            let outer_y = y + 1;
-            let outer_w = CELL - 2;
-            let outer_h = CELL - 2;
-            let pixels = (0..outer_h).flat_map(move |dy| {
-                (0..outer_w).filter_map(move |dx| {
-                    let on_border =
-                        dx < THICK || dy < THICK || dx >= outer_w - THICK || dy >= outer_h - THICK;
-                    if !on_border {
-                        return None;
-                    }
-                    let px = outer_x + dx;
-                    let py = outer_y + dy;
-                    let color = if (px + py) & 1 == 0 { BLACK } else { WHITE };
-                    Some(Pixel(Point::new(px, py), color))
-                })
-            });
-            display.draw_iter(pixels)?;
+            ui::draw_dither_ring(
+                display,
+                Rectangle::new(
+                    Point::new(x + 1, y + 1),
+                    Size::new((CELL - 2) as u32, (CELL - 2) as u32),
+                ),
+                6,
+            )?;
         }
     }
 

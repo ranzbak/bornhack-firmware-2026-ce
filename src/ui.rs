@@ -130,6 +130,30 @@ where
 // Popover frame
 // ---------------------------------------------------------------------------
 
+/// Dithered (50 % checkerboard) black/white border of `thick` pixels just
+/// inside `rect`. Pure B/W so it survives the fast LUT refresh. The dither
+/// phase is `(x + y) & 1 == 0 -> BLACK` in absolute screen coordinates.
+pub fn draw_dither_ring<D>(display: &mut D, rect: Rectangle, thick: i32) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    let (x, y) = (rect.top_left.x, rect.top_left.y);
+    let (w, h) = (rect.size.width as i32, rect.size.height as i32);
+    let pixels = (0..h).flat_map(move |dy| {
+        (0..w).filter_map(move |dx| {
+            let on_border = dx < thick || dy < thick || dx >= w - thick || dy >= h - thick;
+            if !on_border {
+                return None;
+            }
+            let px = x + dx;
+            let py = y + dy;
+            let color = if (px + py) & 1 == 0 { BLACK } else { WHITE };
+            Some(Pixel(Point::new(px, py), color))
+        })
+    });
+    display.draw_iter(pixels)
+}
+
 /// Draw a popover frame: white-fill rectangle of `size` at `origin`,
 /// surrounded by a `border_w`-pixel black stroke.  The in-game modal
 /// uses this for both the menu and the stats sub-view; any future

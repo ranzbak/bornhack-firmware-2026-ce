@@ -16,7 +16,7 @@ use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 
 use crate::menu::ButtonId;
-use crate::{BLACK, TriColor, WHITE, ui};
+use crate::{BLACK, TriColor, ui};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -459,18 +459,9 @@ fn draw_cursor_ring<D>(display: &mut D, x: i32, y: i32, size: i32) -> Result<(),
 where
     D: DrawTarget<Color = TriColor>,
 {
-    const THICK: i32 = 3;
-    let pixels = (0..size).flat_map(move |dy| {
-        (0..size).filter_map(move |dx| {
-            let on_border = dx < THICK || dy < THICK || dx >= size - THICK || dy >= size - THICK;
-            if !on_border {
-                return None;
-            }
-            let px = x + dx;
-            let py = y + dy;
-            let color = if (px + py) & 1 == 0 { BLACK } else { WHITE };
-            Some(Pixel(Point::new(px, py), color))
-        })
-    });
-    display.draw_iter(pixels)
+    ui::draw_dither_ring(
+        display,
+        Rectangle::new(Point::new(x, y), Size::new(size as u32, size as u32)),
+        3,
+    )
 }
