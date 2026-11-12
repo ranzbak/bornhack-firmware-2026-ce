@@ -29,27 +29,15 @@ pub fn close() {
 }
 
 pub fn scroll_up() {
+    let count = super::lifecycle::realm_count();
     let s = SCROLL.load(Ordering::Relaxed);
-    if s > 0 {
-        SCROLL.store(s - 1, Ordering::Relaxed);
-    } else {
-        // Wrap to the last pet instead of doing nothing at the top.
-        let count = super::lifecycle::realm_count();
-        if count > 0 {
-            SCROLL.store(count - 1, Ordering::Relaxed);
-        }
-    }
+    SCROLL.store(ui::wrap_prev(s, count), Ordering::Relaxed);
 }
 
 pub fn scroll_down() {
     let count = super::lifecycle::realm_count();
     let s = SCROLL.load(Ordering::Relaxed);
-    if s + 1 < count {
-        SCROLL.store(s + 1, Ordering::Relaxed);
-    } else if count > 0 {
-        // Wrap to the top instead of doing nothing at the bottom.
-        SCROLL.store(0, Ordering::Relaxed);
-    }
+    SCROLL.store(ui::wrap_next(s, count), Ordering::Relaxed);
 }
 
 pub fn draw<D>(display: &mut D) -> Result<(), D::Error>

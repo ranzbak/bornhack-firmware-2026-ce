@@ -351,3 +351,77 @@ where
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Wrapping list cursor
+// ---------------------------------------------------------------------------
+
+/// Step a wrapping list cursor up: `pos - 1`, or `count - 1` when already
+/// at the top. With `count == 0` the cursor stays put. A stale `pos >= count`
+/// simply steps down by one.
+pub fn wrap_prev(pos: u8, count: u8) -> u8 {
+    if pos > 0 {
+        pos - 1
+    } else {
+        count.saturating_sub(1)
+    }
+}
+
+/// Step a wrapping list cursor down: `pos + 1`, or `0` when at (or past) the
+/// last item. With `count == 0` the cursor stays put.
+pub fn wrap_next(pos: u8, count: u8) -> u8 {
+    if count == 0 {
+        pos
+    } else if pos.saturating_add(1) >= count {
+        0
+    } else {
+        pos + 1
+    }
+}
+
+#[cfg(test)]
+mod wrap_tests {
+    use super::{wrap_next, wrap_prev};
+
+    #[test]
+    fn prev_wraps_to_last() {
+        assert_eq!(wrap_prev(0, 5), 4);
+        assert_eq!(wrap_prev(3, 5), 2);
+        assert_eq!(wrap_prev(0, 1), 0);
+    }
+
+    #[test]
+    fn next_wraps_to_first() {
+        assert_eq!(wrap_next(4, 5), 0);
+        assert_eq!(wrap_next(0, 5), 1);
+        assert_eq!(wrap_next(0, 1), 0);
+    }
+
+    #[test]
+    fn empty_list_keeps_position() {
+        assert_eq!(wrap_prev(0, 0), 0);
+        assert_eq!(wrap_next(0, 0), 0);
+        assert_eq!(wrap_next(7, 0), 7);
+    }
+
+    #[test]
+    fn stale_position_past_end() {
+        assert_eq!(wrap_next(9, 5), 0);
+        assert_eq!(wrap_prev(9, 5), 8);
+        assert_eq!(wrap_next(255, 5), 0);
+    }
+
+    #[test]
+    fn full_lap_returns_to_start() {
+        let n = 4;
+        let mut p = 2;
+        for _ in 0..n {
+            p = wrap_next(p, n);
+        }
+        assert_eq!(p, 2);
+        for _ in 0..n {
+            p = wrap_prev(p, n);
+        }
+        assert_eq!(p, 2);
+    }
+}

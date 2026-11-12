@@ -58,26 +58,12 @@ pub fn close() {
 
 fn cursor_up() {
     let c = CURSOR.load(Ordering::Relaxed);
-    if c > 0 {
-        CURSOR.store(c - 1, Ordering::Relaxed);
-    } else {
-        // Wrap to the last friend instead of doing nothing at the top.
-        let count = super::friends::count();
-        if count > 0 {
-            CURSOR.store(count - 1, Ordering::Relaxed);
-        }
-    }
+    CURSOR.store(ui::wrap_prev(c, super::friends::count()), Ordering::Relaxed);
 }
 
 fn cursor_down() {
-    let count = super::friends::count();
     let c = CURSOR.load(Ordering::Relaxed);
-    if count > 0 && c + 1 < count {
-        CURSOR.store(c + 1, Ordering::Relaxed);
-    } else if count > 0 {
-        // Wrap to the top instead of doing nothing at the bottom.
-        CURSOR.store(0, Ordering::Relaxed);
-    }
+    CURSOR.store(ui::wrap_next(c, super::friends::count()), Ordering::Relaxed);
 }
 
 /// Route a button press while the Friends screen is active. Owns its

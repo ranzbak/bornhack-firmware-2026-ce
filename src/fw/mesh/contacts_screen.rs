@@ -838,7 +838,7 @@ pub fn dispatch(btn: ButtonId) -> bool {
                             target,
                             // Wrap to the last item instead of doing
                             // nothing at the top.
-                            pos: if pos > 0 { pos - 1 } else { n.saturating_sub(1) },
+                            pos: ui::wrap_prev(pos, n),
                         };
                         false
                     }
@@ -847,7 +847,7 @@ pub fn dispatch(btn: ButtonId) -> bool {
                             target,
                             // Wrap to the top instead of doing nothing at
                             // the bottom.
-                            pos: if pos + 1 < n { pos + 1 } else { 0 },
+                            pos: ui::wrap_next(pos, n),
                         };
                         false
                     }
@@ -937,7 +937,7 @@ pub fn dispatch(btn: ButtonId) -> bool {
                         // Wrap to the last filter instead of doing nothing
                         // at the top.
                         b.mode = Mode::FilterPicker {
-                            pos: if pos > 0 { pos - 1 } else { n.saturating_sub(1) },
+                            pos: ui::wrap_prev(pos, n),
                         };
                         false
                     }
@@ -945,7 +945,7 @@ pub fn dispatch(btn: ButtonId) -> bool {
                         // Wrap to the top instead of doing nothing at the
                         // bottom.
                         b.mode = Mode::FilterPicker {
-                            pos: if pos + 1 < n { pos + 1 } else { 0 },
+                            pos: ui::wrap_next(pos, n),
                         };
                         false
                     }

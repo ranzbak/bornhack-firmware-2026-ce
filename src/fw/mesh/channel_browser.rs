@@ -85,26 +85,16 @@ pub fn dispatch(btn: ButtonId) -> bool {
         match b.state {
             BrowserState::ChannelList { cursor } => match btn {
                 ButtonId::Up => {
-                    if cursor > 0 {
-                        b.state = BrowserState::ChannelList { cursor: cursor - 1 };
-                    } else {
-                        // Wrap to the last channel instead of doing
-                        // nothing at the top.
-                        let count = crate::CACHED_CHANNELS.lock(|c| c.borrow().len() as u8);
-                        if count > 0 {
-                            b.state = BrowserState::ChannelList { cursor: count - 1 };
-                        }
-                    }
+                    let count = crate::CACHED_CHANNELS.lock(|c| c.borrow().len() as u8);
+                    b.state = BrowserState::ChannelList {
+                        cursor: crate::ui::wrap_prev(cursor, count),
+                    };
                 }
                 ButtonId::Down => {
                     let count = crate::CACHED_CHANNELS.lock(|c| c.borrow().len() as u8);
-                    if cursor + 1 < count {
-                        b.state = BrowserState::ChannelList { cursor: cursor + 1 };
-                    } else if count > 0 {
-                        // Wrap to the top instead of doing nothing at the
-                        // bottom.
-                        b.state = BrowserState::ChannelList { cursor: 0 };
-                    }
+                    b.state = BrowserState::ChannelList {
+                        cursor: crate::ui::wrap_next(cursor, count),
+                    };
                 }
                 ButtonId::Execute | ButtonId::Fire => {
                     let ch_idx = crate::CACHED_CHANNELS
@@ -181,14 +171,14 @@ pub fn dispatch(btn: ButtonId) -> bool {
                         b.state = BrowserState::Popup {
                             channel_idx,
                             anchor,
-                            pos: if pos > 0 { pos - 1 } else { n - 1 },
+                            pos: crate::ui::wrap_prev(pos, n),
                         };
                     }
                     ButtonId::Down => {
                         b.state = BrowserState::Popup {
                             channel_idx,
                             anchor,
-                            pos: if pos + 1 < n { pos + 1 } else { 0 },
+                            pos: crate::ui::wrap_next(pos, n),
                         };
                     }
                     ButtonId::Execute | ButtonId::Fire => {

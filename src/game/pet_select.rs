@@ -116,43 +116,24 @@ pub fn close() {
 // ── Input ────────────────────────────────────────────────────────────────────
 
 pub fn cursor_up() {
-    if PHASE.load(Ordering::Relaxed) == PHASE_MONEY {
-        // Three-item wrapping cursor over 0/1/2.
-        let s = SELECTION.load(Ordering::Relaxed);
-        let prev = if s == 0 { MONEY_OPTION_COUNT - 1 } else { s - 1 };
-        SELECTION.store(prev, Ordering::Relaxed);
-        return;
-    }
-
     let s = SELECTION.load(Ordering::Relaxed);
-    if s > 0 {
-        SELECTION.store(s - 1, Ordering::Relaxed);
+    let count = if PHASE.load(Ordering::Relaxed) == PHASE_MONEY {
+        // Three-item wrapping cursor over 0/1/2.
+        MONEY_OPTION_COUNT
     } else {
-        // Wrap to the last pet instead of doing nothing at the top.
-        let max = PetKind::roster().len() as u8;
-        if max > 0 {
-            SELECTION.store(max - 1, Ordering::Relaxed);
-        }
-    }
+        PetKind::roster().len() as u8
+    };
+    SELECTION.store(ui::wrap_prev(s, count), Ordering::Relaxed);
 }
 
 pub fn cursor_down() {
-    if PHASE.load(Ordering::Relaxed) == PHASE_MONEY {
-        // Three-item wrapping cursor over 0/1/2.
-        let s = SELECTION.load(Ordering::Relaxed);
-        let next = if s + 1 >= MONEY_OPTION_COUNT { 0 } else { s + 1 };
-        SELECTION.store(next, Ordering::Relaxed);
-        return;
-    }
-
     let s = SELECTION.load(Ordering::Relaxed);
-    let max = PetKind::roster().len() as u8;
-    if s + 1 < max {
-        SELECTION.store(s + 1, Ordering::Relaxed);
-    } else if max > 0 {
-        // Wrap to the top instead of doing nothing at the bottom.
-        SELECTION.store(0, Ordering::Relaxed);
-    }
+    let count = if PHASE.load(Ordering::Relaxed) == PHASE_MONEY {
+        MONEY_OPTION_COUNT
+    } else {
+        PetKind::roster().len() as u8
+    };
+    SELECTION.store(ui::wrap_next(s, count), Ordering::Relaxed);
 }
 
 /// Confirm the current phase.
