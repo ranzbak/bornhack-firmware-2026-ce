@@ -1,4 +1,3 @@
-use core::cell::RefCell;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use embedded_graphics::mono_font::MonoTextStyle;
@@ -597,33 +596,16 @@ impl<const M: usize> DisplayState<M> {
         // Text entry intercepts all input when active.
         if crate::text_entry::is_active() {
             let done = {
-                #[cfg(feature = "embassy-core")]
-                {
-                    crate::text_entry::TEXT_ENTRY.lock(|cell| {
-                        let mut borrow = cell.borrow_mut();
-                        if let Some(ref mut entry) = *borrow {
-                            entry.dispatch(btn)
-                        } else {
-                            false
-                        }
-                    })
-                }
-                #[cfg(feature = "simulator")]
-                {
-                    let guard = crate::text_entry::TEXT_ENTRY.lock().unwrap();
-                    let mut borrow = guard.borrow_mut();
-                    if let Some(ref mut entry) = *borrow {
+                crate::text_entry::TEXT_ENTRY.with_mut(|entry| {
+                    if let Some(entry) = entry {
                         entry.dispatch(btn)
                     } else {
                         false
                     }
-                }
+                })
             };
             if done {
-                #[cfg(feature = "embassy-core")]
                 crate::text_entry::TEXT_ENTRY.lock(|cell| cell.replace(None));
-                #[cfg(feature = "simulator")]
-                crate::text_entry::TEXT_ENTRY.lock().unwrap().replace(None);
             }
             return;
         }
@@ -1339,23 +1321,12 @@ fn action_show_qr() {
 }
 
 fn action_set_name() {
-    #[cfg(feature = "embassy-core")]
-    let prefill = crate::NODE_NAME.lock(|cell| {
-        let s = cell.borrow();
+    let prefill = crate::NODE_NAME.with(|s| {
         let mut buf = [0u8; 31];
         let n = s.len().min(31);
         buf[..n].copy_from_slice(s.as_bytes().get(..n).unwrap_or(&[]));
         (buf, n)
     });
-    #[cfg(feature = "simulator")]
-    let prefill = {
-        let guard = crate::NODE_NAME.lock().unwrap();
-        let s = guard.borrow();
-        let mut buf = [0u8; 31];
-        let n = s.len().min(31);
-        buf[..n].copy_from_slice(s.as_bytes().get(..n).unwrap_or(&[]));
-        (buf, n)
-    };
     crate::text_entry::begin(
         &prefill.0[..prefill.1],
         31,
@@ -2345,18 +2316,9 @@ const WATCH_ENABLED: bool = true;
 #[cfg(not(feature = "watch"))]
 const WATCH_ENABLED: bool = false;
 
-#[cfg(feature = "simulator")]
-use std::sync::Mutex;
+type DisplayMutex = crate::sync::SharedCell<DisplayState<SCREEN_COUNT>, crate::sync::ThreadMode>;
 
-#[cfg(feature = "embassy-core")]
-use embassy_sync::blocking_mutex::{Mutex, raw::ThreadModeRawMutex};
-
-#[cfg(feature = "embassy-core")]
-type DisplayMutex = Mutex<ThreadModeRawMutex, RefCell<DisplayState<SCREEN_COUNT>>>;
-#[cfg(feature = "simulator")]
-type DisplayMutex = Mutex<RefCell<DisplayState<SCREEN_COUNT>>>;
-
-pub static DISPLAY_STATE: DisplayMutex = DisplayMutex::new(RefCell::new(DisplayState::new(
+pub static DISPLAY_STATE: DisplayMutex = DisplayMutex::new(DisplayState::new(
     [
         ScreenState::new(&GAME_ITEMS),
         ScreenState::new(&MAIN_ITEMS),
@@ -2385,7 +2347,7 @@ pub static DISPLAY_STATE: DisplayMutex = DisplayMutex::new(RefCell::new(DisplayS
         // module still exists but draws a "(key not ready)" placeholder.
         true,
     ],
-)));
+));
 
 // ── Scrolling menu renderer
 // ───────────────────────────────────────────────────

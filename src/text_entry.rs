@@ -19,7 +19,6 @@
 //! **Nums/Shift/Clear** (← = back):
 //!   ↑Shift  ↓Clear  →Enter/Submit
 
-use core::cell::RefCell;
 
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
@@ -880,16 +879,8 @@ where
 
 // ── Global session ───────────────────────────────────────────────────────────
 
-#[cfg(feature = "embassy-core")]
-use embassy_sync::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
-
-#[cfg(feature = "embassy-core")]
-pub static TEXT_ENTRY: Mutex<CriticalSectionRawMutex, RefCell<Option<TextEntry>>> =
-    Mutex::new(RefCell::new(None));
-
-#[cfg(feature = "simulator")]
-pub static TEXT_ENTRY: std::sync::Mutex<RefCell<Option<TextEntry>>> =
-    std::sync::Mutex::new(RefCell::new(None));
+pub static TEXT_ENTRY: crate::sync::SharedCell<Option<TextEntry>> =
+    crate::sync::SharedCell::new(None);
 
 /// Start a text entry session. `prefill` is the initial text, `max_len` the
 /// maximum number of characters, `on_complete` is called with the final
@@ -904,18 +895,12 @@ pub fn begin(
     confirm: bool,
 ) {
     let entry = TextEntry::new(prefill, max_len, on_complete, title, confirm);
-    #[cfg(feature = "embassy-core")]
     TEXT_ENTRY.lock(|cell| cell.replace(Some(entry)));
-    #[cfg(feature = "simulator")]
-    TEXT_ENTRY.lock().unwrap().replace(Some(entry));
 }
 
 /// Returns true when text entry is active.
 pub fn is_active() -> bool {
-    #[cfg(feature = "embassy-core")]
-    return TEXT_ENTRY.lock(|cell| cell.borrow().is_some());
-    #[cfg(feature = "simulator")]
-    return TEXT_ENTRY.lock().unwrap().borrow().is_some();
+    TEXT_ENTRY.with(|e| e.is_some())
 }
 
 /// True while an external I2C keyboard is driving the active entry — set by

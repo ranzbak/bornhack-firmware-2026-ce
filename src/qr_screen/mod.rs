@@ -99,27 +99,14 @@ pub fn build_url<'a>(buf: &'a mut [u8], name: &str, pub_key: &[u8; 32]) -> Optio
 // Reading badge state
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "embassy-core")]
 fn read_name(buf: &mut heapless::String<31>) {
-    crate::NODE_NAME.lock(|cell| {
-        let _ = buf.push_str(cell.borrow().as_str());
+    crate::NODE_NAME.with(|name| {
+        let _ = buf.push_str(name.as_str());
     });
 }
 
-#[cfg(feature = "simulator")]
-fn read_name(buf: &mut heapless::String<31>) {
-    let guard = crate::NODE_NAME.lock().unwrap();
-    let _ = buf.push_str(guard.borrow().as_str());
-}
-
-#[cfg(feature = "embassy-core")]
 fn read_pub_key() -> [u8; 32] {
-    crate::MY_PUB_KEY.lock(|cell| *cell.borrow())
-}
-
-#[cfg(feature = "simulator")]
-fn read_pub_key() -> [u8; 32] {
-    *crate::MY_PUB_KEY.lock().unwrap().borrow()
+    crate::MY_PUB_KEY.with(|k| *k)
 }
 
 // ---------------------------------------------------------------------------
