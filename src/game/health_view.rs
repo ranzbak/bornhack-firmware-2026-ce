@@ -7,10 +7,10 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle, Triangle};
-use embedded_graphics::text::{Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::ui::{self, TEXT_BOLD_BLACK};
-use crate::{RED, TriColor, WHITE};
+use crate::{RED, TriColor};
 
 /// X of the per-row condition icon (right edge, 14px wide inside 152px).
 const ICON_X: i32 = 132;
@@ -92,14 +92,12 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     // Background.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     // Title bar.
     ui::draw_title_bar(display, "Health Status", Point::zero(), 152)?;
 
-    let left = TextStyleBuilder::new().baseline(Baseline::Top).build();
+    let left = crate::ui::TOP_LEFT;
 
     let Some(stats) = super::lifecycle::cycle() else {
         ui::draw_centered_message(display, "No pet yet", Point::new(76, 85))?;
@@ -134,7 +132,7 @@ where
             value,
             Point::new(ROW_X + 100, y),
             value_style,
-            TextStyleBuilder::new().baseline(Baseline::Top).build(),
+            crate::ui::TOP_LEFT,
         )
         .draw(display)?;
 

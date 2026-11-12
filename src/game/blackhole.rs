@@ -17,8 +17,8 @@ use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::primitives::{Circle, PrimitiveStyle};
+use embedded_graphics::text::Text;
 
 use crate::{BLACK, TriColor, WHITE, ui};
 
@@ -83,7 +83,7 @@ pub fn open() {
     BLACK_HOLE.store(0, Ordering::Relaxed);
     SCORE_A.store(0, Ordering::Relaxed);
     SCORE_B.store(0, Ordering::Relaxed);
-    RNG.store(seed(), Ordering::Relaxed);
+    RNG.store(crate::platform::seed_ticks_or_fixed(), Ordering::Relaxed);
     // Show the difficulty picker first; play starts after Fire.
     MENU_POS.store(DIFFICULTY_HARD, Ordering::Relaxed);
     MENU_OPEN.store(true, Ordering::Relaxed);
@@ -369,24 +369,6 @@ const CONNECTIVITY_BONUS: i32 = 60;
 /// black hole, so a big AI number is safe there.
 const TERRITORY_BONUS: i32 = 2;
 
-fn xorshift(mut x: u32) -> u32 {
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    x
-}
-
-fn seed() -> u32 {
-    #[cfg(feature = "embassy-core")]
-    {
-        embassy_time::Instant::now().as_ticks() as u32
-    }
-    #[cfg(not(feature = "embassy-core"))]
-    {
-        0xCAFE_BABE
-    }
-}
-
 /// AI places number `m/2 + 1` on the board.  `m` must be odd (B's turn).
 ///
 /// Heuristic: simulate placing B's number on each empty candidate cell
@@ -466,7 +448,7 @@ fn ai_play(m: u8) {
     }
 
     let mut rng = RNG.load(Ordering::Relaxed);
-    rng = xorshift(rng | 1);
+    rng = crate::platform::xorshift32(rng | 1);
     RNG.store(rng, Ordering::Relaxed);
     let pick = if best_count > 0 {
         best_cells[(rng as usize) % best_count] as usize
@@ -492,9 +474,7 @@ where
     let hole = BLACK_HOLE.load(Ordering::Relaxed);
 
     // Background.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     let dia = (CELL_R * 2 + 1) as u32;
 
@@ -545,10 +525,7 @@ where
     }
 
     // Status line(s).
-    let centred_top = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
+    let centred_top = crate::ui::CENTERED_TOP;
     let footer_font = MonoTextStyle::new(&FONT_6X10, BLACK);
 
     let sa = SCORE_A.load(Ordering::Relaxed);
@@ -628,20 +605,14 @@ where
     Ok(())
 }
 
-/// Render a number with a fake-bold effect (FONT_6X10 has no bold
-/// variant in `mono_font::ascii`).  Draws the digit twice, second pass
-/// shifted 1 px right, so vertical strokes thicken — easier to read on
-/// a low-contrast EPD.
+/// Render a number in FONT_6X10 with the shared fake-bold effect
+/// ([`crate::ui::draw_text_fake_bold`]) — easier to read on a
+/// low-contrast EPD.
 fn draw_bold_number<D>(display: &mut D, s: &str, p: Point, color: TriColor) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
     let style = MonoTextStyle::new(&FONT_6X10, color);
-    let centred = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
-    Text::with_text_style(s, p, style, centred).draw(display)?;
-    Text::with_text_style(s, Point::new(p.x + 1, p.y), style, centred).draw(display)?;
-    Ok(())
+    let centred = crate::ui::CENTERED;
+    crate::ui::draw_text_fake_bold(display, s, p, style, centred)
 }

@@ -21,7 +21,7 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::iso_8859_1::{FONT_7X13, FONT_7X13_BOLD};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::{BLACK, TriColor, WHITE};
 
@@ -56,11 +56,8 @@ where
     let label_font = MonoTextStyle::new(&FONT_7X13, BLACK);
     let pct_font_black = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
     let pct_font_white = MonoTextStyle::new(&FONT_7X13_BOLD, WHITE);
-    let left_top = TextStyleBuilder::new().baseline(Baseline::Top).build();
-    let centred = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let left_top = crate::ui::TOP_LEFT;
+    let centred = crate::ui::CENTERED;
 
     // Label, left of the bar.
     Text::with_text_style(label, label_pos, label_font, left_top).draw(display)?;

@@ -19,13 +19,14 @@
 //!
 //! State held in module-level atomics — no heap, no alloc.
 
+use crate::platform::entropy_byte;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::{BLACK, TriColor, WHITE, ui};
 
@@ -363,20 +364,6 @@ fn all_empty() -> bool {
     ROWS.iter().all(|a| a.load(Ordering::Relaxed) == 0)
 }
 
-fn entropy_byte() -> u8 {
-    #[cfg(feature = "embassy-core")]
-    {
-        embassy_time::Instant::now().as_ticks() as u8
-    }
-    #[cfg(not(feature = "embassy-core"))]
-    {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u8)
-            .unwrap_or(0xCB)
-    }
-}
 
 // ── Drawing
 // ───────────────────────────────────────────────────────────────────
@@ -432,10 +419,7 @@ where
     }
 
     // Status line.
-    let centred = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
+    let centred = crate::ui::CENTERED_TOP;
     let font = MonoTextStyle::new(&FONT_6X10, BLACK);
     let msg: &str = match result {
         RESULT_HUMAN_WINS => "You win!",

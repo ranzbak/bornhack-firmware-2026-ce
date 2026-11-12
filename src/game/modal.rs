@@ -19,7 +19,7 @@ use core::sync::atomic::{AtomicU8, Ordering};
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle, Triangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use super::nav::Row;
 use crate::ui::{self, TEXT_BOLD_BLACK, TEXT_BOLD_WHITE};
@@ -752,10 +752,7 @@ where
     ui::draw_title_bar(display, kind.title(), Point::new(inner_x, inner_y), inner_w)?;
 
     // Item list
-    let left_style = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Left)
-        .build();
+    let left_style = crate::ui::MIDDLE_LEFT;
 
     let list_x = inner_x;
     let list_y = inner_y + TITLE_H;
@@ -1088,10 +1085,7 @@ where
         footer.as_str(),
         Point::new(MARGIN + MODAL_W as i32 / 2, footer_y),
         TEXT_BOLD_BLACK,
-        TextStyleBuilder::new()
-            .baseline(Baseline::Bottom)
-            .alignment(Alignment::Center)
-            .build(),
+        crate::ui::CENTERED_BOTTOM,
     )
     .draw(display)?;
 

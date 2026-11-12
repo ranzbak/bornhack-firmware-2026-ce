@@ -6,13 +6,14 @@
 //! State is held in module-level atomics so it integrates with the
 //! existing single-threaded game loop without allocations.
 
+use crate::platform::entropy_byte;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::{BLACK, TriColor, WHITE, ui};
 
@@ -235,20 +236,6 @@ fn check_board() -> Option<u8> {
 
 /// Pseudo-random byte derived from the current uptime — good enough for
 /// the Normal-mode coin flip; no persistent state needed.
-fn entropy_byte() -> u8 {
-    #[cfg(feature = "embassy-core")]
-    {
-        embassy_time::Instant::now().as_ticks() as u8
-    }
-    #[cfg(not(feature = "embassy-core"))]
-    {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u8)
-            .unwrap_or(0xCB)
-    }
-}
 
 fn ai_move(board: &[u8; 9]) -> Option<usize> {
     let perfect = DIFFICULTY.load(Ordering::Relaxed) == DIFFICULTY_IMPOSSIBLE;
@@ -355,9 +342,7 @@ where
     let result = RESULT.load(Ordering::Relaxed);
 
     // Background.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     // Grid lines (2 horizontal + 2 vertical).
     let grid_style = PrimitiveStyle::with_stroke(BLACK, 3);
@@ -402,10 +387,7 @@ where
     }
 
     // Status text below the grid.
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED_TOP;
     let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
     let msg = match result {
         1 => "You win!",

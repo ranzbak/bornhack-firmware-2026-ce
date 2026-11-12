@@ -17,11 +17,11 @@ use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::Text;
 
 use super::engine::PetKind;
 use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_BLACK, TEXT_BOLD_WHITE};
-use crate::{BLACK, TriColor, WHITE};
+use crate::{BLACK, TriColor};
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -216,9 +216,7 @@ where
     let selection = SELECTION.load(Ordering::Relaxed) as usize;
 
     // Background.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     let title = if PHASE.load(Ordering::Relaxed) == PHASE_MONEY {
         "Play with money?"
@@ -227,10 +225,7 @@ where
     };
     ui::draw_title_bar(display, title, Point::zero(), 152)?;
 
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
 
     let (row_h, start_y) = row_layout(if PHASE.load(Ordering::Relaxed) == PHASE_MONEY {
         MONEY_LABELS.len()
@@ -288,10 +283,7 @@ where
     // Hint at bottom — suppressed on the empty-roster notice, where Fire has
     // nothing to confirm.
     if !(PHASE.load(Ordering::Relaxed) == PHASE_PET && PetKind::roster().is_empty()) {
-        let hint_style = TextStyleBuilder::new()
-            .baseline(Baseline::Bottom)
-            .alignment(Alignment::Center)
-            .build();
+        let hint_style = crate::ui::CENTERED_BOTTOM;
         Text::with_text_style(
             "Fire to confirm",
             Point::new(76, 148),

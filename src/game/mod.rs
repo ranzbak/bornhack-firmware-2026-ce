@@ -45,7 +45,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 pub use nav::{GameNav, Row};
 
-use crate::{BLACK, RED, WHITE, TriColor};
+use crate::{BLACK, RED, TriColor};
 
 /// Action feedback shown briefly after an action.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -198,7 +198,7 @@ const DIABETES_ALERT_MIN_VISIBLE_MS: u32 = 3000;
 /// `DIABETES_ALERT_MIN_VISIBLE_MS`. Called once, the instant diabetes
 /// triggers — see `lifecycle::check_diabetes_onset`.
 pub fn show_diabetes_alert() {
-    DIABETES_ALERT_STARTED_MS.store(now_ms_u32(), Ordering::Relaxed);
+    DIABETES_ALERT_STARTED_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
     DIABETES_ALERT_ACTIVE.store(true, Ordering::Relaxed);
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
@@ -212,7 +212,7 @@ static ALCOHOLISM_ALERT_STARTED_MS: AtomicU32 = AtomicU32::new(0);
 /// Show the full-screen "now alcoholic" alert, fired once the instant
 /// alcoholism triggers — see `lifecycle::check_alcoholism_onset`.
 pub fn show_alcoholism_alert() {
-    ALCOHOLISM_ALERT_STARTED_MS.store(now_ms_u32(), Ordering::Relaxed);
+    ALCOHOLISM_ALERT_STARTED_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
     ALCOHOLISM_ALERT_ACTIVE.store(true, Ordering::Relaxed);
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
@@ -287,7 +287,7 @@ pub fn show_battle_anim(
         | ((viewer_won as u32) << 30);
     BATTLE_ANIM_CTX.store(ctx, Ordering::Relaxed);
     BATTLE_ANIM_OPP_ID.store(u16::from_le_bytes(opp_id), Ordering::Relaxed);
-    BATTLE_ANIM_STARTED_MS.store(now_ms_u32(), Ordering::Relaxed);
+    BATTLE_ANIM_STARTED_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
     BATTLE_ANIM_ACTIVE.store(true, Ordering::Relaxed);
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
@@ -300,7 +300,7 @@ pub fn battle_anim_active() -> bool {
 
 /// Current stage from the elapsed time since [`show_battle_anim`].
 pub fn battle_anim_stage() -> BattleStage {
-    let elapsed = now_ms_u32().wrapping_sub(BATTLE_ANIM_STARTED_MS.load(Ordering::Relaxed));
+    let elapsed = crate::platform::uptime_ms_u32().wrapping_sub(BATTLE_ANIM_STARTED_MS.load(Ordering::Relaxed));
     battle_stage_from_elapsed(elapsed)
 }
 
@@ -326,24 +326,6 @@ pub fn clear_battle_anim() {
     BATTLE_ANIM_ACTIVE.store(false, Ordering::Relaxed);
 }
 
-/// Low 32 bits of the current uptime in milliseconds.  Cross-platform
-/// wrapper so `mod.rs` compiles on both firmware (`embassy_time`) and
-/// simulator (`lifecycle::sim_elapsed_ms`).
-fn now_ms_u32() -> u32 {
-    #[cfg(feature = "embassy-core")]
-    {
-        embassy_time::Instant::now().as_millis() as u32
-    }
-    #[cfg(all(feature = "simulator", not(feature = "embassy-core")))]
-    {
-        lifecycle::sim_elapsed_ms() as u32
-    }
-    #[cfg(not(any(feature = "embassy-core", feature = "simulator")))]
-    {
-        0
-    }
-}
-
 /// Show a feedback toast.  Becomes visible on the next display
 /// refresh and stays visible until the first refresh at or after
 /// `TOAST_MIN_VISIBLE_MS` elapsed.  Fires `TOAST_SIGNAL` so the
@@ -352,7 +334,7 @@ fn now_ms_u32() -> u32 {
 /// the display task is parked).
 pub fn show_toast(toast: Toast) {
     TOAST_MSG.store(toast as u8, Ordering::Relaxed);
-    TOAST_STARTED_MS.store(now_ms_u32(), Ordering::Relaxed);
+    TOAST_STARTED_MS.store(crate::platform::uptime_ms_u32(), Ordering::Relaxed);
     TOAST_ACTIVE.store(true, Ordering::Relaxed);
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
@@ -416,7 +398,7 @@ where
 {
     use embedded_graphics::mono_font::MonoTextStyle;
     use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
-    use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+    use embedded_graphics::text::{Text};
     use engine::to_display::DisplayAnim;
 
     // `nav` only drives the simulator's in-line icon blit (firmware
@@ -425,10 +407,7 @@ where
     #[cfg(not(feature = "simulator"))]
     let _ = &nav;
 
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
     let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
     // Red style for pet status prompts (the "gone / new egg" screen) so they
     // stand out from the black countdown timer / labels.
@@ -439,9 +418,7 @@ where
     // mini-games and modals — a rare, one-shot event worth interrupting
     // whatever's on screen for.
     if DIABETES_ALERT_ACTIVE.load(Ordering::Relaxed) {
-        Rectangle::new(Point::new(0, 0), Size::new(152, 152))
-            .into_styled(PrimitiveStyle::with_fill(WHITE))
-            .draw(display)?;
+        crate::ui::clear_screen(display)?;
         Text::with_text_style("TYPE 2", Point::new(76, 56), font, centered).draw(display)?;
         Text::with_text_style("DIABETES", Point::new(76, 74), font, centered).draw(display)?;
         Text::with_text_style(
@@ -452,7 +429,7 @@ where
         )
         .draw(display)?;
 
-        let elapsed = now_ms_u32().wrapping_sub(DIABETES_ALERT_STARTED_MS.load(Ordering::Relaxed));
+        let elapsed = crate::platform::uptime_ms_u32().wrapping_sub(DIABETES_ALERT_STARTED_MS.load(Ordering::Relaxed));
         if elapsed >= DIABETES_ALERT_MIN_VISIBLE_MS {
             DIABETES_ALERT_ACTIVE.store(false, Ordering::Relaxed);
         }
@@ -462,16 +439,14 @@ where
     // Alcoholism onset alert — same one-shot full-screen takeover as
     // diabetes, the twin permanent condition on the drink arc.
     if ALCOHOLISM_ALERT_ACTIVE.load(Ordering::Relaxed) {
-        Rectangle::new(Point::new(0, 0), Size::new(152, 152))
-            .into_styled(PrimitiveStyle::with_fill(WHITE))
-            .draw(display)?;
+        crate::ui::clear_screen(display)?;
         Text::with_text_style("ALCOHOL", Point::new(76, 56), font, centered).draw(display)?;
         Text::with_text_style("DEPENDENCE", Point::new(76, 74), font, centered).draw(display)?;
         Text::with_text_style("Give rehab soon", Point::new(76, 100), font_red, centered)
             .draw(display)?;
 
         let elapsed =
-            now_ms_u32().wrapping_sub(ALCOHOLISM_ALERT_STARTED_MS.load(Ordering::Relaxed));
+            crate::platform::uptime_ms_u32().wrapping_sub(ALCOHOLISM_ALERT_STARTED_MS.load(Ordering::Relaxed));
         if elapsed >= DIABETES_ALERT_MIN_VISIBLE_MS {
             ALCOHOLISM_ALERT_ACTIVE.store(false, Ordering::Relaxed);
         }
@@ -511,10 +486,7 @@ where
     // (y=33 clears the icons; y=16 overlapped them). Larger bold font.
     // Hidden entirely when money mode is disabled for this pet.
     if lifecycle::money_enabled() {
-        let right_style = TextStyleBuilder::new()
-            .baseline(Baseline::Top)
-            .alignment(Alignment::Right)
-            .build();
+        let right_style = crate::ui::TOP_RIGHT;
         let mut money_buf: heapless::String<12> = heapless::String::new();
         let _ = core::fmt::Write::write_fmt(
             &mut money_buf,
@@ -550,7 +522,7 @@ where
             let anim = lifecycle::display_anim();
             let count = anim_files::frame_count(kind, anim);
             if count > 0 {
-                let elapsed_ms = lifecycle::sim_elapsed_ms();
+                let elapsed_ms = crate::platform::uptime_ms();
                 let id = anim_files::anim_id_for(anim);
                 if LAST_ANIM_ID.load(Ordering::Relaxed) != id {
                     LAST_ANIM_ID.store(id, Ordering::Relaxed);
@@ -673,8 +645,8 @@ where
         if !msg.is_empty() {
             use embedded_graphics::mono_font::MonoTextStyle;
             use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
-            use embedded_graphics::text::{Baseline, Text, TextStyleBuilder};
-            let style = TextStyleBuilder::new().baseline(Baseline::Top).build();
+            use embedded_graphics::text::{Text};
+            let style = crate::ui::TOP_LEFT;
             Text::with_text_style(
                 msg,
                 Point::new(2, SEP_TOP + 2),
@@ -688,7 +660,7 @@ where
         // Wrapping subtraction handles the once-per-49-days uptime
         // wraparound correctly: if start was before wrap and now after,
         // `now - start` still yields the true elapsed delta (mod 2^32).
-        let elapsed = now_ms_u32().wrapping_sub(TOAST_STARTED_MS.load(Ordering::Relaxed));
+        let elapsed = crate::platform::uptime_ms_u32().wrapping_sub(TOAST_STARTED_MS.load(Ordering::Relaxed));
         if elapsed >= TOAST_MIN_VISIBLE_MS {
             TOAST_ACTIVE.store(false, Ordering::Relaxed);
         }
@@ -704,11 +676,8 @@ where
     {
         use embedded_graphics::mono_font::MonoTextStyle;
         use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
-        use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
-        let style = TextStyleBuilder::new()
-            .baseline(Baseline::Top)
-            .alignment(Alignment::Right)
-            .build();
+        use embedded_graphics::text::{Text};
+        let style = crate::ui::TOP_RIGHT;
         let font = MonoTextStyle::new(&FONT_7X13_BOLD, RED);
         let banners = [
             (lifecycle::is_diabetic_unmedicated(), "NEEDS MEDS"),
@@ -818,7 +787,7 @@ where
     if !has_sprite && lifecycle::is_started() {
         use embedded_graphics::mono_font::MonoTextStyle;
         use embedded_graphics::mono_font::iso_8859_1::FONT_7X13;
-        use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+        use embedded_graphics::text::{Text};
         use crate::EpdColor as Color;
 
         let anim = lifecycle::display_anim();
@@ -847,10 +816,7 @@ where
             DisplayAnim::Happy => "HAPPY",
             DisplayAnim::Idle => "IDLE",
         };
-        let style = TextStyleBuilder::new()
-            .baseline(Baseline::Top)
-            .alignment(Alignment::Right)
-            .build();
+        let style = crate::ui::TOP_RIGHT;
         let _ = Text::with_text_style(
             anim_name,
             Point::new(150, 36),

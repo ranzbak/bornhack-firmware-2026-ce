@@ -99,27 +99,14 @@ pub fn build_url<'a>(buf: &'a mut [u8], name: &str, pub_key: &[u8; 32]) -> Optio
 // Reading badge state
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "embassy-core")]
 fn read_name(buf: &mut heapless::String<31>) {
-    crate::NODE_NAME.lock(|cell| {
-        let _ = buf.push_str(cell.borrow().as_str());
+    crate::NODE_NAME.with(|name| {
+        let _ = buf.push_str(name.as_str());
     });
 }
 
-#[cfg(feature = "simulator")]
-fn read_name(buf: &mut heapless::String<31>) {
-    let guard = crate::NODE_NAME.lock().unwrap();
-    let _ = buf.push_str(guard.borrow().as_str());
-}
-
-#[cfg(feature = "embassy-core")]
 fn read_pub_key() -> [u8; 32] {
-    crate::MY_PUB_KEY.lock(|cell| *cell.borrow())
-}
-
-#[cfg(feature = "simulator")]
-fn read_pub_key() -> [u8; 32] {
-    *crate::MY_PUB_KEY.lock().unwrap().borrow()
+    crate::MY_PUB_KEY.with(|k| *k)
 }
 
 // ---------------------------------------------------------------------------
@@ -144,11 +131,8 @@ where
     // If the pub key hasn't been populated yet (boot race, or built
     // without `mesh`), show a placeholder instead of a useless QR.
     if pub_key == [0u8; 32] {
-        use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
-        let centered = TextStyleBuilder::new()
-            .baseline(Baseline::Middle)
-            .alignment(Alignment::Center)
-            .build();
+        use embedded_graphics::text::{Text};
+        let centered = crate::ui::CENTERED;
         Text::with_text_style(
             "(key not ready)",
             Point::new(76, 84),

@@ -19,7 +19,6 @@
 //! **Nums/Shift/Clear** (← = back):
 //!   ↑Shift  ↓Clear  →Enter/Submit
 
-use core::cell::RefCell;
 
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
@@ -479,10 +478,7 @@ where
         Rectangle::new(Point::zero(), Size::new(DISPLAY_W as u32, 18))
             .into_styled(PrimitiveStyle::with_fill(BLACK))
             .draw(display)?;
-        let ts = TextStyleBuilder::new()
-            .baseline(Baseline::Middle)
-            .alignment(Alignment::Center)
-            .build();
+        let ts = crate::ui::CENTERED;
         Text::with_text_style(
             entry.title,
             Point::new(DISPLAY_W / 2, 9),
@@ -544,10 +540,7 @@ fn draw_confirm<D>(display: &mut D, entry: &TextEntry) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let ts = crate::ui::CENTERED;
     let cx = DISPLAY_W / 2;
     let text = core::str::from_utf8(&entry.text).unwrap_or("");
     Text::with_text_style("Save name?", Point::new(cx, KB_Y + 16), FONT, ts).draw(display)?;
@@ -570,10 +563,7 @@ where
     Rectangle::new(Point::new(x, KB_Y), Size::new(14, 14))
         .into_styled(PrimitiveStyle::with_fill(BLACK))
         .draw(display)?;
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
+    let ts = crate::ui::CENTERED_TOP;
     Text::with_text_style(label, Point::new(x + 7, KB_Y + 1), FONT_INV, ts).draw(display)?;
     Ok(())
 }
@@ -584,10 +574,7 @@ fn draw_keyboard_hint<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let ts = crate::ui::CENTERED;
     let cx = DISPLAY_W / 2;
     Text::with_text_style("- Keyboard -", Point::new(cx, KB_Y + 16), FONT, ts).draw(display)?;
     Text::with_text_style("type to enter", Point::new(cx, KB_Y + 34), FONT, ts).draw(display)?;
@@ -609,10 +596,7 @@ where
     .into_styled(PrimitiveStyle::with_stroke(BLACK, 1))
     .draw(display)?;
 
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Left)
-        .build();
+    let ts = crate::ui::TOP_LEFT;
 
     let text = core::str::from_utf8(&entry.text).unwrap_or("");
 
@@ -680,53 +664,32 @@ where
         .draw(display)
 }
 
-fn draw_arrow_up<D>(display: &mut D) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = TriColor>,
-{
-    Triangle::new(
-        Point::new(KB_CX, KB_CY - 20),
-        Point::new(KB_CX - 6, KB_CY - 12),
-        Point::new(KB_CX + 6, KB_CY - 12),
-    )
-    .into_styled(PrimitiveStyle::with_fill(BLACK))
-    .draw(display)
+/// Direction of a keyboard-cluster arrow.
+#[derive(Clone, Copy)]
+enum Dir {
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
-fn draw_arrow_down<D>(display: &mut D) -> Result<(), D::Error>
+/// Draw the filled arrowhead pointing `dir` around the cluster centre
+/// (`KB_CX`, `KB_CY`).  Each entry is `[tip, base1, base2]` as offsets
+/// from the centre.
+fn draw_arrow<D>(display: &mut D, dir: Dir) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
+    let [tip, b1, b2]: [(i32, i32); 3] = match dir {
+        Dir::Up => [(0, -20), (-6, -12), (6, -12)],
+        Dir::Down => [(0, 20), (-6, 12), (6, 12)],
+        Dir::Left => [(-20, 0), (-12, -6), (-12, 6)],
+        Dir::Right => [(20, 0), (12, -6), (12, 6)],
+    };
     Triangle::new(
-        Point::new(KB_CX, KB_CY + 20),
-        Point::new(KB_CX - 6, KB_CY + 12),
-        Point::new(KB_CX + 6, KB_CY + 12),
-    )
-    .into_styled(PrimitiveStyle::with_fill(BLACK))
-    .draw(display)
-}
-
-fn draw_arrow_left<D>(display: &mut D) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = TriColor>,
-{
-    Triangle::new(
-        Point::new(KB_CX - 20, KB_CY),
-        Point::new(KB_CX - 12, KB_CY - 6),
-        Point::new(KB_CX - 12, KB_CY + 6),
-    )
-    .into_styled(PrimitiveStyle::with_fill(BLACK))
-    .draw(display)
-}
-
-fn draw_arrow_right<D>(display: &mut D) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = TriColor>,
-{
-    Triangle::new(
-        Point::new(KB_CX + 20, KB_CY),
-        Point::new(KB_CX + 12, KB_CY - 6),
-        Point::new(KB_CX + 12, KB_CY + 6),
+        Point::new(KB_CX + tip.0, KB_CY + tip.1),
+        Point::new(KB_CX + b1.0, KB_CY + b1.1),
+        Point::new(KB_CX + b2.0, KB_CY + b2.1),
     )
     .into_styled(PrimitiveStyle::with_fill(BLACK))
     .draw(display)
@@ -755,10 +718,10 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     draw_center_dot(display)?;
-    draw_arrow_left(display)?;
-    draw_arrow_right(display)?;
-    draw_arrow_up(display)?;
-    draw_arrow_down(display)?;
+    draw_arrow(display, Dir::Left)?;
+    draw_arrow(display, Dir::Right)?;
+    draw_arrow(display, Dir::Up)?;
+    draw_arrow(display, Dir::Down)?;
     draw_label(display, "A-I", KB_CX - 34, KB_CY, Alignment::Right)?;
     draw_label(display, "J-R", KB_CX, KB_CY - 28, Alignment::Center)?;
     draw_label(display, "S-Z", KB_CX + 34, KB_CY, Alignment::Left)?;
@@ -807,9 +770,9 @@ where
 
     // Draw back arrow + label
     match q {
-        Quadrant::Left => draw_arrow_right(display)?,
-        Quadrant::Up => draw_arrow_down(display)?,
-        Quadrant::Right => draw_arrow_left(display)?,
+        Quadrant::Left => draw_arrow(display, Dir::Right)?,
+        Quadrant::Up => draw_arrow(display, Dir::Down)?,
+        Quadrant::Right => draw_arrow(display, Dir::Left)?,
     }
     draw_label(
         display,
@@ -822,10 +785,10 @@ where
     // Draw sub-group arrows + labels
     for (i, &(dir, x, y, align)) in dirs.iter().enumerate() {
         match dir {
-            ButtonId::Left => draw_arrow_left(display)?,
-            ButtonId::Right => draw_arrow_right(display)?,
-            ButtonId::Up => draw_arrow_up(display)?,
-            ButtonId::Down => draw_arrow_down(display)?,
+            ButtonId::Left => draw_arrow(display, Dir::Left)?,
+            ButtonId::Right => draw_arrow(display, Dir::Right)?,
+            ButtonId::Up => draw_arrow(display, Dir::Up)?,
+            ButtonId::Down => draw_arrow(display, Dir::Down)?,
             _ => {}
         }
         draw_label(display, labels[i], x, y, align)?;
@@ -839,10 +802,10 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     draw_center_dot(display)?;
-    draw_arrow_up(display)?;
-    draw_arrow_left(display)?;
-    draw_arrow_down(display)?;
-    draw_arrow_right(display)?;
+    draw_arrow(display, Dir::Up)?;
+    draw_arrow(display, Dir::Left)?;
+    draw_arrow(display, Dir::Down)?;
+    draw_arrow(display, Dir::Right)?;
     draw_label(display, "<-", KB_CX, KB_CY - 28, Alignment::Center)?;
     draw_label(display, "!@#", KB_CX - 34, KB_CY, Alignment::Right)?;
     draw_label(display, "SP/BS", KB_CX, KB_CY + 28, Alignment::Center)?;
@@ -855,10 +818,10 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     draw_center_dot(display)?;
-    draw_arrow_up(display)?;
-    draw_arrow_left(display)?;
-    draw_arrow_down(display)?;
-    draw_arrow_right(display)?;
+    draw_arrow(display, Dir::Up)?;
+    draw_arrow(display, Dir::Left)?;
+    draw_arrow(display, Dir::Down)?;
+    draw_arrow(display, Dir::Right)?;
     draw_label(display, "<-", KB_CX - 34, KB_CY, Alignment::Right)?;
     draw_label(display, "Shift", KB_CX, KB_CY - 28, Alignment::Center)?;
     draw_label(display, "Clear", KB_CX, KB_CY + 28, Alignment::Center)?;
@@ -871,10 +834,7 @@ fn draw_char_picker<D>(display: &mut D, chars: &[u8], cursor: u8) -> Result<(), 
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let ts = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let ts = crate::ui::CENTERED;
 
     let total_w = chars.len() as i32 * 16;
     let start_x = KB_CX - total_w / 2 + 8;
@@ -905,10 +865,7 @@ where
     // would draw down to y=157 and clip.  Use `Baseline::Bottom` at
     // y=151 instead so the glyphs sit flush against the bottom edge
     // with one pixel of breathing room.
-    let hint_ts = TextStyleBuilder::new()
-        .baseline(Baseline::Bottom)
-        .alignment(Alignment::Center)
-        .build();
+    let hint_ts = crate::ui::CENTERED_BOTTOM;
     Text::with_text_style(
         "</>: move  Fire: select",
         Point::new(KB_CX, 151),
@@ -922,16 +879,8 @@ where
 
 // ── Global session ───────────────────────────────────────────────────────────
 
-#[cfg(feature = "embassy-core")]
-use embassy_sync::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
-
-#[cfg(feature = "embassy-core")]
-pub static TEXT_ENTRY: Mutex<CriticalSectionRawMutex, RefCell<Option<TextEntry>>> =
-    Mutex::new(RefCell::new(None));
-
-#[cfg(feature = "simulator")]
-pub static TEXT_ENTRY: std::sync::Mutex<RefCell<Option<TextEntry>>> =
-    std::sync::Mutex::new(RefCell::new(None));
+pub static TEXT_ENTRY: crate::sync::SharedCell<Option<TextEntry>> =
+    crate::sync::SharedCell::new(None);
 
 /// Start a text entry session. `prefill` is the initial text, `max_len` the
 /// maximum number of characters, `on_complete` is called with the final
@@ -946,18 +895,12 @@ pub fn begin(
     confirm: bool,
 ) {
     let entry = TextEntry::new(prefill, max_len, on_complete, title, confirm);
-    #[cfg(feature = "embassy-core")]
     TEXT_ENTRY.lock(|cell| cell.replace(Some(entry)));
-    #[cfg(feature = "simulator")]
-    TEXT_ENTRY.lock().unwrap().replace(Some(entry));
 }
 
 /// Returns true when text entry is active.
 pub fn is_active() -> bool {
-    #[cfg(feature = "embassy-core")]
-    return TEXT_ENTRY.lock(|cell| cell.borrow().is_some());
-    #[cfg(feature = "simulator")]
-    return TEXT_ENTRY.lock().unwrap().borrow().is_some();
+    TEXT_ENTRY.with(|e| e.is_some())
 }
 
 /// True while an external I2C keyboard is driving the active entry — set by

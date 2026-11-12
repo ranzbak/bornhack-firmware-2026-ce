@@ -23,6 +23,52 @@ use crate::{BLACK, RED, TriColor, WHITE};
 // scattered across the game's render code.  Use the constant rather
 // than re-creating the style at each call site.
 
+// Alignment / baseline pairs.  Named `<horizontal>_<vertical>` for the
+// centred variants and `<vertical>_<horizontal>` for the edge-anchored
+// ones, matching how the call sites read ("centred, top baseline").
+
+/// Centred on both axes (`Alignment::Center` + `Baseline::Middle`).
+pub const CENTERED: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Middle)
+    .alignment(Alignment::Center)
+    .build();
+
+/// Horizontally centred, `Baseline::Top`.
+pub const CENTERED_TOP: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Top)
+    .alignment(Alignment::Center)
+    .build();
+
+/// Horizontally centred, `Baseline::Bottom`.
+pub const CENTERED_BOTTOM: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Bottom)
+    .alignment(Alignment::Center)
+    .build();
+
+/// Left-aligned, `Baseline::Top`.
+pub const TOP_LEFT: TextStyle = TextStyleBuilder::new().baseline(Baseline::Top).build();
+
+/// Right-aligned, `Baseline::Top`.
+pub const TOP_RIGHT: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Top)
+    .alignment(Alignment::Right)
+    .build();
+
+/// Left-aligned, `Baseline::Middle`.
+pub const MIDDLE_LEFT: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Middle)
+    .alignment(Alignment::Left)
+    .build();
+
+/// Left-aligned, `Baseline::Bottom`.
+pub const BOTTOM_LEFT: TextStyle = TextStyleBuilder::new().baseline(Baseline::Bottom).build();
+
+/// Right-aligned, `Baseline::Bottom`.
+pub const BOTTOM_RIGHT: TextStyle = TextStyleBuilder::new()
+    .baseline(Baseline::Bottom)
+    .alignment(Alignment::Right)
+    .build();
+
 /// 7×13 regular weight, drawn in `BLACK` — body text on white.
 pub const TEXT_BLACK: MonoTextStyle<'static, TriColor> = MonoTextStyle::new(&FONT_7X13, BLACK);
 
@@ -66,10 +112,7 @@ where
         .into_styled(PrimitiveStyle::with_fill(BLACK))
         .draw(display)?;
 
-    let style = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let style = CENTERED;
     Text::with_text_style(
         title,
         Point::new(
@@ -111,6 +154,53 @@ where
 }
 
 // ---------------------------------------------------------------------------
+// Full-screen clear
+// ---------------------------------------------------------------------------
+
+/// Wipe the whole 152×152 panel to white.  Every screen that owns the
+/// full display starts with this so the previous frame doesn't bleed
+/// through.  `DrawTarget::clear` fills the target's bounding box, which
+/// is exactly 152×152 on every panel adapter and the simulator.
+pub fn clear_screen<D>(display: &mut D) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    display.clear(WHITE)
+}
+
+// ---------------------------------------------------------------------------
+// Fake-bold text
+// ---------------------------------------------------------------------------
+
+/// Draw `text` with a fake-bold effect for fonts that have no bold
+/// variant (e.g. the 6×10 face — embedded-graphics' `iso_8859_1`
+/// catalogue stops at `FONT_6X13_BOLD`, and moving up to 6×13 would
+/// disturb the layouts built around the 6×10 cell).  The text is drawn
+/// twice, the second pass shifted 1 px right, which doubles the vertical
+/// stroke width without changing layout — the difference between a 1 px
+/// and a 2 px stroke on the e-ink panel.
+pub fn draw_text_fake_bold<D>(
+    display: &mut D,
+    text: &str,
+    position: Point,
+    character_style: MonoTextStyle<'_, TriColor>,
+    text_style: TextStyle,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    Text::with_text_style(text, position, character_style, text_style).draw(display)?;
+    Text::with_text_style(
+        text,
+        Point::new(position.x + 1, position.y),
+        character_style,
+        text_style,
+    )
+    .draw(display)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // "No data" placeholder
 // ---------------------------------------------------------------------------
 
@@ -121,10 +211,7 @@ pub fn draw_centered_message<D>(display: &mut D, text: &str, pos: Point) -> Resu
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let style = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let style = CENTERED;
     Text::with_text_style(text, pos, TEXT_BLACK, style).draw(display)?;
     Ok(())
 }
@@ -210,10 +297,7 @@ where
     draw_title_bar(display, title, Point::new(inner_x, inner_y), inner_w)?;
 
     let list_y = inner_y + title_h + PADDING_BELOW_TITLE;
-    let left_style = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Left)
-        .build();
+    let left_style = MIDDLE_LEFT;
 
     for (row, label) in items[scroll..end].iter().enumerate() {
         let abs_idx = scroll + row;

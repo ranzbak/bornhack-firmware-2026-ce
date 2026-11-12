@@ -67,7 +67,7 @@ fn seed_rng() {
     }
     #[cfg(all(feature = "simulator", not(feature = "embassy-core")))]
     {
-        let s = super::lifecycle::sim_elapsed_ms() as u32;
+        let s = crate::platform::uptime_ms_u32();
         GAME_RNG.store(s.max(1), Ordering::Relaxed);
         return;
     }
@@ -82,9 +82,7 @@ fn entropy_byte() -> u8 {
     if s == 0 {
         s = 0xDEAD_BEEF;
     }
-    s ^= s << 13;
-    s ^= s >> 17;
-    s ^= s << 5;
+    s = crate::platform::xorshift32(s);
     GAME_RNG.store(s, Ordering::Relaxed);
     (s >> 24) as u8
 }
@@ -425,9 +423,7 @@ where
     // Full-screen white wipe so the previous frame's content (game
     // icons, pet area, leftover toast, …) doesn't bleed through under
     // and around the board.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     for idx in 0..CELLS {
         let gem = BOARD[idx].load(Ordering::Relaxed);

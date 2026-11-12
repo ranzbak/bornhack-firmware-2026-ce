@@ -34,7 +34,7 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use super::clock;
 use super::ics::SUMMARY_LEN;
@@ -803,10 +803,7 @@ where
 {
     let bell_cx = 56i32;
     let bell_cy = 8i32;
-    let left = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Left)
-        .build();
+    let left = crate::ui::MIDDLE_LEFT;
 
     // Bell + optional HH:MM keep their existing positions.  Title text
     // sits left-aligned at x=4..~40, so anything we draw past the bell
@@ -877,10 +874,7 @@ where
     clock::draw_digit(display, clock::MM_TENS_X, clock::DIGIT_Y, m / 10)?;
     clock::draw_digit(display, clock::MM_ONES_X, clock::DIGIT_Y, m % 10)?;
 
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
 
     // Three info rows below the digits.  FONT_6X10 keeps them tight enough
     // that there's room for an underline / inverted bar beneath each without

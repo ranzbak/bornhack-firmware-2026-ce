@@ -153,20 +153,24 @@ pub mod color;
 /// Panel-agnostic e-paper driver trait implemented by each controller adapter.
 #[cfg(feature = "embassy-core")]
 pub mod epd_driver;
+pub mod button_seq;
 pub mod display_flush;
 pub mod menu;
 pub mod lut_file;
 pub mod name_screen;
 pub mod nfc_ndef;
+pub mod platform;
 #[cfg(feature = "mesh")]
 pub mod qr_screen;
 #[cfg(feature = "signed-channel")]
 pub mod signed_channel;
+pub mod sync;
 pub mod text_entry;
 pub mod text_wrap;
 pub mod ui;
 #[cfg(feature = "watch")]
 pub mod watch;
+#[cfg(feature = "embassy-core")]
 use core::cell::RefCell;
 use core::result::Result;
 use core::result::Result::Ok;
@@ -178,7 +182,7 @@ use core::sync::atomic::{AtomicBool, AtomicI8, AtomicU8, AtomicU32};
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 #[cfg(feature = "embassy-core")]
 use heapless::format;
 pub use menu::{DISPLAY_STATE, DisplayState, MenuItem, MenuItemKind, ScreenState, draw_menu};
@@ -530,26 +534,16 @@ pub fn unix_now_unique() -> Option<u32> {
 /// renderer. Populated by the BLE task at startup (after reading from flash)
 /// and on every SET_ADVERT_NAME update.  Empty until the BLE task has
 /// initialized.
-#[cfg(feature = "embassy-core")]
-pub static NODE_NAME: Mutex<CriticalSectionRawMutex, RefCell<heapless::String<31>>> =
-    Mutex::new(RefCell::new(heapless::String::new()));
-
-#[cfg(feature = "simulator")]
-pub static NODE_NAME: std::sync::Mutex<RefCell<heapless::String<31>>> =
-    std::sync::Mutex::new(RefCell::new(heapless::String::new()));
+pub static NODE_NAME: sync::SharedCell<heapless::String<31>> =
+    sync::SharedCell::new(heapless::String::new());
 
 /// This badge's Ed25519 public key, populated once at boot by
 /// `bin/embassy.rs` after `device_identity::load_or_create()` completes.
 /// Read by the "My QR" screen to build the meshcore contact URL; all zeros
 /// before mesh init runs (the QR screen treats that as "key not ready yet"
 /// and shows a placeholder).
-#[cfg(all(feature = "embassy-core", feature = "mesh"))]
-pub static MY_PUB_KEY: Mutex<CriticalSectionRawMutex, RefCell<[u8; 32]>> =
-    Mutex::new(RefCell::new([0u8; 32]));
-
-#[cfg(all(feature = "simulator", feature = "mesh"))]
-pub static MY_PUB_KEY: std::sync::Mutex<RefCell<[u8; 32]>> =
-    std::sync::Mutex::new(RefCell::new([0u8; 32]));
+#[cfg(all(any(feature = "embassy-core", feature = "simulator"), feature = "mesh"))]
+pub static MY_PUB_KEY: sync::SharedCell<[u8; 32]> = sync::SharedCell::new([0u8; 32]);
 
 /// Lowercase hex of `bytes` (`n_bytes` of them) into a `String<32>`.
 /// Used to render pub_key prefixes (`pub_key[..8]` → 16-char hex) and
@@ -590,81 +584,40 @@ pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
 
 /// Store `name` (raw UTF-8 bytes) into [`NODE_NAME`].  Invalid UTF-8 is
 /// ignored.
-#[cfg(feature = "embassy-core")]
 pub fn update_node_name(name: &[u8]) {
     if let Ok(s) = core::str::from_utf8(name) {
-        NODE_NAME.lock(|cell| {
-            let mut stored = cell.borrow_mut();
+        NODE_NAME.with_mut(|stored| {
             stored.clear();
             let _ = stored.push_str(truncate_str(s, 31));
         });
     }
 }
 
-/// Store `name` (raw UTF-8 bytes) into [`NODE_NAME`].  Invalid UTF-8 is
-/// ignored.
-#[cfg(feature = "simulator")]
-pub fn update_node_name(name: &[u8]) {
-    if let Ok(s) = core::str::from_utf8(name) {
-        let guard = NODE_NAME.lock().unwrap();
-        let mut stored = guard.borrow_mut();
-        stored.clear();
-        let _ = stored.push_str(truncate_str(s, 31));
-    }
-}
-
 // (mesh statics moved to fw/mesh/mod.rs)
 
-// Macro for embassy - immutable access
 /// Access the shared `DisplayState` immutably.
 /// Usage: `with_display_state!(|s| s.active_screen())`
-#[cfg(feature = "embassy-core")]
 #[macro_export]
 macro_rules! with_display_state {
     ($f:expr) => {
-        DISPLAY_STATE.lock(|cell| {
-            let state = cell.borrow();
+        DISPLAY_STATE.with(|state| {
             let f: &dyn Fn(&$crate::menu::DisplayState<{ $crate::menu::SCREEN_COUNT }>) -> _ = &$f;
-            f(&state)
+            f(state)
         })
     };
 }
 
 /// Access the shared `DisplayState` mutably.
 /// Usage: `with_display_state_mut!(|s| s.dispatch_button(btn))`
-#[cfg(feature = "embassy-core")]
 #[macro_export]
 macro_rules! with_display_state_mut {
     ($f:expr) => {
-        DISPLAY_STATE.lock(|cell| {
-            let mut state = cell.borrow_mut();
+        DISPLAY_STATE.with_mut(|state| {
             let f: &dyn Fn(&mut $crate::menu::DisplayState<{ $crate::menu::SCREEN_COUNT }>) -> _ =
                 &$f;
-            f(&mut state)
+            f(state)
         })
     };
-}
-
-#[cfg(feature = "simulator")]
-#[macro_export]
-macro_rules! with_display_state {
-    ($f:expr) => {{
-        let guard = DISPLAY_STATE.lock().unwrap();
-        let state = guard.borrow();
-        let f: &dyn Fn(&$crate::menu::DisplayState<{ $crate::menu::SCREEN_COUNT }>) -> _ = &$f;
-        f(&state)
-    }};
-}
-
-#[cfg(feature = "simulator")]
-#[macro_export]
-macro_rules! with_display_state_mut {
-    ($f:expr) => {{
-        let guard = DISPLAY_STATE.lock().unwrap();
-        let mut state = guard.borrow_mut();
-        let f: &dyn Fn(&mut $crate::menu::DisplayState<{ $crate::menu::SCREEN_COUNT }>) -> _ = &$f;
-        f(&mut state)
-    }};
 }
 
 // Position of the animated circle
@@ -690,25 +643,13 @@ where
 {
     // Text entry: full-screen text input takes priority over all screens.
     if text_entry::is_active() {
-        #[cfg(feature = "embassy-core")]
-        return text_entry::TEXT_ENTRY.lock(|cell| {
-            let borrow = cell.borrow();
-            if let Some(ref entry) = *borrow {
+        return text_entry::TEXT_ENTRY.with(|entry| {
+            if let Some(entry) = entry {
                 text_entry::draw_text_entry(display, entry)
             } else {
                 Ok(())
             }
         });
-        #[cfg(feature = "simulator")]
-        return {
-            let guard = text_entry::TEXT_ENTRY.lock().unwrap();
-            let borrow = guard.borrow();
-            if let Some(ref entry) = *borrow {
-                text_entry::draw_text_entry(display, entry)
-            } else {
-                Ok(())
-            }
-        };
     }
 
     // Qwiic Scan: full-screen I2C bus-scanner overlay.
@@ -812,10 +753,7 @@ where
     if passkey_val == u32::MAX {
         return Ok(());
     }
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
     Rectangle::new(Point::new(20, 48), Size::new(112, 62))
         .into_styled(PrimitiveStyle::with_fill(WHITE))
         .draw(display)?;
@@ -862,7 +800,7 @@ pub fn draw_frame<D>(
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let bottom = TextStyleBuilder::new().baseline(Baseline::Bottom).build();
+    let bottom = crate::ui::BOTTOM_LEFT;
 
     let body_start = if let Some((title, bat_prc)) = header {
         Text::with_text_style(title, Point::new(4, 14), ui::TEXT_BOLD_BLACK, bottom)
@@ -885,10 +823,7 @@ where
             text,
             Point::new(76, footer_y + 5),
             ui::TEXT_BOLD_BLACK,
-            TextStyleBuilder::new()
-                .baseline(Baseline::Middle)
-                .alignment(Alignment::Center)
-                .build(),
+            crate::ui::CENTERED,
         )
         .draw(display)?;
         footer_y - 4
@@ -1143,10 +1078,7 @@ fn draw_screen_lora<D>(display: &mut D, _bat_prc: &u8) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let center = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let center = crate::ui::CENTERED;
     Text::with_text_style(
         "Channels (no mesh)",
         Point::new(76, 76),

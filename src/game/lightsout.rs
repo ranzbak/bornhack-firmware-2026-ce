@@ -14,7 +14,7 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::iso_8859_1::FONT_7X13_BOLD;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 
 use crate::{BLACK, TriColor, WHITE};
 
@@ -77,13 +77,13 @@ pub fn is_active() -> bool {
 pub fn open() {
     // Generate a solvable random puzzle by applying random toggles
     // from a solved (all-off) board.
-    let seed = seed();
+    let seed = crate::platform::seed_ticks_or_fixed();
     let mut board: u32 = 0;
     let mut rng = seed;
     // Apply 8–12 random toggles to guarantee solvability.
     let n_toggles = 8 + (rng % 5) as usize;
     for _ in 0..n_toggles {
-        rng = xorshift(rng);
+        rng = crate::platform::xorshift32(rng);
         let cell = (rng % 25) as usize;
         board = toggle(board, cell);
     }
@@ -196,26 +196,6 @@ fn toggle(mut board: u32, pos: usize) -> u32 {
     board
 }
 
-/// Simple xorshift32 PRNG.
-fn xorshift(mut x: u32) -> u32 {
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    x
-}
-
-/// Seed from embassy uptime or a fallback.
-fn seed() -> u32 {
-    #[cfg(feature = "embassy-core")]
-    {
-        embassy_time::Instant::now().as_ticks() as u32
-    }
-    #[cfg(not(feature = "embassy-core"))]
-    {
-        0xCAFE_BABE
-    }
-}
-
 // ── Drawing ──────────────────────────────────────────────────────────────────
 
 pub fn draw<D>(display: &mut D) -> Result<(), D::Error>
@@ -228,9 +208,7 @@ where
     let moves = MOVES.load(Ordering::Relaxed);
 
     // Background.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     // Draw 5×5 grid.
     for i in 0..25 {
@@ -282,10 +260,7 @@ where
     }
 
     // Status text below the grid.
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Top)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED_TOP;
     let font = MonoTextStyle::new(&FONT_7X13_BOLD, BLACK);
 
     let unsolvable = UNSOLVABLE.load(Ordering::Relaxed);

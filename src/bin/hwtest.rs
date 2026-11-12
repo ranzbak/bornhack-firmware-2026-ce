@@ -53,55 +53,9 @@ use embassy_nrf::{bind_interrupts, peripherals};
 use embassy_time::Timer;
 use panic_probe as _;
 
-// Board pin map — inlined (not using the main lib, which is gated on
-// `embassy-base` / `simulator`). Keep in sync with `src/fw/board.rs`.
-#[rustfmt::skip]
-macro_rules! board {
-    ($p:expr, led_red)    => { $p.P1_07 };
-    ($p:expr, led_green)  => { $p.P1_15 };
-    ($p:expr, led_blue)   => { $p.P0_02 };
-
-    ($p:expr, buzzer)     => { $p.P0_13 };
-
-    ($p:expr, epd_busy)   => { $p.P0_14 };
-    ($p:expr, epd_reset)  => { $p.P0_11 };
-    ($p:expr, epd_dc)     => { $p.P0_12 };
-    ($p:expr, epd_csn)    => { $p.P1_09 };
-    ($p:expr, epd_sck)    => { $p.P0_08 };
-    ($p:expr, epd_mosi)   => { $p.P0_27 };
-
-    ($p:expr, vbat)       => { $p.P0_31 };
-    ($p:expr, vbat_rd)    => { $p.P0_07 };
-    ($p:expr, ps_sync)    => { $p.P0_17 };
-
-    ($p:expr, btn_can)    => { $p.P0_06 };
-    ($p:expr, btn_exe)    => { $p.P0_26 };
-
-    ($p:expr, joy_up)     => { $p.P1_04 };
-    ($p:expr, joy_down)   => { $p.P1_03 };
-    ($p:expr, joy_left)   => { $p.P1_05 };
-    ($p:expr, joy_right)  => { $p.P1_01 };
-    ($p:expr, joy_fire)   => { $p.P1_02 };
-
-    ($p:expr, lora_dio1)  => { $p.P0_29 };
-    ($p:expr, lora_busy)  => { $p.P0_28 };
-    ($p:expr, lora_rf_sw) => { $p.P0_04 };
-    ($p:expr, lora_rst)   => { $p.P0_30 };
-    ($p:expr, lora_miso)  => { $p.P1_14 };
-    ($p:expr, lora_mosi)  => { $p.P0_03 };
-    ($p:expr, lora_sck)   => { $p.P1_13 };
-    ($p:expr, lora_nss)   => { $p.P1_12 };
-
-    ($p:expr, qwiic_sda)  => { $p.P1_10 };
-    ($p:expr, qwiic_scl)  => { $p.P1_11 };
-
-    ($p:expr, flash_csn)  => { $p.P0_25 };
-    ($p:expr, flash_sck)  => { $p.P0_21 };
-    ($p:expr, flash_io0)  => { $p.P0_20 };
-    ($p:expr, flash_io1)  => { $p.P0_24 };
-    ($p:expr, flash_io2)  => { $p.P0_22 };
-    ($p:expr, flash_io3)  => { $p.P0_23 };
-}
+// Board pin map — shared with the main app and the bootloader (this binary
+// cannot link the lib, so it `include!`s the file instead).
+include!("../fw/board.rs");
 
 bind_interrupts!(struct Irqs {
     SAADC => saadc::InterruptHandler;
@@ -460,15 +414,8 @@ fn probe_qspi(
     jedec != [0x00; 3] && jedec != [0xFF; 3]
 }
 
-// nRF52840 CLOCK peripheral register addresses (@ 0x40000000).
-const CLOCK_TASKS_HFCLKSTART: *mut u32 = 0x4000_0000 as *mut u32;
-const CLOCK_TASKS_HFCLKSTOP: *mut u32 = 0x4000_0004 as *mut u32;
-const CLOCK_TASKS_LFCLKSTART: *mut u32 = 0x4000_0008 as *mut u32;
-const CLOCK_TASKS_LFCLKSTOP: *mut u32 = 0x4000_000C as *mut u32;
-const CLOCK_EVENTS_HFCLKSTARTED: *mut u32 = 0x4000_0100 as *mut u32;
-const CLOCK_EVENTS_LFCLKSTARTED: *mut u32 = 0x4000_0104 as *mut u32;
-const CLOCK_LFCLKSTAT: *const u32 = 0x4000_0418 as *const u32;
-const CLOCK_LFCLKSRC: *mut u32 = 0x4000_0518 as *mut u32;
+// nRF52840 CLOCK peripheral register addresses (shared with factory_test).
+include!("../fw/nrf_clock_regs.rs");
 
 /// Request the 32 MHz HFXO and wait up to 1 s for `HFCLKSTARTED`.
 ///

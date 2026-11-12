@@ -6,12 +6,11 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::Text;
 
 use super::stat_bar::draw_stat_bar;
 use crate::ui::{self, TEXT_BOLD_BLACK};
-use crate::{BLACK, TriColor, WHITE};
+use crate::{BLACK, TriColor};
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 
@@ -32,14 +31,12 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     // Background.
-    Rectangle::new(Point::zero(), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     // Title bar.
     ui::draw_title_bar(display, "Rolled Stats", Point::zero(), 152)?;
 
-    let left = TextStyleBuilder::new().baseline(Baseline::Top).build();
+    let left = crate::ui::TOP_LEFT;
 
     // Header: name (if any), kind, generation.
     let name = super::lifecycle::pet_name();

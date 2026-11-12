@@ -31,7 +31,7 @@
 use embedded_graphics::mono_font::{MonoFont, MonoTextStyle, iso_8859_1};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use embedded_graphics::text::{Text};
 use profont::{PROFONT_14_POINT, PROFONT_18_POINT, PROFONT_24_POINT};
 use u8g2_fonts::FontRenderer;
 use u8g2_fonts::fonts::u8g2_font_fub42_tf;
@@ -73,19 +73,14 @@ where
     let _ = bat_prc; // Battery isn't surfaced on this screen — name stands alone.
 
     // Clear the panel — bottom half stays white, top is overdrawn red below.
-    Rectangle::new(Point::new(0, 0), Size::new(152, 152))
-        .into_styled(PrimitiveStyle::with_fill(WHITE))
-        .draw(display)?;
+    crate::ui::clear_screen(display)?;
 
     // ── Red band: filled rectangle covering the top portion ───────────────
     Rectangle::new(Point::new(0, 0), Size::new(152, RED_BAND_BOTTOM as u32))
         .into_styled(PrimitiveStyle::with_fill(RED))
         .draw(display)?;
 
-    let centered = TextStyleBuilder::new()
-        .baseline(Baseline::Middle)
-        .alignment(Alignment::Center)
-        .build();
+    let centered = crate::ui::CENTERED;
 
     // "HELLO" — big and centered
     Text::with_text_style(
@@ -195,19 +190,7 @@ where
 /// on-screen snapshot.
 fn snapshot_name(out: &mut heapless::String<31>) {
     out.clear();
-    #[cfg(feature = "embassy-core")]
-    {
-        crate::NODE_NAME.lock(|cell| {
-            let name = cell.borrow();
-            push_renderable(out, name.as_str());
-        });
-    }
-    #[cfg(feature = "simulator")]
-    {
-        let guard = crate::NODE_NAME.lock().unwrap();
-        let name = guard.borrow();
-        push_renderable(out, name.as_str());
-    }
+    crate::NODE_NAME.with(|name| push_renderable(out, name.as_str()));
 }
 
 /// Push the drawable characters of `name` into `out`, stopping if the buffer
