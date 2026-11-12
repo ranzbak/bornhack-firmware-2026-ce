@@ -384,46 +384,6 @@ async fn probe_lut(
 /// over the persisted-KV value.
 pub static LUT_FILE_SPEED: AtomicI16 = AtomicI16::new(-1);
 
-/// Stream `file` through `scratch` line by line, invoking `f` once per
-/// text line (without its `\n`). Lines may span read-chunk boundaries —
-/// the partial tail is carried over between reads — so the file itself
-/// can be (much) larger than `scratch`. Errors on a read failure, a `f`
-/// parse error, or a single line longer than the whole scratch buffer.
-async fn for_each_file_line<F>(
-    file: &crate::fw::fat12::FileRef,
-    scratch: &mut [u8],
-    mut f: F,
-) -> Result<(), ()>
-where
-    F: FnMut(&[u8]) -> Result<(), crate::lut_file::LutCfgError>,
-{
-    let mut offset: u32 = 0;
-    let mut carry: usize = 0;
-    loop {
-        let n = match crate::fw::fat12::read_file(file, offset, &mut scratch[carry..]).await {
-            Ok(n) => n,
-            Err(_) => return Err(()),
-        };
-        offset = offset.saturating_add(n as u32);
-        let filled = carry + n;
-        let eof = n == 0 || offset >= file.size;
-
-        let consumed = crate::lut_file::drain_lines(&scratch[..filled], &mut f).map_err(|_| ())?;
-        if eof {
-            if consumed < filled {
-                // Final line without a trailing newline.
-                f(&scratch[consumed..filled]).map_err(|_| ())?;
-            }
-            return Ok(());
-        }
-        carry = filled - consumed;
-        if carry == scratch.len() {
-            return Err(()); // one line larger than the whole scratch buffer
-        }
-        scratch.copy_within(consumed..filled, 0);
-    }
-}
-
 /// Read and apply a custom `LUT.CFG` from the USB-MSC FAT partition into
 /// `lut_table`, in place.
 ///
@@ -467,7 +427,7 @@ async fn load_custom_lut(
     // Pass 1 — meta + full dry-run validation, streamed.
     let mut meta = MetaScan::new();
     let mut check = BandScan::validate();
-    let streamed = for_each_file_line(&file, scratch, |line| {
+    let streamed = crate::fw::fat12::for_each_line(&file, scratch, |line| {
         meta.feed_line(line)?;
         check.feed_line(line)
     })
@@ -499,7 +459,7 @@ async fn load_custom_lut(
     if has_waveform {
         // Pass 2 — apply (contents already validated above).
         let mut apply = BandScan::apply(lut_table);
-        if for_each_file_line(&file, scratch, |line| apply.feed_line(line))
+        if crate::fw::fat12::for_each_line(&file, scratch, |line| apply.feed_line(line))
             .await
             .is_err()
         {

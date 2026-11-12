@@ -246,9 +246,9 @@ pub fn validate_bands(data: &[u8]) -> Result<(), LutCfgError> {
 /// incomplete line, which the caller carries over into the next read
 /// chunk. Building block for streaming a file through a scratch buffer
 /// smaller than the file.
-pub fn drain_lines<F>(buf: &[u8], f: &mut F) -> Result<usize, LutCfgError>
+pub fn drain_lines<E, F>(buf: &[u8], f: &mut F) -> Result<usize, E>
 where
-    F: FnMut(&[u8]) -> Result<(), LutCfgError>,
+    F: FnMut(&[u8]) -> Result<(), E>,
 {
     let mut start = 0;
     while let Some(pos) = buf[start..].iter().position(|&b| b == b'\n') {
@@ -461,7 +461,7 @@ mod tests {
     /// Push `data` through the scanners the way the firmware's chunked
     /// file reader does: read `chunk`-sized pieces into a window buffer,
     /// drain complete lines, carry the partial tail over. Mirrors
-    /// `epd::for_each_file_line`.
+    /// `fat12::for_each_line`.
     fn stream_chunked<F>(data: &[u8], window: usize, chunk: usize, f: &mut F)
     where
         F: FnMut(&[u8]) -> Result<(), LutCfgError>,
@@ -568,7 +568,7 @@ mod tests {
         let mut seen: std::vec::Vec<std::vec::Vec<u8>> = vec![];
         let consumed = drain_lines(b"a=1\nb=2\npartial", &mut |l: &[u8]| {
             seen.push(l.to_vec());
-            Ok(())
+            Ok::<(), LutCfgError>(())
         })
         .unwrap();
         assert_eq!(consumed, 8);

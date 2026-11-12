@@ -518,6 +518,46 @@ pub async fn read_file(file: &FileRef, offset: u32, buf: &mut [u8]) -> Result<us
     Ok(bytes_read)
 }
 
+/// Stream `file` through `scratch` line by line, invoking `f` once per
+/// text line (without its `\n`). Lines may span read-chunk boundaries —
+/// the partial tail is carried over between reads — so the file itself
+/// can be (much) larger than `scratch`. Errors on a read failure, a `f`
+/// parse error, or a single line longer than the whole scratch buffer.
+pub async fn for_each_line<E, F>(
+    file: &FileRef,
+    scratch: &mut [u8],
+    mut f: F,
+) -> Result<(), ()>
+where
+    F: FnMut(&[u8]) -> Result<(), E>,
+{
+    let mut offset: u32 = 0;
+    let mut carry: usize = 0;
+    loop {
+        let n = match read_file(file, offset, &mut scratch[carry..]).await {
+            Ok(n) => n,
+            Err(_) => return Err(()),
+        };
+        offset = offset.saturating_add(n as u32);
+        let filled = carry + n;
+        let eof = n == 0 || offset >= file.size;
+
+        let consumed = crate::lut_file::drain_lines(&scratch[..filled], &mut f).map_err(|_| ())?;
+        if eof {
+            if consumed < filled {
+                // Final line without a trailing newline.
+                f(&scratch[consumed..filled]).map_err(|_| ())?;
+            }
+            return Ok(());
+        }
+        carry = filled - consumed;
+        if carry == scratch.len() {
+            return Err(()); // one line larger than the whole scratch buffer
+        }
+        scratch.copy_within(consumed..filled, 0);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Format — create a fresh FAT12 filesystem
 // ---------------------------------------------------------------------------
