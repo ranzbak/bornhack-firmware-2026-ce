@@ -263,13 +263,8 @@ fn shift_utc_to_local(
     if day_delta == 0 {
         return (year, month, day, new_hour, minute);
     }
-    match fasttime::Date::from_ymd(year as i32, month, day)
-        .ok()
-        .and_then(|d| d.add_days(day_delta as i64).ok())
-    {
-        Some(d) => (d.year as u16, d.month, d.day, new_hour, minute),
-        None => (year, month, day, new_hour, minute),
-    }
+    let (y, mo, d) = calendar::add_days(year, month, day, day_delta as i64);
+    (y, mo, d, new_hour, minute)
 }
 
 // ── Top-level draw ──────────────────────────────────────────────────────────

@@ -233,7 +233,7 @@ fn digits(bytes: &[u8]) -> Option<u32> {
     Some(n)
 }
 
-fn copy_ascii(dst: &mut [u8; SUMMARY_LEN], src: &[u8]) {
+pub(super) fn copy_ascii(dst: &mut [u8; SUMMARY_LEN], src: &[u8]) {
     let mut i = 0;
     for &b in src {
         if i >= dst.len() {

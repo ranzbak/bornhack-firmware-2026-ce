@@ -386,16 +386,7 @@ pub fn add_quick_event(minutes_ahead: u16, summary: &[u8]) -> Option<(u8, u8)> {
     set_alarm_date_n(slot, year, month, day);
     set_alarm_time_n(slot, target_hour, target_min);
     let mut buf = [0u8; SUMMARY_LEN];
-    let mut i = 0usize;
-    for &b in summary {
-        if i >= SUMMARY_LEN {
-            break;
-        }
-        if (0x20..=0x7e).contains(&b) {
-            buf[i] = b;
-            i += 1;
-        }
-    }
+    super::ics::copy_ascii(&mut buf, summary);
     set_alarm_summary_n(slot, &buf);
     set_alarm_enabled_n(slot, true);
     Some((target_hour, target_min))

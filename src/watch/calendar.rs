@@ -183,7 +183,7 @@ fn weekday_for(year: u16, month: u8, day: u8) -> u8 {
 
 /// Add `delta_days` to `(year, month, day)` and return the resulting
 /// date.  Returns the input unchanged on out-of-range arithmetic.
-fn add_days(year: u16, month: u8, day: u8, delta_days: i64) -> (u16, u8, u8) {
+pub(super) fn add_days(year: u16, month: u8, day: u8, delta_days: i64) -> (u16, u8, u8) {
     let Ok(d) = fasttime::Date::from_ymd(year as i32, month, day) else {
         return (year, month, day);
     };
