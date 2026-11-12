@@ -83,15 +83,7 @@ static FRAME_COUNT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8:
 /// Decode `b"AB"` (two ASCII hex digits) into a 0..=255 byte.
 #[cfg(feature = "embassy-core")]
 fn parse_hex_pair(hi: u8, lo: u8) -> Option<u8> {
-    fn d(c: u8) -> Option<u8> {
-        match c {
-            b'0'..=b'9' => Some(c - b'0'),
-            b'A'..=b'F' => Some(c - b'A' + 10),
-            b'a'..=b'f' => Some(c - b'a' + 10),
-            _ => None,
-        }
-    }
-    Some((d(hi)? << 4) | d(lo)?)
+    crate::hex::pair(hi, lo)
 }
 
 /// Discover PCX files on the FAT12 partition and record per-animation

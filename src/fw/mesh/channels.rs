@@ -40,7 +40,7 @@ const SLOT_LEN: usize = NAME_LEN + KEY_LEN; // 48 bytes
 /// Longest per-channel region name accepted (bytes, without the `#`).
 pub const REGION_NAME_MAX: usize = 20;
 
-/// Format a slot index as a zero-padded 4-digit decimal string.
+/// Format a slot index as a zero-padded 2-digit decimal string (`{:02}`).
 fn slot_key(idx: usize) -> heapless::String<4> {
     use core::fmt::Write;
     let mut s = heapless::String::new();

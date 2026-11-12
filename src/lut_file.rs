@@ -290,20 +290,11 @@ fn decode_exact(src: &[u8], dst: &mut [u8]) -> Result<(), LutCfgError> {
         return Err(LutCfgError::WrongLen);
     }
     for (i, out) in dst.iter_mut().enumerate() {
-        let hi = hex_val(src[2 * i]).ok_or(LutCfgError::BadHex)?;
-        let lo = hex_val(src[2 * i + 1]).ok_or(LutCfgError::BadHex)?;
+        let hi = crate::hex::val(src[2 * i]).ok_or(LutCfgError::BadHex)?;
+        let lo = crate::hex::val(src[2 * i + 1]).ok_or(LutCfgError::BadHex)?;
         *out = (hi << 4) | lo;
     }
     Ok(())
-}
-
-fn hex_val(c: u8) -> Option<u8> {
-    match c {
-        b'0'..=b'9' => Some(c - b'0'),
-        b'a'..=b'f' => Some(c - b'a' + 10),
-        b'A'..=b'F' => Some(c - b'A' + 10),
-        _ => None,
-    }
 }
 
 /// Parse a non-empty ASCII decimal into a `u32`, or `None` on any

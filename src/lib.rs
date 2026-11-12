@@ -155,6 +155,7 @@ pub mod color;
 pub mod epd_driver;
 pub mod button_seq;
 pub mod display_flush;
+pub mod hex;
 pub mod menu;
 pub mod lut_file;
 pub mod name_screen;
@@ -581,20 +582,7 @@ pub static MY_PUB_KEY: sync::SharedCell<[u8; 32]> = sync::SharedCell::new([0u8; 
 pub fn hex_prefix(bytes: &[u8], n_bytes: usize) -> heapless::String<32> {
     let mut out: heapless::String<32> = heapless::String::new();
     let take = n_bytes.min(bytes.len()).min(16);
-    for &b in bytes.iter().take(take) {
-        let hi = b >> 4;
-        let lo = b & 0xF;
-        let _ = out.push(if hi < 10 {
-            (b'0' + hi) as char
-        } else {
-            (b'a' + hi - 10) as char
-        });
-        let _ = out.push(if lo < 10 {
-            (b'0' + lo) as char
-        } else {
-            (b'a' + lo - 10) as char
-        });
-    }
+    hex::push_lower(&mut out, &bytes[..take]);
     out
 }
 

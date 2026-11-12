@@ -489,20 +489,7 @@ fn slot_key(idx: usize) -> heapless::String<4> {
 /// the companion protocol identifies contacts by their first 6 pub_key bytes.
 fn index_key(pub_key: &[u8]) -> heapless::String<12> {
     let mut s = heapless::String::new();
-    for &b in &pub_key[..6.min(pub_key.len())] {
-        let hi = b >> 4;
-        let lo = b & 0xF;
-        let _ = s.push(if hi < 10 {
-            (b'0' + hi) as char
-        } else {
-            (b'a' + hi - 10) as char
-        });
-        let _ = s.push(if lo < 10 {
-            (b'0' + lo) as char
-        } else {
-            (b'a' + lo - 10) as char
-        });
-    }
+    crate::hex::push_lower(&mut s, &pub_key[..6.min(pub_key.len())]);
     s
 }
 
@@ -510,18 +497,7 @@ fn index_key(pub_key: &[u8]) -> heapless::String<12> {
 /// first byte of a contact's pub_key. Matches [`index_key`]'s encoding.
 fn hi_key(src_hash: u8) -> heapless::String<2> {
     let mut s = heapless::String::new();
-    let hi = src_hash >> 4;
-    let lo = src_hash & 0xF;
-    let _ = s.push(if hi < 10 {
-        (b'0' + hi) as char
-    } else {
-        (b'a' + hi - 10) as char
-    });
-    let _ = s.push(if lo < 10 {
-        (b'0' + lo) as char
-    } else {
-        (b'a' + lo - 10) as char
-    });
+    crate::hex::push_lower(&mut s, &[src_hash]);
     s
 }
 
