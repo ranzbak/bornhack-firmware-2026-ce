@@ -153,6 +153,7 @@ pub mod color;
 /// Panel-agnostic e-paper driver trait implemented by each controller adapter.
 #[cfg(feature = "embassy-core")]
 pub mod epd_driver;
+pub mod button_seq;
 pub mod display_flush;
 pub mod menu;
 pub mod lut_file;
