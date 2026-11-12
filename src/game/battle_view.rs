@@ -8,6 +8,7 @@
 //!   refreshes are too slow for that) showing both pets' names, HP-left
 //!   bars, and a WIN/LOSE banner. Any button returns to the game screen.
 
+use crate::sync::SyncCell;
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
 
 use embedded_graphics::prelude::*;
@@ -52,17 +53,6 @@ struct ResultDisplay {
     friend_name: [u8; PET_NAME_MAX],
     friend_name_len: u8,
     outcome: BattleOutcome,
-}
-
-struct SyncCell<T>(core::cell::UnsafeCell<T>);
-unsafe impl<T> Sync for SyncCell<T> {}
-impl<T> SyncCell<T> {
-    const fn new(v: T) -> Self {
-        Self(core::cell::UnsafeCell::new(v))
-    }
-    fn get(&self) -> *mut T {
-        self.0.get()
-    }
 }
 
 static RESULT: SyncCell<Option<ResultDisplay>> = SyncCell::new(None);

@@ -5,6 +5,7 @@
 //! in this module.  All functions are async (flash access goes through
 //! the shared QSPI mutex).
 
+use crate::sync::SyncCell;
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
 use super::engine::{DisplayAnim, GameState, PET_NAME_MAX, PetRealm, PetRecord, PetStats};
@@ -14,18 +15,6 @@ use super::engine::{REALM_SAVE_SIZE, SAVE_SIZE};
 // ---------------------------------------------------------------------------
 // Static game state
 // ---------------------------------------------------------------------------
-
-/// Wrapper for static mutable access (single-task, sequential).
-struct SyncCell<T>(core::cell::UnsafeCell<T>);
-unsafe impl<T> Sync for SyncCell<T> {}
-impl<T> SyncCell<T> {
-    const fn new(v: T) -> Self {
-        Self(core::cell::UnsafeCell::new(v))
-    }
-    fn get(&self) -> *mut T {
-        self.0.get()
-    }
-}
 
 static GAME: SyncCell<Option<GameState>> = SyncCell::new(None);
 static REALM: SyncCell<PetRealm> = SyncCell::new(PetRealm::new());

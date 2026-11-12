@@ -87,6 +87,27 @@ impl<T, M> SharedCell<T, M> {
     }
 }
 
+/// Plain `static` holder for state that is only ever touched from one task,
+/// sequentially (the game loop and its draw code). No locking: [`get`] hands
+/// out a raw pointer and the caller upholds the single-task access rule. Use
+/// [`SharedCell`] instead when more than one task may touch the value.
+///
+/// [`get`]: SyncCell::get
+#[cfg(feature = "game")]
+pub(crate) struct SyncCell<T>(core::cell::UnsafeCell<T>);
+// SAFETY: access is single-task and sequential by contract (see above).
+#[cfg(feature = "game")]
+unsafe impl<T> Sync for SyncCell<T> {}
+#[cfg(feature = "game")]
+impl<T> SyncCell<T> {
+    pub(crate) const fn new(v: T) -> Self {
+        Self(core::cell::UnsafeCell::new(v))
+    }
+    pub(crate) fn get(&self) -> *mut T {
+        self.0.get()
+    }
+}
+
 #[cfg(all(test, feature = "simulator"))]
 mod tests {
     use super::*;

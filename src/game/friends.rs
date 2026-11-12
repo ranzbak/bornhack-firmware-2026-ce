@@ -11,6 +11,7 @@
 //! Persisted separately from the main game save, in its own `"friends"` KV
 //! namespace — mirrors `PetRealm`'s ring-buffer/dirty-flag pattern.
 
+use crate::sync::SyncCell;
 use super::engine::PET_NAME_MAX;
 
 // ---------------------------------------------------------------------------
@@ -327,17 +328,6 @@ impl FriendsList {
 // ---------------------------------------------------------------------------
 // Static state + KV persistence
 // ---------------------------------------------------------------------------
-
-struct SyncCell<T>(core::cell::UnsafeCell<T>);
-unsafe impl<T> Sync for SyncCell<T> {}
-impl<T> SyncCell<T> {
-    const fn new(v: T) -> Self {
-        Self(core::cell::UnsafeCell::new(v))
-    }
-    fn get(&self) -> *mut T {
-        self.0.get()
-    }
-}
 
 static FRIENDS: SyncCell<FriendsList> = SyncCell::new(FriendsList::new());
 static FRIENDS_DIRTY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
