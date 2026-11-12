@@ -163,15 +163,18 @@ async fn main(spawner: Spawner) {
     static RED_BUF: StaticCell<[u8; EpdConfig::BUF_SIZE]> = StaticCell::new();
     #[cfg(feature = "ssd1675-driver")]
     static WORK_BUF: StaticCell<[u8; EpdConfig::BUF_SIZE]> = StaticCell::new();
-    // Boot-time escape hatch for a bad custom LUT: sample Fire (joy_fire =
-    // P1_02, see board.rs) before init_epd. Held → force the safe OTP
+    // Boot-time escape hatch for a bad custom LUT: sample Fire (`joy_fire` in
+    // board.rs) before init_epd. Held → force the safe OTP
     // waveform and ignore LUT.CFG. `steal` is sound here: this is a
     // one-shot read that completes before the button task claims the pin
     // (board!(p, joy_fire) at spawn time below).
     #[cfg(feature = "ssd1675-driver")]
     let force_otp_lut = {
         use embassy_nrf::gpio::{Input, Pull};
-        let fire = Input::new(unsafe { embassy_nrf::peripherals::P1_02::steal() }, Pull::Up);
+        let fire = Input::new(
+            board!(unsafe { embassy_nrf::Peripherals::steal() }, joy_fire),
+            Pull::Up,
+        );
         let held = fire.is_low();
         drop(fire);
         held
@@ -1209,8 +1212,7 @@ fn halve_shake_rp_1680(mut lut: [u8; 153]) -> [u8; 153] {
 /// over cmd `0x33`: `0x33` is clocked out on MOSI (TX), the same data line is
 /// flipped to input (`new_rxonly`) to clock the reply in, then TX-only is
 /// restored — the single-wire read trick used by `fw::epd::probe_lut` on the
-/// SSD1675. Pins are stolen by number (board.rs: sck P0_08, mosi P0_27, busy
-/// P0_14, rst P0_11, dc P0_12, csn P1_09) and the GPIO wrappers `mem::forget`'d
+/// SSD1675. Pins are stolen through the `board!` map and the GPIO wrappers `mem::forget`'d
 /// so the real display Spim re-owns them.
 ///
 /// ⚠ UNVALIDATED on this panel: the raw bytes are logged over defmt so the OTP
@@ -1218,22 +1220,21 @@ fn halve_shake_rp_1680(mut lut: [u8; 153]) -> [u8; 153] {
 /// the reply comes back empty/garbage.
 #[cfg(feature = "ssd1680-driver")]
 async fn probe_otp_full_lut_1680() -> [u8; 153] {
-    use embassy_nrf::gpio::{AnyPin, Input, Level, Output, OutputDrive, Pull};
-    use embassy_nrf::peripherals;
+    use embassy_nrf::gpio::{Input, Level, Output, OutputDrive, Pull};
     use embassy_nrf::spim::{Config, Frequency, Spim};
 
-    // board.rs EPD pin numbers (port 1 = 32 + n).
-    const SCK: u8 = 8;
-    const MOSI: u8 = 27;
-    const BUSY: u8 = 14;
-    const RST: u8 = 11;
-    const DC: u8 = 12;
-    const CSN: u8 = 32 + 9;
+    // EPD pins come from the shared `board!` map; each use steals a fresh
+    // handle, as the SPI3 `Spim`s below are built and dropped repeatedly.
+    macro_rules! sp {
+        () => {
+            unsafe { embassy_nrf::Peripherals::steal() }
+        };
+    }
 
-    let mut cs = Output::new(unsafe { AnyPin::steal(CSN) }, Level::High, OutputDrive::Standard);
-    let mut dc = Output::new(unsafe { AnyPin::steal(DC) }, Level::Low, OutputDrive::Standard);
-    let mut rst = Output::new(unsafe { AnyPin::steal(RST) }, Level::Low, OutputDrive::Standard);
-    let busy = Input::new(unsafe { AnyPin::steal(BUSY) }, Pull::Down);
+    let mut cs = Output::new(board!(sp!(), epd_csn), Level::High, OutputDrive::Standard);
+    let mut dc = Output::new(board!(sp!(), epd_dc), Level::Low, OutputDrive::Standard);
+    let mut rst = Output::new(board!(sp!(), epd_reset), Level::Low, OutputDrive::Standard);
+    let busy = Input::new(board!(sp!(), epd_busy), Pull::Down);
 
     let mut cfg = Config::default();
     cfg.frequency = Frequency::M16;
@@ -1247,10 +1248,10 @@ async fn probe_otp_full_lut_1680() -> [u8; 153] {
     cs.set_low();
     {
         let mut tx = Spim::new_txonly(
-            unsafe { peripherals::SPI3::steal() },
+            board!(sp!(), epd_spi),
             Irqs1680,
-            unsafe { AnyPin::steal(SCK) },
-            unsafe { AnyPin::steal(MOSI) },
+            board!(sp!(), epd_sck),
+            board!(sp!(), epd_mosi),
             cfg.clone(),
         );
         dc.set_low();
@@ -1268,10 +1269,10 @@ async fn probe_otp_full_lut_1680() -> [u8; 153] {
     cs.set_low();
     {
         let mut tx = Spim::new_txonly(
-            unsafe { peripherals::SPI3::steal() },
+            board!(sp!(), epd_spi),
             Irqs1680,
-            unsafe { AnyPin::steal(SCK) },
-            unsafe { AnyPin::steal(MOSI) },
+            board!(sp!(), epd_sck),
+            board!(sp!(), epd_mosi),
             cfg.clone(),
         );
         dc.set_low();
@@ -1299,10 +1300,10 @@ async fn probe_otp_full_lut_1680() -> [u8; 153] {
     cs.set_low();
     {
         let mut tx = Spim::new_txonly(
-            unsafe { peripherals::SPI3::steal() },
+            board!(sp!(), epd_spi),
             Irqs1680,
-            unsafe { AnyPin::steal(SCK) },
-            unsafe { AnyPin::steal(MOSI) },
+            board!(sp!(), epd_sck),
+            board!(sp!(), epd_mosi),
             cfg.clone(),
         );
         dc.set_low();
@@ -1313,10 +1314,10 @@ async fn probe_otp_full_lut_1680() -> [u8; 153] {
     {
         // Same data pin, now clocked as input.
         let mut rx = Spim::new_rxonly(
-            unsafe { peripherals::SPI3::steal() },
+            board!(sp!(), epd_spi),
             Irqs1680,
-            unsafe { AnyPin::steal(SCK) },
-            unsafe { AnyPin::steal(MOSI) },
+            board!(sp!(), epd_sck),
+            board!(sp!(), epd_mosi),
             cfg.clone(),
         );
         rx.read(&mut lut).await.ok();
@@ -1327,10 +1328,10 @@ async fn probe_otp_full_lut_1680() -> [u8; 153] {
     // Restore SPI3 to TX-only so the display Spim built next can transmit.
     {
         let restore = Spim::new_txonly(
-            unsafe { peripherals::SPI3::steal() },
+            board!(sp!(), epd_spi),
             Irqs1680,
-            unsafe { AnyPin::steal(SCK) },
-            unsafe { AnyPin::steal(MOSI) },
+            board!(sp!(), epd_sck),
+            board!(sp!(), epd_mosi),
             cfg,
         );
         core::mem::forget(restore);

@@ -73,6 +73,12 @@ use embassy_time::Timer;
 
 include!("nrf_clock_regs.rs");
 
+// Shared raw-to-mV battery formula and SX1262 status probe (also used by
+// `bin/hwtest.rs`, which cannot link the lib).
+include!("vbat_scale.rs");
+#[cfg(feature = "mesh")]
+include!("hw_probe.rs");
+
 /// `HFCLKSTAT.STATE` bit (16): 1 when the requested HFCLK source is
 /// the current source.  For HFXO requests, this means the crystal
 /// is running and the chip has switched to it.
@@ -184,12 +190,8 @@ pub async fn probe() -> HardwareInfo {
     let hfxo_ok = probe_hfxo().await;
     let lfxo_ok = probe_lfxo();
     let buzzer_pin_ok = probe_buzzer_pin();
-    let qwiic_sda_ok = probe_qwiic_pin_high("SDA", unsafe {
-        embassy_nrf::peripherals::P1_10::steal()
-    });
-    let qwiic_scl_ok = probe_qwiic_pin_high("SCL", unsafe {
-        embassy_nrf::peripherals::P1_11::steal()
-    });
+    let qwiic_sda_ok = probe_qwiic_pin_high("SDA", board!(steal_peripherals(), qwiic_sda));
+    let qwiic_scl_ok = probe_qwiic_pin_high("SCL", board!(steal_peripherals(), qwiic_scl));
     let battery_mv = probe_battery().await;
     let die_temp_c = probe_temperature().await;
     let lora_ok = probe_lora().await;
@@ -211,6 +213,14 @@ pub async fn probe() -> HardwareInfo {
 // Phase 5a silent peripheral probes
 // ---------------------------------------------------------------------------
 
+/// Fresh handle on every peripheral, used to pull individual pins out via
+/// `board!`.  Sound because each probe runs before the owning driver is built
+/// (see the per-probe `# Safety` notes) and drops its pin handle before
+/// returning.
+fn steal_peripherals() -> embassy_nrf::Peripherals {
+    unsafe { embassy_nrf::Peripherals::steal() }
+}
+
 /// Buzzer pin (P0_13) idles low through the 1 MΩ PCB pull-down.
 /// Reading high here means the pull-down is missing or the pin is
 /// shorted to VCC — the buzzer task would drive unpredictably.
@@ -222,7 +232,7 @@ pub async fn probe() -> HardwareInfo {
 /// builds its `Buzzer` only after `factory_test::probe()` returns.
 fn probe_buzzer_pin() -> bool {
     use embassy_nrf::gpio::{Input, Pull};
-    let pin = unsafe { embassy_nrf::peripherals::P0_13::steal() };
+    let pin = board!(steal_peripherals(), buzzer);
     let input = Input::new(pin, Pull::None);
     let high = input.is_high();
     if high {
@@ -268,8 +278,9 @@ async fn probe_temperature() -> Option<i16> {
 /// `GetStatus` (0xC0).  PASS when the returned status byte's mode
 /// bits land in the valid `2..=6` range (i.e. the chip is not in
 /// the reserved 0 or 7 modes and didn't return all-ones / all-
-/// zeros).  Mirrors `bin/hwtest.rs::probe_lora` but uses the
-/// existing `mesh::sx1262::Irqs` so there's no double-binding of
+/// zeros).  The reset + GetStatus body is shared with `bin/hwtest.rs`
+/// (`hw_probe.rs`); this wrapper supplies the existing
+/// `mesh::sx1262::Irqs` so there's no double-binding of
 /// `SPI2 => spim::InterruptHandler<SPI2>`.
 ///
 /// Only run when built with the `mesh` feature; otherwise the
@@ -286,64 +297,24 @@ async fn probe_lora() -> bool {
     #[cfg(feature = "mesh")]
     {
         use embassy_nrf::Peri;
-        use embassy_nrf::gpio::{AnyPin, Input, Level, Output, OutputDrive, Pull};
-        use embassy_nrf::peripherals;
-        use embassy_nrf::spim::{self, Frequency, Spim};
+        use embassy_nrf::gpio::AnyPin;
+        use embassy_nrf::spim::Spim;
 
-        // Pin assignments from `fw::board::board!` — keep these in
-        // sync with that macro if the hardware changes.
-        let spi_periph: Peri<'static, peripherals::SPI2> = unsafe { peripherals::SPI2::steal() };
-        let sck: Peri<'static, AnyPin> = unsafe { peripherals::P1_13::steal() }.into();
-        let mosi: Peri<'static, AnyPin> = unsafe { peripherals::P0_03::steal() }.into();
-        let miso: Peri<'static, AnyPin> = unsafe { peripherals::P1_14::steal() }.into();
-        let rst: Peri<'static, AnyPin> = unsafe { peripherals::P0_30::steal() }.into();
-        let nss: Peri<'static, AnyPin> = unsafe { peripherals::P1_12::steal() }.into();
-        let busy: Peri<'static, AnyPin> = unsafe { peripherals::P0_28::steal() }.into();
-        let rf_sw: Peri<'static, AnyPin> = unsafe { peripherals::P0_04::steal() }.into();
+        // Pins come from the shared `board!` map.
+        let p = unsafe { embassy_nrf::Peripherals::steal() };
+        let spi_periph = board!(p, lora_spi);
+        let sck: Peri<'static, AnyPin> = board!(p, lora_sck).into();
+        let mosi: Peri<'static, AnyPin> = board!(p, lora_mosi).into();
+        let miso: Peri<'static, AnyPin> = board!(p, lora_miso).into();
 
-        let _rf_sw = Output::new(rf_sw, Level::Low, OutputDrive::Standard);
-        let mut rst_out = Output::new(rst, Level::Low, OutputDrive::Standard);
-        let mut nss_out = Output::new(nss, Level::High, OutputDrive::Standard);
-        let busy_in = Input::new(busy, Pull::None);
-
-        Timer::after_micros(500).await;
-        rst_out.set_high();
-
-        let mut ready = false;
-        for _ in 0..50u8 {
-            if !busy_in.is_high() {
-                ready = true;
-                break;
-            }
-            Timer::after_millis(1).await;
-        }
-        if !ready {
-            defmt::warn!("hwtest: LoRa BUSY stuck high after reset");
-            return false;
-        }
-
-        let mut spi_cfg = spim::Config::default();
-        spi_cfg.frequency = Frequency::M1;
-        let mut spi = Spim::new(spi_periph, crate::fw::mesh::sx1262::Irqs, sck, mosi, miso, spi_cfg);
-
-        let tx = [0xC0u8, 0x00];
-        let mut rx = [0u8; 2];
-        nss_out.set_low();
-        let r = spi.transfer(&mut rx, &tx).await;
-        nss_out.set_high();
-
-        match r {
-            Ok(()) => {
-                let status = rx[1];
-                defmt::info!("hwtest: LoRa GetStatus = 0x{:02X}", status);
-                let mode = (status >> 4) & 0x07;
-                mode != 0 && mode != 7 && status != 0xFF
-            }
-            Err(_) => {
-                defmt::warn!("hwtest: LoRa SPI transfer failed");
-                false
-            }
-        }
+        sx1262_status_ok(
+            board!(p, lora_rf_sw).into(),
+            board!(p, lora_rst).into(),
+            board!(p, lora_nss).into(),
+            board!(p, lora_busy).into(),
+            |cfg| Spim::new(spi_periph, crate::fw::mesh::sx1262::Irqs, sck, mosi, miso, cfg),
+        )
+        .await
     }
     #[cfg(not(feature = "mesh"))]
     {
@@ -366,12 +337,12 @@ async fn probe_lora() -> bool {
 /// returns.  All three handles drop at end of this function.
 async fn probe_battery() -> Option<u16> {
     use embassy_nrf::gpio::{Level, Output, OutputDrive};
-    use embassy_nrf::peripherals;
     use embassy_nrf::saadc::{ChannelConfig, Config, Saadc};
 
-    let saadc = unsafe { peripherals::SAADC::steal() };
-    let vbat = unsafe { peripherals::P0_31::steal() };
-    let vbat_rd_pin = unsafe { peripherals::P0_07::steal() };
+    let p = steal_peripherals();
+    let saadc = p.SAADC;
+    let vbat = board!(p, vbat);
+    let vbat_rd_pin = board!(p, vbat_rd);
 
     // Enable the divider (vbat_rd low) and let the RC settle.
     let mut vbat_rd = Output::new(vbat_rd_pin, Level::Low, OutputDrive::Standard);
@@ -386,9 +357,8 @@ async fn probe_battery() -> Option<u16> {
     // Disable the divider so it doesn't bleed current after we drop.
     vbat_rd.set_high();
 
-    // Same formula as `fw::battery::BatteryMonitor::read_mv`:
-    //   3.6 V reference × gain factor × 3 (divider) ÷ 4096 (12-bit ADC).
-    let mv = ((raw * 10_800) / 4_096) as u16;
+    // Same formula as `fw::battery::BatteryMonitor::read_mv`.
+    let mv = vbat_raw_to_mv(raw);
     defmt::info!("hwtest: battery {} mV (raw={})", mv, raw);
     Some(mv)
 }

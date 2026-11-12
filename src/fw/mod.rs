@@ -1,4 +1,5 @@
 pub mod battery;
+#[macro_use]
 pub mod board;
 /// BORNPETS.CFG parser — overrides game balance thresholds from the USB-MSC
 /// partition. Game-only: it reads `crate::game` threshold types.
