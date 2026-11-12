@@ -707,6 +707,100 @@ static KBD_REDRAW: embassy_sync::signal::Signal<
     (),
 > = embassy_sync::signal::Signal::new();
 
+/// Per-loop sprite animation state shared by both panel loops (empty without
+/// the `game` feature).
+#[cfg(any(feature = "ssd1675-driver", feature = "ssd1680-driver"))]
+struct AnimState {
+    #[cfg(feature = "game")]
+    sprite_frame: u8,
+    // Last animation id observed by the sprite-frame advance.  When
+    // it changes, `sprite_frame` resets to 0 so each new animation
+    // starts at its first frame regardless of where the previous one
+    // left the counter.
+    #[cfg(feature = "game")]
+    last_anim_id: u8,
+}
+
+#[cfg(any(feature = "ssd1675-driver", feature = "ssd1680-driver"))]
+impl AnimState {
+    const fn new() -> Self {
+        Self {
+            #[cfg(feature = "game")]
+            sprite_frame: 0,
+            #[cfg(feature = "game")]
+            last_anim_id: 0xFF,
+        }
+    }
+
+    /// Advance the animation frame; call only when the sprite timer fired.
+    /// Anim-change detection lives in `render_frame`, just before the render,
+    /// so the reset is visible on the same frame as the change.
+    fn advance_sprite(&mut self, sprite_advance: bool) {
+        #[cfg(feature = "game")]
+        if sprite_advance {
+            let anim = bornhack_aegg::game::lifecycle::display_anim();
+            let kind = bornhack_aegg::game::lifecycle::pet_kind();
+            let count = bornhack_aegg::game::engine::anim_files::frame_count(kind, anim);
+            if count > 0 {
+                let next = self.sprite_frame + 1;
+                // During hatching, clamp to the last frame instead of wrapping.
+                let is_hatching = matches!(
+                    anim,
+                    bornhack_aegg::game::engine::DisplayAnim::Hatching { .. }
+                );
+                self.sprite_frame = if is_hatching {
+                    next.min(count - 1)
+                } else {
+                    next % count
+                };
+            }
+        }
+        #[cfg(not(feature = "game"))]
+        let _ = sprite_advance;
+    }
+}
+
+/// Clear the frame, render the game (when active) and the UI into `display`;
+/// returns the active screen.
+#[cfg(any(feature = "ssd1675-driver", feature = "ssd1680-driver"))]
+async fn render_frame<D>(display: &mut D, anim_state: &mut AnimState) -> u8
+where
+    D: embedded_graphics::draw_target::DrawTarget<Color = bornhack_aegg::EpdColor>
+        + bornhack_aegg::epd_driver::PlaneAccess,
+{
+    let _ = display.clear(bornhack_aegg::EpdColor::White);
+    let active_screen = DISPLAY_STATE.lock(|f| f.borrow().active_screen());
+
+    // ── Game cycle: update engine, render animation ────────────────
+    // Reset the sprite-frame counter on animation change *before*
+    // the render so the new anim shows frame 0 immediately rather
+    // than waiting for the next sprite-tick fire.
+    #[cfg(feature = "game")]
+    if active_screen == bornhack_aegg::SCREEN_GAME {
+        let anim = bornhack_aegg::game::lifecycle::display_anim();
+        let id = bornhack_aegg::game::engine::anim_files::anim_id_for(anim);
+        if id != anim_state.last_anim_id {
+            anim_state.last_anim_id = id;
+            anim_state.sprite_frame = 0;
+        }
+        bornhack_aegg::game::render(display, anim_state.sprite_frame).await;
+    }
+    #[cfg(not(feature = "game"))]
+    let _ = anim_state;
+
+    #[cfg(feature = "mesh")]
+    if active_screen == SCREEN_PM {
+        bornhack_aegg::PM_UNREAD.store(false, core::sync::atomic::Ordering::Relaxed);
+    }
+
+    let health_str = with_health!(|f| f.to_string());
+    let bat_str = battery::read_pct();
+    if draw_graphics(display, &health_str, &bat_str).is_err() {
+        health_err!(epd, "Failed to draw graphics");
+    }
+    active_screen
+}
+
 #[cfg(feature = "ssd1675-driver")]
 async fn display_loop(
     driver: &mut bornhack_aegg::fw::epd_1675_driver::Ssd1675Driver<'_>,
@@ -717,17 +811,11 @@ async fn display_loop(
         2,
     >,
 ) {
+    #[cfg(feature = "game")]
     use bornhack_aegg::EpdColor;
     use embassy_futures::select::{Either, select};
 
-    #[cfg(feature = "game")]
-    let mut sprite_frame: u8 = 0;
-    // Last animation id observed by the sprite-frame advance.  When
-    // it changes, `sprite_frame` resets to 0 so each new animation
-    // starts at its first frame regardless of where the previous one
-    // left the counter.
-    #[cfg(feature = "game")]
-    let mut last_anim_id: u8 = 0xFF;
+    let mut anim_state = AnimState::new();
 
     // Track the previously-rendered screen so we can promote the
     // first refresh after a screen switch to a full panel-clearing
@@ -803,37 +891,7 @@ async fn display_loop(
             bornhack_aegg::FULL_REFRESH_PENDING.store(true, core::sync::atomic::Ordering::Relaxed);
         }
 
-        {
-            use embedded_graphics::draw_target::DrawTarget;
-            let _ = driver.clear(EpdColor::White);
-        }
-        let active_screen = DISPLAY_STATE.lock(|f| f.borrow().active_screen());
-
-        // ── Game cycle: update engine, render animation ────────────────
-        // Reset the sprite-frame counter on animation change *before*
-        // the render so the new anim shows frame 0 immediately rather
-        // than waiting for the next sprite-tick fire.
-        #[cfg(feature = "game")]
-        if active_screen == bornhack_aegg::SCREEN_GAME {
-            let anim = bornhack_aegg::game::lifecycle::display_anim();
-            let id = bornhack_aegg::game::engine::anim_files::anim_id_for(anim);
-            if id != last_anim_id {
-                last_anim_id = id;
-                sprite_frame = 0;
-            }
-            bornhack_aegg::game::render(driver, sprite_frame).await;
-        }
-
-        #[cfg(feature = "mesh")]
-        if active_screen == SCREEN_PM {
-            bornhack_aegg::PM_UNREAD.store(false, core::sync::atomic::Ordering::Relaxed);
-        }
-
-        let health_str = with_health!(|f| f.to_string());
-        let bat_str = battery::read_pct();
-        if draw_graphics(driver, &health_str, &bat_str).is_err() {
-            health_err!(epd, "Failed to draw graphics");
-        }
+        let active_screen = render_frame(driver, &mut anim_state).await;
 
         // Screen switches and game menu open/close redraw the WHOLE frame
         // as a partial (mark every pixel dirty) rather than running a full
@@ -1007,30 +1065,7 @@ async fn display_loop(
 
         led::set_color(led::Rgb::RED, Duration::from_millis(50));
 
-        // Advance animation frame only when the sprite timer fired.
-        // Anim-change detection lives just before `render()` above so
-        // the reset is visible on the same frame as the change.
-        #[cfg(feature = "game")]
-        if sprite_advance {
-            let anim = bornhack_aegg::game::lifecycle::display_anim();
-            let kind = bornhack_aegg::game::lifecycle::pet_kind();
-            let count = bornhack_aegg::game::engine::anim_files::frame_count(kind, anim);
-            if count > 0 {
-                let next = sprite_frame + 1;
-                // During hatching, clamp to the last frame instead of wrapping.
-                let is_hatching = matches!(
-                    anim,
-                    bornhack_aegg::game::engine::DisplayAnim::Hatching { .. }
-                );
-                sprite_frame = if is_hatching {
-                    next.min(count - 1)
-                } else {
-                    next % count
-                };
-            }
-        }
-        #[cfg(not(feature = "game"))]
-        let _ = sprite_advance;
+        anim_state.advance_sprite(sprite_advance);
     }
 }
 
@@ -1061,10 +1096,7 @@ async fn display_loop_1680<D>(
     use bornhack_aegg::epd_driver::RefreshMode;
     use embassy_futures::select::{Either, select};
 
-    #[cfg(feature = "game")]
-    let mut sprite_frame: u8 = 0;
-    #[cfg(feature = "game")]
-    let mut last_anim_id: u8 = 0xFF;
+    let mut anim_state = AnimState::new();
 
     loop {
         // ── Battle animation takeover ──────────────────────────────────
@@ -1086,30 +1118,7 @@ async fn display_loop_1680<D>(
             continue;
         }
 
-        let _ = display.clear(bornhack_aegg::color::EpdColor::White);
-        let active_screen = DISPLAY_STATE.lock(|f| f.borrow().active_screen());
-
-        #[cfg(feature = "game")]
-        if active_screen == bornhack_aegg::SCREEN_GAME {
-            let anim = bornhack_aegg::game::lifecycle::display_anim();
-            let id = bornhack_aegg::game::engine::anim_files::anim_id_for(anim);
-            if id != last_anim_id {
-                last_anim_id = id;
-                sprite_frame = 0;
-            }
-            bornhack_aegg::game::render(display, sprite_frame).await;
-        }
-
-        #[cfg(feature = "mesh")]
-        if active_screen == SCREEN_PM {
-            bornhack_aegg::PM_UNREAD.store(false, core::sync::atomic::Ordering::Relaxed);
-        }
-
-        let health_str = with_health!(|f| f.to_string());
-        let bat_str = battery::read_pct();
-        if draw_graphics(display, &health_str, &bat_str).is_err() {
-            health_err!(epd, "Failed to draw graphics");
-        }
+        let active_screen = render_frame(display, &mut anim_state).await;
 
         // The SSD1680 de-ghosts on the non-blink delta, so screen switches use
         // the fast windowed delta too — consume any pending full-refresh request
@@ -1177,26 +1186,7 @@ async fn display_loop_1680<D>(
 
         led::set_color(led::Rgb::RED, Duration::from_millis(50));
 
-        #[cfg(feature = "game")]
-        if sprite_advance {
-            let anim = bornhack_aegg::game::lifecycle::display_anim();
-            let kind = bornhack_aegg::game::lifecycle::pet_kind();
-            let count = bornhack_aegg::game::engine::anim_files::frame_count(kind, anim);
-            if count > 0 {
-                let next = sprite_frame + 1;
-                let is_hatching = matches!(
-                    anim,
-                    bornhack_aegg::game::engine::DisplayAnim::Hatching { .. }
-                );
-                sprite_frame = if is_hatching {
-                    next.min(count - 1)
-                } else {
-                    next % count
-                };
-            }
-        }
-        #[cfg(not(feature = "game"))]
-        let _ = sprite_advance;
+        anim_state.advance_sprite(sprite_advance);
     }
 }
 
