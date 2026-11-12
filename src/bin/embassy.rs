@@ -32,7 +32,7 @@ use embassy_nrf::gpio::{Input, Level, Output, OutputDrive, Pull};
 use embassy_nrf::pac::wdt::vals::{Halt as WdtHalt, Sleep as WdtSleep};
 use embassy_nrf::pwm::SimplePwm;
 use embassy_nrf::wdt::{Config as WdtConfig, Watchdog};
-use embassy_time::Timer;
+use embassy_time::{Duration, Timer};
 use panic_probe as _;
 #[cfg(feature = "ssd1675-driver")]
 use ssd1675::UpdateMode;
@@ -107,28 +107,23 @@ async fn main(spawner: Spawner) {
 
     // ── LEDs ─────────────────────────────────────────────────────────────
     // Hoisted above the mesh stack so the led_task is already running when
-    // ContactStore::init wipes a legacy store; the wipe signals via the
-    // existing fw::led::set_led / LED_GREEN atomics.
-    let mut led_red = Output::new(board!(p, led_red), Level::High, OutputDrive::Standard);
-    let mut led_green = Output::new(board!(p, led_green), Level::High, OutputDrive::Standard);
-    let mut led_blue = Output::new(board!(p, led_blue), Level::High, OutputDrive::Standard);
-    led_red.set_low();
-    led_green.set_low();
-    led_blue.set_low();
-    Timer::after_millis(200).await;
-    led_red.set_high();
-    led_green.set_high();
-    led_blue.set_high();
-    Timer::after_millis(200).await;
-    spawner.must_spawn(led::led_task(led_red, led_green, led_blue));
+    // ContactStore::init wipes a legacy store and lights the LED.  PWM1 mixes
+    // the three channels (PWM0 is the buzzer).
+    spawner.must_spawn(led::led_task(SimplePwm::new_3ch(
+        p.PWM1,
+        board!(p, led_red),
+        board!(p, led_green),
+        board!(p, led_blue),
+        &led::pwm_config(),
+    )));
+    spawner.must_spawn(led::about_rainbow_task());
+    led::set_color(led::Rgb::WHITE, Duration::from_millis(200));
+    Timer::after_millis(400).await;
 
-    // Boot breadcrumb #1 — ORANGE 50% duty (red + green together).  Orange,
-    // not red, so the boot blink isn't confused with DFU mode's red blink.
-    // Keeps a steady "alive, booting" pulse while the rest of init runs (KV,
-    // watch, sprites, mesh, EPD).  Both colours share the same Duty50 phase so
-    // they're on/off in lockstep → orange.  Cleared at EPD init below.
-    led::set_led(&led::LED_RED, led::LedState::Duty50);
-    led::set_led(&led::LED_GREEN, led::LedState::Duty50);
+    // Boot breadcrumb #1 — steady orange while the rest of init runs (KV,
+    // watch, sprites, mesh, EPD).  Orange, not red, so it isn't confused
+    // with DFU mode's red blink.  Replaced at EPD init below.
+    led::set_color(led::Rgb::ORANGE, led::FOREVER);
 
     // ── Signed-channel CSPRNG seed ───────────────────────────────────────
     // Draw 32 bytes from the on-chip TRNG via direct register access
@@ -227,9 +222,7 @@ async fn main(spawner: Spawner) {
     // tri-color refresh + remaining task spawns finish.  This is the
     // longest dark phase in the original boot, ~13s, so a colour change
     // here gives users a "no, it's not stuck" signal partway through.
-    led::set_led(&led::LED_RED, led::LedState::Off);
-    led::set_led(&led::LED_GREEN, led::LedState::Off);
-    led::set_led(&led::LED_BLUE, led::LedState::Duty50);
+    led::set_color(led::Rgb::BLUE, led::FOREVER);
 
     // Boot-time full blank: clear both planes to white and push with the
     // tri-color waveform so red ink particles get cycled too.  Wipes any
@@ -429,6 +422,7 @@ async fn main(spawner: Spawner) {
         spawner.must_spawn(persister::run());
         spawner.must_spawn(bornhack_aegg::fw::mesh::contacts_screen::refresh_cache_task());
         spawner.must_spawn(bornhack_aegg::fw::mesh::contacts_screen::mutation_persister_task());
+        spawner.must_spawn(bornhack_aegg::fw::mesh::pm_inbox::pm_led_task());
         ContactStore::new().init().await;
 
         // Seed channel KV slots before the meshcore listener or BLE task
@@ -585,8 +579,8 @@ async fn main(spawner: Spawner) {
     // is in deep_sleep until the display task takes over.)
 
     // LEDs are initialised earlier (above the mesh stack) so the led_task is
-    // already running when the contact store needs to blink the green LED
-    // during a legacy-format wipe.
+    // already running when the contact store lights the green LED during a
+    // legacy-format wipe.
 
     // ── Buttons, NFC, buzzer, battery, clock ─────────────────────────────
     let mut button_rcvr = BTN_WATCH.receiver().unwrap();
@@ -650,11 +644,9 @@ async fn main(spawner: Spawner) {
     // ── Display loop + concurrent tasks ──────────────────────────────────
     defmt::info!("Entering main loop...");
 
-    // Boot breadcrumb #3 — single green pulse, then idle.  Tells the
+    // Boot breadcrumb #3 — single 500 ms green pulse, then idle.  Tells the
     // user the badge is past init and the screen carousel is live.
-    // `Duty50Once` auto-resets to Off after one 500 ms pulse.
-    led::set_led(&led::LED_BLUE, led::LedState::Off);
-    led::set_led(&led::LED_GREEN, led::LedState::Duty50Once);
+    led::set_color(led::Rgb::GREEN, Duration::from_millis(500));
     // Qwiic I2C bus (external connector, TWISPI0 + P1_10/P1_11).  Owned by a
     // dedicated `keyboard_task` so the optional I2C keyboard can be polled
     // independently of the (slow) e-paper display loop — a wedged I2C read
@@ -835,7 +827,6 @@ async fn display_loop(
         #[cfg(feature = "mesh")]
         if active_screen == SCREEN_PM {
             bornhack_aegg::PM_UNREAD.store(false, core::sync::atomic::Ordering::Relaxed);
-            led::set_led(&led::LED_BLUE, led::LedState::Off);
         }
 
         let health_str = with_health!(|f| f.to_string());
@@ -1014,7 +1005,7 @@ async fn display_loop(
             }
         };
 
-        led::set_led(&led::LED_RED, led::LedState::BlinkOnce);
+        led::set_color(led::Rgb::RED, Duration::from_millis(50));
 
         // Advance animation frame only when the sprite timer fired.
         // Anim-change detection lives just before `render()` above so
@@ -1112,7 +1103,6 @@ async fn display_loop_1680<D>(
         #[cfg(feature = "mesh")]
         if active_screen == SCREEN_PM {
             bornhack_aegg::PM_UNREAD.store(false, core::sync::atomic::Ordering::Relaxed);
-            led::set_led(&led::LED_BLUE, led::LedState::Off);
         }
 
         let health_str = with_health!(|f| f.to_string());
@@ -1185,7 +1175,7 @@ async fn display_loop_1680<D>(
             Either::Second(_) => false,
         };
 
-        led::set_led(&led::LED_RED, led::LedState::BlinkOnce);
+        led::set_color(led::Rgb::RED, Duration::from_millis(50));
 
         #[cfg(feature = "game")]
         if sprite_advance {

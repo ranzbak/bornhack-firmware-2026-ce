@@ -1026,6 +1026,12 @@ where
     Ok(())
 }
 
+/// True while the About screen is open.
+#[cfg(feature = "embassy-core")]
+pub fn about_active() -> bool {
+    with_display_state!(|state| state.current_screen().is_about())
+}
+
 fn draw_screen_main<D>(display: &mut D, _health_str: &str, bat_prc: &u8) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
@@ -1036,6 +1042,8 @@ where
         (s.is_about(), s.about_page())
     });
     if about {
+        #[cfg(feature = "embassy-core")]
+        fw::led::ABOUT_RAINBOW.signal(());
         return menu::draw_about(display, about_page);
     }
 
