@@ -79,79 +79,16 @@ pub enum ScreenError {
 
 #[cfg(feature = "embassy-core")]
 pub mod fw;
-// `fw::emoji` is pure embedded-graphics glyph rendering (no embassy/HAL deps)
-// and is shared with the `watch` face, which the simulator also compiles.
-// The simulator doesn't pull in the rest of `fw` (battery, board, radio, …),
-// so expose just this one submodule there to keep `crate::fw::emoji::*`
-// resolving. Guarded against `embassy-base` so the two `mod fw` blocks are
-// mutually exclusive.
-#[cfg(all(feature = "simulator", not(feature = "embassy-core")))]
-pub mod fw {
-    pub mod emoji;
-
-    /// Screen lock — shares the real firmware module so the padlock overlay and
-    /// lock state render identically in the simulator. The Cancel-hold toggle
-    /// lives in the firmware-only `fw::button`, so in the sim the lock just
-    /// stays inactive unless toggled programmatically.
-    #[path = "lock.rs"]
-    pub mod lock;
-
-    /// Companion text CLI — pure logic, compiled here so its unit tests run
-    /// on the host.
-    #[path = "mesh/cli.rs"]
-    pub mod cli;
-
-    /// `PETS.CFG` parser — the real firmware module. Only its `parse` half
-    /// compiles here (`load_and_install` is `embassy-core`-gated, and there
-    /// is no FAT12 partition off-badge), which is what the simulator needs to
-    /// install a roster from the repo's `assets/to-badge/PETS.CFG`. Without
-    /// it the sim would have no pets at all, since none are built in.
-    #[cfg(feature = "game")]
-    #[path = "pets_cfg.rs"]
-    pub mod pets_cfg;
-
-    /// `BORNPETS.CFG` overrides — the real firmware module; only the
-    /// `apply_overrides` half compiles here, which lets its unit tests run on
-    /// the host.
-    #[cfg(feature = "game")]
-    #[path = "bornpets_cfg.rs"]
-    pub mod bornpets_cfg;
-
-    /// Host-simulator stubs for the shared settings menu, which reads these EPD
-    /// tuning atomics/consts (`menu.rs`). The host has no e-paper panel, so the
-    /// state is inert — the menu's adjust actions still update the live value
-    /// but the `*_DIRTY` persist signals are `embassy-base`-gated in the real
-    /// `fw::epd`, so nothing is written. Values MUST mirror `src/fw/epd.rs`.
-    pub mod epd {
-        use core::sync::atomic::{AtomicBool, AtomicI8, AtomicU8};
-        pub const EPD_LUT_SPEED_MIN: u8 = 30;
-        pub static EPD_LUT_SPEED: AtomicU8 = AtomicU8::new(100);
-        pub const EPD_TEMP_BIAS_MIN: i8 = -50;
-        pub const EPD_TEMP_BIAS_MAX: i8 = 50;
-        pub const EPD_TEMP_BIAS_STEP: i8 = 5;
-        pub static EPD_TEMP_BIAS_C10: AtomicI8 = AtomicI8::new(0);
-        pub static EPD_VARIANT_IS_B: AtomicBool = AtomicBool::new(false);
-        pub static EPD_CUSTOM_LUT_ACTIVE: AtomicBool = AtomicBool::new(false);
-    }
-
-    /// Host-simulator stub: no Qwiic I2C bus off-badge, so the scan overlay is
-    /// never active, open/close are no-ops, and `draw` (only reached when
-    /// `is_active()` is true) never runs but must still type-check.
-    pub mod qwiic {
-        use embedded_graphics::draw_target::DrawTarget;
-        pub fn is_active() -> bool {
-            false
-        }
-        pub fn open() {}
-        pub fn close() {}
-        pub fn draw<D>(_display: &mut D) -> Result<(), D::Error>
-        where
-            D: DrawTarget<Color = crate::TriColor>,
-        {
-            Ok(())
-        }
-    }
-}
+/// Pure embedded-graphics emoji glyph rendering (no embassy/HAL deps); shared
+/// by `ui::draw_text`, the `watch` face and the simulator.
+pub mod emoji;
+/// Screen lock — padlock overlay + lock state. The Cancel-hold toggle lives in
+/// the firmware-only `fw::button`, so in the simulator the lock just stays
+/// inactive unless toggled programmatically.
+pub mod lock;
+/// Companion text CLI — pure logic, compiled on the host so its unit tests run.
+#[cfg(any(feature = "mesh", feature = "simulator"))]
+pub mod mesh_cli;
 #[cfg(feature = "game")]
 pub mod game;
 /// Unified EPD pixel colour (`EpdColor`; `TriColor` alias) shared by every panel
@@ -679,6 +616,7 @@ where
     }
 
     // Qwiic Scan: full-screen I2C bus-scanner overlay.
+    #[cfg(feature = "embassy-core")]
     if fw::qwiic::is_active() {
         return fw::qwiic::draw(display);
     }
@@ -755,8 +693,8 @@ where
     // overlay, so pairing still takes priority. Transient: shown for a few
     // seconds after each key touch while locked, then hidden (keys stay
     // locked) so the screen underneath stays readable.
-    if fw::lock::overlay_visible() {
-        fw::lock::draw(display)?;
+    if lock::overlay_visible() {
+        lock::draw(display)?;
     }
 
     // BLE pairing PIN overlay — drawn last so it appears on every screen,

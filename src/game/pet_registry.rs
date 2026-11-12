@@ -1,7 +1,7 @@
 //! Runtime pet roster.
 //!
 //! The roster comes entirely from the `PETS.CFG` manifest on the USB-MSC
-//! partition — there are no built-in pets.  See [`crate::fw::pets_cfg`].
+//! partition — there are no built-in pets.  See [`crate::game::pets_cfg`].
 //! A badge whose `PETS.CFG` is missing, empty or unreadable has an empty
 //! roster and no pet can be selected until the file is restored.
 //!
@@ -76,7 +76,7 @@ fn current() -> Option<&'static Registry> {
 /// out-of-range ids, duplicates and overflow past [`MAX_PETS`] are dropped; a
 /// repeated id renames the earlier entry rather than listing the pet twice.
 ///
-/// Call once at boot (see [`crate::fw::pets_cfg::load_and_install`]).  A
+/// Call once at boot (see [`crate::game::pets_cfg::load_and_install`]).  A
 /// second call is ignored.  There is no built-in roster: installing an empty
 /// slice — which is what a missing or unreadable `PETS.CFG` produces — leaves
 /// the badge with no selectable pets.

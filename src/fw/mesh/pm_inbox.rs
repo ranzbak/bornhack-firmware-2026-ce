@@ -829,7 +829,7 @@ where
                 // `emoji::draw_string` so emoji codepoints in the
                 // thread come out as monochrome icons instead of the
                 // font's missing-glyph indicator.
-                crate::fw::emoji::draw_string(
+                crate::emoji::draw_string(
                     display,
                     slice,
                     Point::new(BODY_X, row_y),

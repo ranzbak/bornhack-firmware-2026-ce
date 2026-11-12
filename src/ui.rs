@@ -260,7 +260,7 @@ pub fn draw_text<D>(
 where
     D: DrawTarget<Color = TriColor>,
 {
-    crate::fw::emoji::draw_string(display, text, position, style, text_style)
+    crate::emoji::draw_string(display, text, position, style, text_style)
 }
 
 // ---------------------------------------------------------------------------

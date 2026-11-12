@@ -614,7 +614,7 @@ where
             let text_bytes = text.as_bytes();
             for (s, e) in crate::text_wrap::word_wrap(text_bytes, chars_per_line) {
                 let slice = core::str::from_utf8(&text_bytes[s as usize..e as usize]).unwrap_or("");
-                crate::fw::emoji::draw_string(display, slice, Point::new(8, y), FONT, left)?;
+                crate::emoji::draw_string(display, slice, Point::new(8, y), FONT, left)?;
                 y += LH;
             }
         }

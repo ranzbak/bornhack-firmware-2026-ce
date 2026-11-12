@@ -10,7 +10,6 @@ pub mod ble;
 pub mod bonds;
 pub mod channel_browser;
 pub mod channels;
-pub mod cli;
 pub mod contacts;
 pub mod contacts_screen;
 pub mod device_identity;

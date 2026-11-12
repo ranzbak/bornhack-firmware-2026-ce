@@ -414,10 +414,10 @@ async fn main(spawner: Spawner) {
     #[cfg(feature = "game")]
     {
         let mode = bornhack_aegg::game::settings::load_mode_from_kv().await;
-        let _ = bornhack_aegg::fw::bornpets_cfg::load_and_install(mode).await;
+        let _ = bornhack_aegg::game::bornpets_cfg::load_and_install(mode).await;
         // Register custom pets from PETS.CFG (if any) before the game reads
         // the roster.  No file → built-in roster only.
-        bornhack_aegg::fw::pets_cfg::load_and_install().await;
+        bornhack_aegg::game::pets_cfg::load_and_install().await;
         spawner.must_spawn(bornhack_aegg::game::settings::persister_task());
         // Apply the persisted "game enabled" flag to the display state so a
         // previously disabled game screen stays hidden across reboot (default
@@ -616,7 +616,7 @@ async fn main(spawner: Spawner) {
     };
     spawner.must_spawn(battery_task(battery_monitor));
     // Drives the transient screen-lock padlock (5 s auto-hide, refresh on key).
-    spawner.must_spawn(bornhack_aegg::fw::lock::overlay_task());
+    spawner.must_spawn(bornhack_aegg::lock::overlay_task());
     spawner.must_spawn(minute_tick_task());
     #[cfg(feature = "mesh")]
     spawner.must_spawn(advert_ticker_task());

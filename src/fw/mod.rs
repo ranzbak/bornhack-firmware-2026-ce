@@ -1,14 +1,9 @@
 pub mod battery;
 #[macro_use]
 pub mod board;
-/// BORNPETS.CFG parser — overrides game balance thresholds from the USB-MSC
-/// partition. Game-only: it reads `crate::game` threshold types.
-#[cfg(feature = "game")]
-pub mod bornpets_cfg;
 pub mod button;
 pub mod buzzer;
 pub mod device_id;
-pub mod emoji;
 /// SSD1675 panel wiring + tri-colour OTP/partial refresh machinery.
 #[cfg(feature = "ssd1675-driver")]
 pub mod epd;
@@ -28,15 +23,9 @@ pub mod kv;
 pub mod qwiic;
 pub mod i2c_keyboard;
 pub mod led;
-/// Screen lock — Cancel-hold toggles a global input lock + red padlock overlay.
-pub mod lock;
 pub mod nfct;
 /// Buck/boost converter power-mode arbiter (`PS_SYNC` pin).
 pub mod power;
-/// PETS.CFG parser — registers custom pets from the USB-MSC partition.
-/// Game-only: it reads `crate::game` pet-registry types.
-#[cfg(feature = "game")]
-pub mod pets_cfg;
 pub mod storage;
 pub mod temperature;
 /// nRF52840 hardware TRNG register reader (`seed32`).

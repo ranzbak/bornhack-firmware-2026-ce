@@ -750,7 +750,7 @@ fn next_alarm_today(c: &super::clock::Clock) -> Option<(u8, u8)> {
 }
 
 /// Render a 13×13 red bell, centred at `(cx, cy)`, blitting the shared
-/// `fw::emoji::ATLAS_BELL` glyph in red instead of the default black.
+/// `emoji::ATLAS_BELL` glyph in red instead of the default black.
 ///
 /// Previously this function drew the bell from primitive shapes (circle
 /// dome + rectangles).  Now it shares the bitmap with in-message emoji
@@ -760,25 +760,25 @@ fn draw_bell<D>(display: &mut D, cx: i32, cy: i32) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    crate::fw::emoji::draw_emoji(
+    crate::emoji::draw_emoji(
         display,
-        crate::fw::emoji::ATLAS_BELL,
+        crate::emoji::ATLAS_BELL,
         Point::new(cx - 6, cy - 6),
         RED,
     )
 }
 
 /// Render a 13×13 red envelope, centred at `(cx, cy)`, blitting the
-/// shared `fw::emoji::ATLAS_ENVELOPE` glyph in red.  Same atlas bitmap
+/// shared `emoji::ATLAS_ENVELOPE` glyph in red.  Same atlas bitmap
 /// the in-message ✉ / 📧 / 📨 / 📩 codepoints use.
 #[cfg(feature = "mesh")]
 fn draw_envelope<D>(display: &mut D, cx: i32, cy: i32) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    crate::fw::emoji::draw_emoji(
+    crate::emoji::draw_emoji(
         display,
-        crate::fw::emoji::ATLAS_ENVELOPE,
+        crate::emoji::ATLAS_ENVELOPE,
         Point::new(cx - 6, cy - 6),
         RED,
     )

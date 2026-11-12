@@ -69,7 +69,7 @@ fn install_pets_from_repo_cfg() {
     const CFG: &[u8] = include_bytes!("../../assets/to-badge/PETS.CFG");
 
     let mut pets: heapless::Vec<PetDef, MAX_PETS> = heapless::Vec::new();
-    bornhack_aegg::fw::pets_cfg::parse(CFG, &mut pets);
+    bornhack_aegg::game::pets_cfg::parse(CFG, &mut pets);
     pet_registry::install(&pets);
 }
 

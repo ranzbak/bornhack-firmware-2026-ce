@@ -50,7 +50,8 @@ use static_cell::StaticCell;
 use trouble_host::prelude::*;
 
 use super::bonds::{BOND_CMD_CHANNEL, BondCmd, INITIAL_BONDS};
-use super::{channels, cli, contacts, msg_queue, settings};
+use super::{channels, contacts, msg_queue, settings};
+use crate::mesh_cli as cli;
 
 // ---------------------------------------------------------------------------
 // Interrupt bindings for MPSL + RNG

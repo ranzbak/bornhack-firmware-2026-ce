@@ -611,6 +611,7 @@ impl<const M: usize> DisplayState<M> {
         }
 
         // Qwiic Scan intercepts all input when active — any button closes it.
+        #[cfg(feature = "embassy-core")]
         if crate::fw::qwiic::is_active() {
             crate::fw::qwiic::close();
             crate::FULL_REFRESH_PENDING.store(true, core::sync::atomic::Ordering::Relaxed);
@@ -1877,6 +1878,7 @@ static SETTINGS_ITEMS: [MenuItem; SETTINGS_ITEMS_LEN] = [
     MenuItem {
         label: || "I2C Scan",
         kind: MenuItemKind::Action(|| {
+            #[cfg(feature = "embassy-core")]
             crate::fw::qwiic::open();
         }),
     },
