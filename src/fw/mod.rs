@@ -26,6 +26,8 @@ pub mod led;
 pub mod nfct;
 /// Buck/boost converter power-mode arbiter (`PS_SYNC` pin).
 pub mod power;
+/// Device-wide `"settings"` KV helpers + timezone and EPD tuning persistence.
+pub mod settings;
 pub mod storage;
 pub mod temperature;
 /// nRF52840 hardware TRNG register reader (`seed32`).
