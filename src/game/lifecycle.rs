@@ -126,10 +126,11 @@ async fn try_load() -> Option<GameState> {
             s.last_update_tick = 0;
             // Clock already known: catch up now. Otherwise `on_wall_clock_set`
             // does it when the clock first becomes known.
-            BOOT_SAVED_UNIX.store(s.saved_unix, Ordering::Relaxed);
+            let saved = s.saved_unix;
+            BOOT_SAVED_UNIX.store(saved, Ordering::Relaxed);
             if let Some(now) = crate::unix_now() {
                 let uptime_s = (crate::platform::uptime_ms() / 1000) as u32;
-                apply_boot_catch_up(&mut s, &CATCH_UP_DONE, s.saved_unix, now, uptime_s);
+                apply_boot_catch_up(&mut s, &CATCH_UP_DONE, saved, now, uptime_s);
             }
             defmt::info!(
                 "game: restored from flash (gen={} age={} upgraded={})",
