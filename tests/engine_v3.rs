@@ -797,3 +797,183 @@ mod update_minutes {
         assert_eq!((s.fullness, s.tick_rem, s.age_ticks), (f, rem, age));
     }
 }
+
+mod solver {
+    use bornhack_aegg::game::engine::advance::advance;
+    use bornhack_aegg::game::engine::needs::{MAX, NEEDS, P, edges};
+    use bornhack_aegg::game::engine::regime::rates;
+    use bornhack_aegg::game::engine::solver::seg_len;
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase};
+
+    fn pct(p: i32) -> u16 {
+        (p * P) as u16
+    }
+
+    /// Awake, sober, every need mid-band except fullness (40 %), no timers.
+    fn calm() -> GameState {
+        let mut s = GameState::new_egg(1, PetKind(0));
+        s.phase = Phase::Active;
+        s.is_sleeping = false;
+        s.fullness = pct(40);
+        s.hydration = pct(65);
+        s.energy = pct(80);
+        s.fun = pct(50);
+        s.dirt = pct(20);
+        s.booze = 0;
+        s.strain = pct(20);
+        s.fitness = pct(55);
+        s.weight = pct(50);
+        s.mood = MAX as u16;
+        s.health = pct(70);
+        s
+    }
+
+    #[test]
+    fn segment_stops_one_unit_before_a_threshold() {
+        let s = calm();
+        assert_eq!(seg_len(&s, 10_000), (40 * 655 - 38 * 655 - 1) / 54);
+    }
+
+    #[test]
+    fn timer_bounds_the_segment() {
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.injured_min = 7;
+        assert_eq!(seg_len(&s, 10_000), 7);
+    }
+
+    #[test]
+    fn pinned_level_is_ignored() {
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.is_sleeping = true;
+        s.energy = MAX as u16;
+        s.sleep_min = 700;
+        assert_eq!(seg_len(&s, 10_000), 20, "only the sleep timer bounds it");
+    }
+
+    #[test]
+    fn never_zero() {
+        let mut s = calm();
+        s.fullness = pct(38); // exactly on an edge, heading down
+        assert_eq!(seg_len(&s, 10_000), 1);
+        s.fullness = pct(38) + 1; // one unit above the edge
+        assert_eq!(seg_len(&s, 10_000), 1);
+        assert_eq!(seg_len(&calm(), 1), 1);
+    }
+
+    #[test]
+    fn dependence_and_diabetes_timers_use_ceil_division() {
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.booze = pct(50);
+        s.dependence_min = 1200 * 4 - 5; // 5 quarter-minutes left: 2 minutes
+        assert_eq!(seg_len(&s, 10_000), 2);
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.weight = pct(85);
+        s.diabetes_min = 4320 * 4 - 9; // 3 minutes
+        assert_eq!(seg_len(&s, 10_000), 3);
+    }
+
+    #[test]
+    fn leaving_timer_runs_in_half_minutes() {
+        let mut s = calm();
+        s.health = 0;
+        s.leaving_min = 720 * 2 - 3; // 2 minutes
+        assert_eq!(seg_len(&s, 10_000), 2);
+    }
+
+    fn sides(s: &GameState) -> Vec<i32> {
+        let e = edges();
+        let lv = [
+            s.fullness,
+            s.hydration,
+            s.energy,
+            s.fun,
+            s.dirt,
+            s.booze,
+            s.strain,
+            s.fitness,
+            s.weight,
+        ];
+        let mut out = Vec::new();
+        for n in 0..NEEDS {
+            for k in 0..e.len[n] as usize {
+                out.push((lv[n] as i32 - e.edges[n][k] as i32 * P).signum());
+            }
+        }
+        out
+    }
+
+    fn timers(s: &GameState) -> [u16; 11] {
+        [
+            s.rested_min,
+            s.injured_min,
+            s.groggy_min,
+            s.med_cd_min,
+            s.recovering_min,
+            s.junk_min,
+            s.insulin_min,
+            s.ozempic_min,
+            s.ozempic_cd_min,
+            s.rehab_min,
+            s.hangover_min,
+        ]
+    }
+
+    #[test]
+    fn segments_never_cross_an_edge_or_a_timer() {
+        let mut fresh = GameState::new_egg(7, PetKind(0));
+        fresh.phase = Phase::Active;
+        fresh.fitness = pct(65); // an egg's 60 % sits exactly on an edge: a one-minute segment
+        let mut hungry = calm();
+        hungry.fullness = pct(20);
+        let mut drunk = calm();
+        drunk.booze = pct(50);
+        drunk.hangover_min = 90;
+        let mut asleep = calm();
+        asleep.is_sleeping = true;
+        asleep.energy = MAX as u16;
+        asleep.injured_min = 900;
+        let mut heavy = calm();
+        heavy.weight = pct(85);
+        let mut dead = calm();
+        dead.health = 0;
+        for (name, s0) in [
+            ("fresh", fresh),
+            ("hungry", hungry),
+            ("drunk", drunk),
+            ("asleep", asleep),
+            ("heavy", heavy),
+            ("dead", dead),
+        ] {
+            let d = seg_len(&s0, 2000);
+            assert!(
+                (2..=2000).contains(&d),
+                "{name}: segment of {d} minutes is not a real segment"
+            );
+            let (r0, side0, t0) = (rates(&s0), sides(&s0), timers(&s0));
+            let mut s = s0.clone();
+            for minute in 0..d {
+                assert_eq!(
+                    rates(&s),
+                    r0,
+                    "{name}: rates changed at minute {minute} of {d}"
+                );
+                assert_eq!(
+                    sides(&s),
+                    side0,
+                    "{name}: edge crossed at minute {minute} of {d}"
+                );
+                for (a, b) in t0.iter().zip(timers(&s)) {
+                    assert!(
+                        *a == 0 || b > 0,
+                        "{name}: timer expired at minute {minute} of {d}"
+                    );
+                }
+                advance(&mut s, 1);
+            }
+        }
+    }
+}
