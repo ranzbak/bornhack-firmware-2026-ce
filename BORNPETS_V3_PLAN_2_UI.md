@@ -640,7 +640,7 @@ Spec 5.5: the row is still usable; the hint is a warning, not a lock. A suffix s
 The prediction is `preview`, so the marker is exactly what the dose would do.
 
 **Files:**
-- Modify: `src/game/modal.rs` (`draw_modal` 789, `Item`), `src/game/lifecycle.rs`, `src/game/engine/food.rs` (`label`: `Frikandel spec` → `Frikandel`).
+- Modify: `src/game/modal.rs` (`draw_modal` 789, `Item`), `src/game/lifecycle.rs`, `src/game/engine/food.rs` (`label` keeps `Frikandel spec`; full name `Frikandel speciaal` in the selected-row title — owner ruling, see ledger).
 - Modify: `GAME.md` ("Actions": the `!` and the risk title; the Frikandel name).
 - Test: `src/game/modal.rs` tests.
 
@@ -681,7 +681,7 @@ fn title_text(kind: ModalKind, selected: Option<Item>, stats: Option<&PetStats>)
 ```
 - [ ] **Step 2: run and see them fail.** `... --lib modal`.
 - [ ] **Step 3: implement.** `draw_modal` uses `row_text` and `title_text`.
-- [ ] **Step 4: update the docs.** `GAME.md` "Actions": the `!` marker, the risk title, `Frikandel`. Remove the v1 "(wait)" cooldown paragraph that plan 1 left.
+- [ ] **Step 4: update the docs.** `GAME.md` "Actions": the `!` marker, the risk title, the full name `Frikandel speciaal`. Remove the v1 "(wait)" cooldown paragraph that plan 1 left.
 - [ ] **Step 5: run them and see them pass.**
 - [ ] **Step 6: commit** `feat(game): menu rows warn what a dose would cause`.
 - [ ] **Step 7: V.**
@@ -843,7 +843,7 @@ Every new or renamed on-screen text in this plan, for the player's guide. Case a
 - **Menus** (Tasks 5, 7, 8, 9):
   - Stats menu: `View stats`, `Hint`, `Diary`, `Rolled stats`, `Friends`, `Cancel` (`Health status` removed);
   - row marker ` !`; title `risk: <what>`;
-  - food label `Frikandel` (was `Frikandel spec`);
+  - food label `Frikandel spec` kept (Dutch snack-bar shorthand); full name `Frikandel speciaal` in titles and toasts;
   - Battle picker title `Battle <w>W-<l>L`.
 - **Hint** (Task 9): title `<name> says` / `Your pet says`.
   - Line 1:
@@ -930,7 +930,7 @@ Every new or renamed on-screen text in this plan, for the player's guide. Case a
 - (b) The care score stays out of the page-2 footer until plan 8.
 - (c) The menu-hint form: ` !` plus `risk:` title instead of a suffix.
 - (d) The four corner banners are removed.
-- (e) `Frikandel spec` is renamed `Frikandel`.
+- (e) Owner: keep `Frikandel spec` — it is the Dutch snack `Frikandel speciaal`, a nod to the badge design's Dutch origin; show the full name where width allows.
 - (f) The strain mark on the Fit bar is dropped.
 
 **Type consistency:** checked `StatusLine`, `Word`, `Conditions`, `Cause`, `CauseQueue`, `Remedy`, `Subject`, `Ask`, `preview*`, `remedy_reason`, `price`, `live_view_open`, `IDLE_FRAME_TICKS` across the tasks that consume them. The Stats item lists are pinned per task: T5 adds Diary, T7 removes Health status, T9 adds Hint, and each test states the list at that point.
