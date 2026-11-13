@@ -107,6 +107,7 @@ pub enum Phase {
 pub const ONLYPETS_HOBBY_REWARD: u32 = 20;
 /// Grade (0..=2) the mini-game dose is given for a win or draw: the best one.
 /// The games report no finer result yet.
+// TODO(plan-1 task 10): pass the real grade; draws currently get grade 2 too.
 pub const MINIGAME_WIN_GRADE: u8 = 2;
 /// HAX earned for winning a mini-game.
 pub const MINIGAME_HAX_REWARD: u32 = 15;
@@ -337,9 +338,6 @@ pub struct GameState {
     pub cooldown_blackhole: u16,
     pub cooldown_nim: u16,
     pub cooldown_bornjeweled: u16,
-    /// Cooldown after completing "Only pets". Transient (not persisted),
-    /// same policy as the mini-game cooldowns above — rebooting mid-cooldown
-    /// just makes the action available again a little early.
 
     // Sleep.
     pub is_sleeping: bool,
@@ -691,6 +689,11 @@ impl GameState {
         self.start_action(Action::OnlyPets, None, PLAY_DURATION())
     }
 
+    /// Diabetic with the insulin window run out.
+    pub fn is_diabetic_unmedicated(&self) -> bool {
+        self.diabetic && self.insulin_min == 0
+    }
+
     /// Start a bath.
     pub fn wash(&mut self) -> bool {
         self.start_action(Action::Wash, None, PLAY_DURATION())
@@ -785,8 +788,8 @@ impl GameState {
 
     /// Award the mini-game win reward: HAX (when `money_enabled`) plus the
     /// per-game cooldown.  Starts only that game's cooldown so other
-    /// mini-games stay available — encourages variety.  Also bumps
-    /// hunger: playing burns calories.
+    /// mini-games stay available — encourages variety.  Also gives the
+    /// mini-game's fun dose (and costs a little energy).
     pub fn award_inspiration(&mut self, game: MiniGame) {
         if self.phase != Phase::Active {
             return;
@@ -993,9 +996,9 @@ pub struct PetStats {
     /// the "no friends yet" empty state itself.
     pub can_battle: bool,
 
-    /// Remaining action cooldowns in ticks (1 tick = 10 s).  0 = ready.
-    /// Mirrored from the matching `GameState` fields so the modal can
-    /// show the exact remaining time on a disabled menu row.
+    /// Remaining mini-game and Battle cooldowns in ticks (1 tick = 10 s).
+    /// 0 = ready. Mirrored from the matching `GameState` fields so the modal
+    /// can show the exact remaining time on a disabled menu row.
     pub cooldown_tictactoe: u16,
     pub cooldown_lightsout: u16,
     pub cooldown_blackhole: u16,

@@ -133,25 +133,28 @@ pub fn friend(s: &mut GameState, big: bool) {
 
 fn exercise(s: &mut GameState) {
     // Every multiplier looks at the pet as it was before the session.
-    let mut strain = lvl(t::DOSE_EXERCISE_STRAIN_PCT());
+    // i64 so absurd CFG multipliers cannot overflow; clamped before use.
+    let mut strain = lvl(t::DOSE_EXERCISE_STRAIN_PCT()) as i64;
+    let scale = |strain: i64, pct: u16| strain * pct as i64 / 100;
     if (s.fullness as i32) < needs::full_lo()
         || (s.energy as i32) < needs::energy_lo()
         || (s.hydration as i32) < needs::water_lo()
     {
-        strain = strain * t::DOSE_STRAIN_NEED_PCT() as i32 / 100;
+        strain = scale(strain, t::DOSE_STRAIN_NEED_PCT());
     }
     if s.rested_min > 0 {
-        strain = strain * t::DOSE_STRAIN_RESTED_PCT() as i32 / 100;
+        strain = scale(strain, t::DOSE_STRAIN_RESTED_PCT());
     }
     if s.fitness as i32 >= lvl(t::DOSE_STRAIN_FIT_MIN_PCT()) {
-        strain = strain * t::DOSE_STRAIN_FIT_PCT() as i32 / 100;
+        strain = scale(strain, t::DOSE_STRAIN_FIT_PCT());
     }
     if s.weight as i32 > needs::weight_hi() {
-        strain = strain * t::DOSE_STRAIN_HEAVY_PCT() as i32 / 100;
+        strain = scale(strain, t::DOSE_STRAIN_HEAVY_PCT());
     }
     if s.deprived {
-        strain = strain * t::DOSE_STRAIN_DEPRIVED_PCT() as i32 / 100;
+        strain = scale(strain, t::DOSE_STRAIN_DEPRIVED_PCT());
     }
+    let strain = strain.min(MAX as i64) as i32;
     bump(&mut s.strain, strain);
     bump(&mut s.energy, -lvl(t::DOSE_EXERCISE_ENERGY_PCT()));
     bump(&mut s.fullness, -lvl(t::DOSE_EXERCISE_FULL_PCT()));

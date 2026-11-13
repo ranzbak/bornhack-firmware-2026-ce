@@ -61,6 +61,20 @@ pub fn advance(s: &mut GameState, dt: u32) {
         }
     }
 
+    // Mini-game and Battle cooldowns (ticks) run down with time; no regime
+    // term reads them, so they never bound a segment (R20).
+    let spent = (dt as u64 * super::TICKS_PER_MINUTE as u64).min(u16::MAX as u64) as u16;
+    for c in [
+        &mut s.cooldown_battle,
+        &mut s.cooldown_tictactoe,
+        &mut s.cooldown_lightsout,
+        &mut s.cooldown_blackhole,
+        &mut s.cooldown_nim,
+        &mut s.cooldown_bornjeweled,
+    ] {
+        *c = c.saturating_sub(spent);
+    }
+
     // Slow counters, by the regime at the start.
     let (booze, weight, fit) = (s.booze as i32, s.weight as i32, s.fitness as i32);
     let (heavy, lean) = (lvl(t::DIABETES_WEIGHT_HI_PCT()), lvl(t::DIABETES_WEIGHT_LO_PCT()));

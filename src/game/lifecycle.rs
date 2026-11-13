@@ -271,7 +271,7 @@ pub fn cycle() -> Option<PetStats> {
 /// entirely whenever the condition was active.
 pub fn is_diabetic_unmedicated() -> bool {
     let state = unsafe { (*GAME.get()).as_ref() };
-    state.is_some_and(|s| s.diabetic && s.insulin_min == 0)
+    state.is_some_and(|s| s.is_diabetic_unmedicated())
 }
 
 /// Alcoholic and the rehab-protection window has lapsed — drives the

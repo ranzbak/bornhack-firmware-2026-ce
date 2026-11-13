@@ -89,11 +89,23 @@ fn new_egg_starts_inside_every_band() {
     assert_eq!(s.phase, Phase::Active);
 
     let inside = |v: u16, lo: i32, hi: i32| (lo..=hi).contains(&(v as i32));
-    assert!(inside(s.fullness, full_lo(), full_hi()), "fullness {}", s.fullness);
-    assert!(inside(s.hydration, water_lo(), water_hi()), "hydration {}", s.hydration);
+    assert!(
+        inside(s.fullness, full_lo(), full_hi()),
+        "fullness {}",
+        s.fullness
+    );
+    assert!(
+        inside(s.hydration, water_lo(), water_hi()),
+        "hydration {}",
+        s.hydration
+    );
     assert!(s.energy as i32 >= energy_lo(), "energy {}", s.energy);
     assert!(inside(s.fun, fun_lo(), fun_hi()), "fun {}", s.fun);
-    assert!(inside(s.weight, weight_lo(), weight_hi()), "weight {}", s.weight);
+    assert!(
+        inside(s.weight, weight_lo(), weight_hi()),
+        "weight {}",
+        s.weight
+    );
     assert!((s.dirt as i32) < dirt_hi(), "dirt {}", s.dirt);
     assert!(s.fitness as i32 >= fit_lo(), "fitness {}", s.fitness);
 }
@@ -202,7 +214,16 @@ mod regime_rates {
     #[test]
     fn thirst_steps_with_booze_band() {
         let mut s = awake();
-        for (b, want) in [(0, 100), (14, 100), (15, 110), (39, 110), (40, 125), (69, 125), (70, 140), (100, 140)] {
+        for (b, want) in [
+            (0, 100),
+            (14, 100),
+            (15, 110),
+            (39, 110),
+            (40, 125),
+            (69, 125),
+            (70, 140),
+            (100, 140),
+        ] {
             s.booze = if b == 100 { 65535 } else { pct(b) };
             assert_eq!(thirst_pct(&s), want, "booze {b}");
         }
@@ -271,9 +292,16 @@ mod health_terms {
         assert_eq!(k.DMG_FULL_LOW_PM, 20);
         let dmg = |t: &Thresholds| {
             [
-                t.DMG_FULL_LOW_PM, t.DMG_FULL_HIGH_PM, t.DMG_WATER_LOW_PM, t.DMG_WATER_HIGH_PM,
-                t.DMG_ENERGY_PM, t.DMG_BOOZE_PM, t.DMG_MOOD_PM, t.DMG_DIRT_PM,
-                t.DMG_WEIGHT_HIGH_PM, t.DMG_WEIGHT_LOW_PM,
+                t.DMG_FULL_LOW_PM,
+                t.DMG_FULL_HIGH_PM,
+                t.DMG_WATER_LOW_PM,
+                t.DMG_WATER_HIGH_PM,
+                t.DMG_ENERGY_PM,
+                t.DMG_BOOZE_PM,
+                t.DMG_MOOD_PM,
+                t.DMG_DIRT_PM,
+                t.DMG_WEIGHT_HIGH_PM,
+                t.DMG_WEIGHT_LOW_PM,
             ]
         };
         for (a, b) in dmg(&c).iter().zip(dmg(&k)) {
@@ -317,7 +345,11 @@ mod advance_wake {
         let mut s = calm();
         advance(&mut s, 1);
         assert_eq!(s.fullness, pct(60) - 54);
-        assert_eq!(s.hydration, pct(65) - 45 * 110 / 100, "booze 30 %: thirst x1.1");
+        assert_eq!(
+            s.hydration,
+            pct(65) - 45 * 110 / 100,
+            "booze 30 %: thirst x1.1"
+        );
         assert_eq!(s.energy, pct(80) - 36);
         assert_eq!(s.fun, pct(50) - 40);
         assert_eq!(s.dirt, pct(20) + 8);
@@ -326,7 +358,11 @@ mod advance_wake {
         assert_eq!(s.fitness, pct(55) - 4);
         assert_eq!(s.weight, pct(50) - 1);
         assert_eq!(s.mood, MAX as u16);
-        assert_eq!(s.health, pct(70) + 14, "below the ceiling and in a good mood");
+        assert_eq!(
+            s.health,
+            pct(70) + 14,
+            "below the ceiling and in a good mood"
+        );
         assert_eq!(s.care_awake_min, 1);
         assert_eq!(s.care_good_min, 1);
     }
@@ -478,7 +514,10 @@ mod advance_wake {
         s.booze = 0;
         s.dependence_min = 400;
         advance(&mut s, 40);
-        assert_eq!(s.dependence_min, 360, "quarter-minutes: minus 1 per sober minute");
+        assert_eq!(
+            s.dependence_min, 360,
+            "quarter-minutes: minus 1 per sober minute"
+        );
     }
 
     #[test]
@@ -636,10 +675,27 @@ mod split_invariance {
     fn snap(s: &GameState) -> Snapshot {
         (
             [
-                s.fullness, s.hydration, s.energy, s.fun, s.dirt, s.booze, s.strain, s.fitness,
-                s.weight, s.mood, s.health, s.sleep_min, s.oversleep_min, s.reversal_min,
+                s.fullness,
+                s.hydration,
+                s.energy,
+                s.fun,
+                s.dirt,
+                s.booze,
+                s.strain,
+                s.fitness,
+                s.weight,
+                s.mood,
+                s.health,
+                s.sleep_min,
+                s.oversleep_min,
+                s.reversal_min,
             ],
-            [s.dependence_min, s.diabetes_min, s.leaving_min, s.care_awake_min],
+            [
+                s.dependence_min,
+                s.diabetes_min,
+                s.leaving_min,
+                s.care_awake_min,
+            ],
         )
     }
 
@@ -730,7 +786,13 @@ mod carried_from_task_4 {
         let cfg = b"CEILING_STEP0_PCT=500\nCEILING_STEP1_PCT=500\nCEILING_STEP2_PCT=500\nCEILING_STEP3_PCT=500\nCEILING_DIABETIC_PCT=500\n";
         assert_eq!(apply_overrides(&mut t, cfg), 5);
         assert_eq!(
-            [t.CEILING_STEP0_PCT, t.CEILING_STEP1_PCT, t.CEILING_STEP2_PCT, t.CEILING_STEP3_PCT, t.CEILING_DIABETIC_PCT],
+            [
+                t.CEILING_STEP0_PCT,
+                t.CEILING_STEP1_PCT,
+                t.CEILING_STEP2_PCT,
+                t.CEILING_STEP3_PCT,
+                t.CEILING_DIABETIC_PCT
+            ],
             [100; 5]
         );
     }
@@ -773,7 +835,11 @@ mod update_minutes {
         assert_eq!(a.fullness, b.fullness);
         assert_eq!(a.energy, b.energy);
         assert_eq!(a.age_ticks, b.age_ticks);
-        assert!(b.fullness < (60 * P) as u16, "pet did not age: {}", b.fullness);
+        assert!(
+            b.fullness < (60 * P) as u16,
+            "pet did not age: {}",
+            b.fullness
+        );
     }
 
     #[test]
@@ -784,7 +850,10 @@ mod update_minutes {
         let before = s.fullness;
         s.update(6);
         assert_eq!(s.tick_rem, 0);
-        assert!(s.fullness < before, "one whole minute must have been applied");
+        assert!(
+            s.fullness < before,
+            "one whole minute must have been applied"
+        );
         assert_eq!(s.age_ticks, 6);
     }
 
@@ -839,7 +908,11 @@ mod solver {
         let mut s = calm();
         s.fullness = pct(60);
         s.injured_min = 7;
-        assert_eq!(seg_len(&s, 10_000), 6, "injured feeds mood: one minute early (R20)");
+        assert_eq!(
+            seg_len(&s, 10_000),
+            6,
+            "injured feeds mood: one minute early (R20)"
+        );
     }
 
     #[test]
@@ -849,7 +922,11 @@ mod solver {
         s.is_sleeping = true;
         s.energy = MAX as u16;
         s.sleep_min = 700;
-        assert_eq!(seg_len(&s, 10_000), 19, "only the self-wake timer bounds it, one minute early");
+        assert_eq!(
+            seg_len(&s, 10_000),
+            19,
+            "only the self-wake timer bounds it, one minute early"
+        );
     }
 
     #[test]
@@ -1054,7 +1131,10 @@ mod solver {
             for _ in 0..d {
                 advance(&mut stepped, 1);
             }
-            assert_eq!(closed, stepped, "{name}: segment of {d} minutes differs from stepping");
+            assert_eq!(
+                closed, stepped,
+                "{name}: segment of {d} minutes differs from stepping"
+            );
         }
     }
 
@@ -1226,7 +1306,12 @@ mod zone_check {
     #[test]
     fn update_equals_stepping_near_every_line() {
         let mut cases: Vec<(&str, GameState)> = Vec::new();
-        for (name, mood) in [("mood 60+", 60), ("mood 40+", 40), ("mood 20+", 20), ("mood 80+", 80)] {
+        for (name, mood) in [
+            ("mood 60+", 60),
+            ("mood 40+", 40),
+            ("mood 20+", 20),
+            ("mood 80+", 80),
+        ] {
             let mut s = calm();
             s.fun = 0;
             s.mood = pct(mood) + 30;
@@ -1873,9 +1958,29 @@ mod doses_care {
         assert!(s.medicate());
         finish(&mut s, MEDICATE_DURATION());
         assert_eq!(s.insulin_min, 480);
-        // The banner reads `diabetic && insulin_min == 0`.
-        assert!(s.diabetic && s.insulin_min != 0);
+        assert!(!s.is_diabetic_unmedicated());
+        s.insulin_min = 0;
+        assert!(s.is_diabetic_unmedicated());
+        s.insulin_min = 480;
         assert!(!s.medicate(), "inside the window");
+    }
+
+    #[test]
+    fn heal_at_exactly_80_percent_health_still_mends() {
+        let mut s = pet();
+        s.health = pct(80) as u16;
+        assert!(s.heal());
+        finish(&mut s, HEAL_DURATION());
+        assert_eq!(s.health as i32, pct(90));
+        assert_eq!(s.booze, 0);
+    }
+
+    #[test]
+    fn sleep_at_exactly_50_percent_energy_is_a_nap() {
+        let mut s = pet();
+        s.energy = pct(50) as u16;
+        assert!(s.sleep());
+        assert!(!s.night);
     }
 
     #[test]
@@ -1976,5 +2081,30 @@ mod doses_care {
         s.injured_min = 0;
         assert!(s.play());
         assert!(!s.is_sleeping);
+    }
+}
+
+mod cooldown_countdown {
+    use bornhack_aegg::game::engine::thresholds::HATCHING_TICKS;
+    use bornhack_aegg::game::engine::{GameState, PetKind};
+
+    #[test]
+    fn minigame_cooldown_counts_down_over_time() {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        s.tick_rem = 0;
+        s.cooldown_nim = 100;
+        s.cooldown_battle = 50;
+        s.cooldown_tictactoe = 30;
+        let t0 = s.last_update_tick;
+        s.update(t0 + 18); // 3 minutes
+        assert_eq!(s.cooldown_nim, 82);
+        assert_eq!(s.cooldown_battle, 32);
+        assert_eq!(s.cooldown_tictactoe, 12);
+        assert_eq!(s.cooldown_lightsout, 0);
+        s.update(t0 + 120); // 20 minutes: all done
+        assert_eq!(s.cooldown_nim, 0);
+        assert_eq!(s.cooldown_battle, 0);
+        assert_eq!(s.cooldown_tictactoe, 0);
     }
 }
