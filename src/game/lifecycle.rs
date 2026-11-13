@@ -424,7 +424,7 @@ pub fn diary() -> super::diary::Diary {
     unsafe { (*DIARY.get()).clone() }
 }
 
-fn clear_diary() {
+pub(super) fn clear_diary() {
     unsafe { (*DIARY.get()).clear() }
 }
 

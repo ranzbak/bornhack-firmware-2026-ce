@@ -1153,7 +1153,7 @@ where
     let age_hours = stats.age_ticks / 360;
     let age_days = age_hours / 24;
     // Footer baseline; moved down 8 px so it no longer collides with
-    // the bottom of the last stat bar (which now occupies y ≤ 122).
+    // the bottom of the page-2 condition row (the bars end at y = 107).
     let footer_y = MARGIN + MODAL_H as i32 - BORDER as i32 - 6;
     let mut footer: heapless::String<32> = heapless::String::new();
     // `*` after the name when BPETS_V3.CFG overrode at least one

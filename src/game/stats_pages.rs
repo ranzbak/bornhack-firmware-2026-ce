@@ -182,4 +182,50 @@ mod tests {
         let st = g.stats(0);
         assert_eq!(bars(Page::Body, &st)[0].cap, Some(80));
     }
+
+    /// Row `row` of the Needs page after `set` changed the pet.
+    fn needs_row(row: usize, set: impl FnOnce(&mut GameState)) -> BarRow {
+        let mut g = pet();
+        set(&mut g);
+        bars(Page::Needs, &g.stats(0))[row]
+    }
+
+    fn lvl(p: i32) -> u16 {
+        (p * crate::game::engine::needs::P) as u16
+    }
+
+    #[test]
+    fn needs_rows_turn_red_on_the_right_side() {
+        // Classic: Full 38..78, Water 38..83, Energy 33.., Fun 33..73, Clean 42.. (dirt 58).
+        // Each row: the band edges are fine, one step past them is red.
+        let full = |p| needs_row(0, |g| g.fullness = lvl(p)).red;
+        assert_eq!(
+            (full(37), full(38), full(78), full(79)),
+            (true, false, false, true)
+        );
+        let water = |p| needs_row(1, |g| g.hydration = lvl(p)).red;
+        assert_eq!(
+            (water(37), water(38), water(83), water(84)),
+            (true, false, false, true)
+        );
+        // Energy has no upper edge: full energy is fine.
+        let energy = |p| needs_row(2, |g| g.energy = lvl(p));
+        assert_eq!(
+            (energy(32).red, energy(33).red, energy(100).red),
+            (true, false, false)
+        );
+        assert_eq!(energy(100).hi, None);
+        let fun = |p| needs_row(3, |g| g.fun = lvl(p)).red;
+        assert_eq!(
+            (fun(32), fun(33), fun(73), fun(74)),
+            (true, false, false, true)
+        );
+        // Clean is 100 - dirt: dirtier than 58 % is red, spotless is fine.
+        let clean = |dirt| needs_row(4, |g| g.dirt = lvl(dirt));
+        assert_eq!(
+            (clean(59).red, clean(58).red, clean(0).red),
+            (true, false, false)
+        );
+        assert_eq!(clean(59).pct, 41);
+    }
 }

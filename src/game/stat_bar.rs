@@ -49,17 +49,27 @@ pub fn draw_stat_bar<D>(
 where
     D: DrawTarget<Color = TriColor>,
 {
-    // Inline percentage uses the bold variant of FONT_7X13 — bolder
-    // glyphs survive the half-and-half clipping at the fill boundary
-    // with better legibility than the regular weight.
-    let label_font = crate::ui::TEXT_BLACK;
-    let pct_font_black = crate::ui::TEXT_BOLD_BLACK;
-    let pct_font_white = crate::ui::TEXT_BOLD_WHITE;
-    let left_top = crate::ui::TOP_LEFT;
-    let centred = crate::ui::CENTERED;
+    draw_bar_body(display, label, pct, label_pos, bar_origin, bar_size, fill_color)?;
+    draw_bar_pct(display, pct, bar_origin, bar_size)
+}
 
+/// The label, the outline and the fill of a bar (everything but the inline
+/// percentage).
+fn draw_bar_body<D>(
+    display: &mut D,
+    label: &str,
+    pct: u8,
+    label_pos: Point,
+    bar_origin: Point,
+    bar_size: Size,
+    fill_color: TriColor,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
     // Label, left of the bar.
-    Text::with_text_style(label, label_pos, label_font, left_top).draw(display)?;
+    Text::with_text_style(label, label_pos, crate::ui::TEXT_BLACK, crate::ui::TOP_LEFT)
+        .draw(display)?;
 
     // Bar outline.
     Rectangle::new(bar_origin, bar_size)
@@ -78,6 +88,28 @@ where
         .into_styled(PrimitiveStyle::with_fill(fill_color))
         .draw(display)?;
     }
+    Ok(())
+}
+
+/// The inline percentage, drawn over the fill and the unfilled part.
+fn draw_bar_pct<D>(
+    display: &mut D,
+    pct: u8,
+    bar_origin: Point,
+    bar_size: Size,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    // Inline percentage uses the bold variant of FONT_7X13 — bolder
+    // glyphs survive the half-and-half clipping at the fill boundary
+    // with better legibility than the regular weight.
+    let pct_font_black = crate::ui::TEXT_BOLD_BLACK;
+    let pct_font_white = crate::ui::TEXT_BOLD_WHITE;
+    let centred = crate::ui::CENTERED;
+    let pct = pct.min(100);
+    let inner_w = bar_size.width.saturating_sub(2);
+    let fill_w = (pct as u32 * inner_w) / 100;
 
     // Percentage text — drawn twice with mutually-exclusive clip rects.
     let mut pct_str: heapless::String<8> = heapless::String::new();
@@ -123,7 +155,8 @@ pub fn tick_x(bar_x: i32, bar_w: u32, pct: u8) -> i32 {
 }
 
 /// [`draw_stat_bar`] for a [`BarRow`]: red fill when the row is out of its
-/// band, plus one tick for each of the band edges and the cap.
+/// band, plus one tick for each of the band edges and the cap. The ticks are
+/// drawn before the inline percentage.
 pub fn draw_band_bar<D>(
     display: &mut D,
     row: &BarRow,
@@ -135,7 +168,7 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     let fill = if row.red { RED } else { BLACK };
-    draw_stat_bar(display, row.label, row.pct, label_pos, bar_origin, bar_size, fill)?;
+    draw_bar_body(display, row.label, row.pct, label_pos, bar_origin, bar_size, fill)?;
 
     let inner_w = bar_size.width.saturating_sub(2);
     let fill_end = bar_origin.x + 1 + (row.pct.min(100) as u32 * inner_w / 100) as i32;
@@ -156,7 +189,8 @@ where
             .into_styled(black)
             .draw(display)?;
     }
-    Ok(())
+    // The percentage goes last, so no tick cuts through its glyphs.
+    draw_bar_pct(display, row.pct, bar_origin, bar_size)
 }
 
 #[cfg(test)]
@@ -203,5 +237,53 @@ mod tests {
         assert_eq!(c.get(cx, origin.y + 12), BLACK);
         let lx = tick_x(origin.x, size.width, 10);
         assert_eq!(c.get(lx, origin.y + 4), WHITE);
+    }
+
+    /// A canvas that logs the order its pixels are drawn in.
+    struct Logged {
+        canvas: Canvas,
+        order: std::vec::Vec<(i32, i32)>,
+    }
+
+    impl OriginDimensions for Logged {
+        fn size(&self) -> Size {
+            self.canvas.size()
+        }
+    }
+
+    impl DrawTarget for Logged {
+        type Color = TriColor;
+        type Error = core::convert::Infallible;
+
+        fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+        where
+            I: IntoIterator<Item = Pixel<TriColor>>,
+        {
+            for Pixel(p, c) in pixels {
+                self.order.push((p.x, p.y));
+                self.canvas.draw_iter(core::iter::once(Pixel(p, c)))?;
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_percentage_is_drawn_after_the_ticks() {
+        // A tick at 50 % lands on the centre of "50%". Colours cannot tell the
+        // tick from a glyph of the same colour, so the draw order is asserted:
+        // the tick's top stub is written before the last pixel of the text.
+        let row = BarRow { label: "Fun", pct: 50, lo: Some(50), hi: None, cap: None, red: false };
+        let origin = Point::new(76, 40);
+        let size = Size::new(60, 15);
+        let mut d = Logged { canvas: Canvas::new(), order: std::vec::Vec::new() };
+        draw_band_bar(&mut d, &row, Point::new(16, 41), origin, size).unwrap();
+        let tx = tick_x(origin.x, size.width, 50);
+        let stub = d.order.iter().rposition(|&p| p == (tx, origin.y)).unwrap();
+        let in_text = |&(x, y): &(i32, i32)| (tx - 9..tx + 10).contains(&x) && (43..58).contains(&y);
+        let last_text = d.order.iter().rposition(in_text).unwrap();
+        assert!(stub < last_text, "stub {stub} text {last_text}");
+        // The glyph pixels are still there.
+        let area = Rectangle::new(Point::new(tx - 9, 43), Size::new(19, 14));
+        assert!(d.canvas.any(area, WHITE) && d.canvas.any(area, BLACK));
     }
 }

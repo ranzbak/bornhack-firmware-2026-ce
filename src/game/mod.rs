@@ -1069,6 +1069,9 @@ impl Drop for TestState {
         ALCOHOLISM_ALERT.clear();
         lifecycle::clear_sleep_anim_for_test();
         battle_view::reset_for_test();
+        diary_view::close();
+        modal::close();
+        lifecycle::clear_diary();
     }
 }
 

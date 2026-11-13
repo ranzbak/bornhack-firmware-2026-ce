@@ -106,6 +106,9 @@ mod tests {
         let mut s = GameState::new_egg(7, PetKind(0));
         s.phase = Phase::Active;
         crate::game::lifecycle::set_state_for_test(Some(s));
+        for i in 0..4 {
+            crate::game::lifecycle::log_cause(crate::game::engine::causes::Cause::Groggy, i);
+        }
         super::open();
         assert!(super::is_active());
         assert_eq!(super::page(), 0);
