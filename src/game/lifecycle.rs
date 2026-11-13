@@ -393,6 +393,14 @@ pub fn cycle() -> Option<PetStats> {
     Some(stats)
 }
 
+/// Ticks left in the running action (cheap read, no update; 0 when none or
+/// before a game exists). The display waiter uses it to pace action frames
+/// without calling [`cycle`], which updates the engine.
+pub fn action_ticks_remaining() -> u8 {
+    let state = unsafe { (*GAME.get()).as_ref() };
+    state.map_or(0, |s| s.action_ticks_remaining)
+}
+
 /// The status line under the pet (cheap read, no update, like
 /// [`display_anim`]). `None` before a game exists.
 pub fn status_line() -> Option<super::engine::status::StatusLine> {

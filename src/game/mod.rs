@@ -31,6 +31,7 @@ pub mod modal;
 pub mod nav;
 pub mod nim;
 pub mod bornpets_cfg;
+pub mod pacing;
 pub mod pet_registry;
 pub mod pets_cfg;
 pub mod pet_select;
@@ -413,6 +414,13 @@ pub(crate) fn last_reason_for_test() -> engine::doses::Reason {
     )
 }
 
+/// True while a view whose numbers drift by themselves is on screen. Such a
+/// view is refreshed at least once per idle frame (display pacing, not
+/// engine polling).
+pub fn live_view_open() -> bool {
+    modal::live_modal_view_open()
+}
+
 /// Next tick the frame loop must wake for UI-only timed state, whatever the
 /// engine says: a toast or alert is cleared by the first draw after its
 /// minimum time, and the sleep animation floor ends at a fixed tick. Without
@@ -427,6 +435,9 @@ pub fn next_ui_deadline_tick() -> u32 {
     let mut next = lifecycle::sleep_anim_deadline_tick();
     if overlay {
         next = next.min(now.saturating_add(1));
+    }
+    if live_view_open() {
+        next = next.min(now.saturating_add(pacing::IDLE_FRAME_TICKS));
     }
     next
 }
@@ -635,9 +646,15 @@ where
                     ANIM_START_MS.store(elapsed_ms, Ordering::Relaxed);
                 }
                 let delta_ms = elapsed_ms.saturating_sub(ANIM_START_MS.load(Ordering::Relaxed));
-                // 10 s per frame — matches the firmware default sprite
-                // tick interval.  Hatching clamps to the last frame.
-                let raw = (delta_ms / 10_000) as u32;
+                // Same pace as the firmware waiter (`pacing`): idle frames
+                // every 5 minutes, actions and hatching at full speed.
+                let interval_ms = pacing::frame_interval_secs(
+                    anim,
+                    count as u32,
+                    lifecycle::action_ticks_remaining(),
+                )
+                .map_or(u64::MAX, |s| s.saturating_mul(1000));
+                let raw = (delta_ms / interval_ms).min(u32::MAX as u64) as u32;
                 let frame = anim_files::clamp_or_wrap(raw, count, anim);
                 let name = anim_files::anim_filename(kind, anim, frame);
                 sprite_loader::blit_pcx_sim(display, &name, 0, PET_AREA_TOP as i32, false);
@@ -1094,5 +1111,27 @@ mod tests {
         super::battle_view::show_result_for_test();
         assert!(super::battle_view::wants_full_refresh());
         assert_eq!(super::next_ui_deadline_tick(), u32::MAX);
+    }
+
+    #[test]
+    fn an_open_stats_view_refreshes_within_an_idle_frame() {
+        use crate::game::engine::{GameState, PetKind, Phase};
+        let _guard = super::lock_test_state();
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.phase = Phase::Active;
+        crate::game::lifecycle::set_state_for_test(Some(s));
+        assert_eq!(super::next_ui_deadline_tick(), u32::MAX);
+        super::modal::open(super::modal::ModalKind::Stats);
+        assert_eq!(super::next_ui_deadline_tick(), u32::MAX, "menu list has no drifting numbers");
+        super::modal::activate(); // first row: View stats
+        assert!(super::live_view_open());
+        let now = super::lifecycle::now_tick();
+        let d = super::next_ui_deadline_tick();
+        assert!(d <= now + super::pacing::IDLE_FRAME_TICKS, "deadline {d} now {now}");
+        assert!(d > now, "an idle frame, not a tight poll");
+        super::modal::close();
+        assert!(!super::live_view_open());
+        assert_eq!(super::next_ui_deadline_tick(), u32::MAX);
+        crate::game::lifecycle::set_state_for_test(None);
     }
 }

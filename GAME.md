@@ -40,6 +40,11 @@ power, your pet will be right where you left it.
  └───────────────────────────────────────┘
 ```
 
+The pet moves calmly: when nothing is happening it changes to its next idle frame
+only once every 5 minutes, which saves battery and spares the e-paper. Actions
+(feeding, healing, playing and so on) still animate at full speed, and the screen
+redraws at once when you press a button or the pet's state changes.
+
 Use **Up/Down** to switch between icon rows and **Left/Right** to select
 an icon. Press **Fire** to open the action menu for the selected icon.
 

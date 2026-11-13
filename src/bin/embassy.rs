@@ -1463,54 +1463,34 @@ async fn wait_display_event(
         #[cfg(feature = "game")]
         let sprite_tick = async {
             if sprite_active {
-                // Compute frame interval from the current animation.
-                // Timed animations (hatching, actions) spread frames evenly
-                // over their duration so every frame is shown.
-                // Idle/warning/etc: 10 seconds per frame.
-                let anim = bornhack_aegg::game::lifecycle::display_anim();
-                let kind = bornhack_aegg::game::lifecycle::pet_kind();
+                // Idle animations advance one frame per 5 minutes; hatching
+                // and actions spread their frames over their duration. The
+                // wait always ends at the engine wake or UI deadline too.
+                // Pure reads only: this future never updates the engine.
+                use bornhack_aegg::game::{lifecycle, pacing};
+                let anim = lifecycle::display_anim();
+                let kind = lifecycle::pet_kind();
                 let frame_count =
-                    bornhack_aegg::game::engine::anim_files::frame_count(kind, anim) as u64;
-                if frame_count <= 1 {
-                    // Single frame — no animation to advance; sleep until
-                    // the game state changes (next wake tick) or a UI-only
-                    // timer (toast, alert, sleep-animation floor) ends.
-                    let wake = bornhack_aegg::game::lifecycle::next_wake_tick()
-                        .min(bornhack_aegg::game::next_ui_deadline_tick());
-                    let now = bornhack_aegg::game::lifecycle::now_tick();
-                    let wait_ticks = wake.saturating_sub(now).max(1) as u64;
-                    Timer::after_secs(wait_ticks * 10).await;
-                } else {
-                    let interval_secs = match anim {
-                        bornhack_aegg::game::engine::DisplayAnim::Hatching { ticks_remaining } => {
-                            let total_secs = ticks_remaining as u64 * 10;
-                            total_secs / frame_count
-                        }
-                        bornhack_aegg::game::engine::DisplayAnim::Feeding
-                        | bornhack_aegg::game::engine::DisplayAnim::Healing
-                        | bornhack_aegg::game::engine::DisplayAnim::Playing => {
-                            // Spread frames over the remaining action time.
-                            let stats = bornhack_aegg::game::lifecycle::cycle();
-                            let remaining_ticks =
-                                stats.map_or(0, |s| s.action_ticks_remaining as u64);
-                            let total_secs = remaining_ticks * 10;
-                            total_secs / frame_count
-                        }
-                        _ => 3,
-                    };
-                    // Minimum pacing between frames. The refresh itself now
-                    // guarantees the full waveform played (the frame timer no
-                    // longer cancels an in-flight refresh — see the display
-                    // loop), so this only sets idle cadence, not anti-ghost
-                    // timing. Floor 2 s.
-                    Timer::after_secs(interval_secs.max(2)).await;
-                }
+                    bornhack_aegg::game::engine::anim_files::frame_count(kind, anim) as u32;
+                let frame_secs = pacing::frame_interval_secs(
+                    anim,
+                    frame_count,
+                    lifecycle::action_ticks_remaining(),
+                );
+                let wake_secs = pacing::wake_secs(
+                    lifecycle::next_wake_tick(),
+                    bornhack_aegg::game::next_ui_deadline_tick(),
+                    lifecycle::now_tick(),
+                );
+                let (wait_secs, frame_due) = pacing::sprite_wait(frame_secs, wake_secs);
+                Timer::after_secs(wait_secs).await;
+                frame_due
             } else {
-                core::future::pending::<()>().await;
+                core::future::pending::<bool>().await
             }
         };
         #[cfg(not(feature = "game"))]
-        let sprite_tick = core::future::pending::<()>();
+        let sprite_tick = core::future::pending::<bool>();
 
         // Compose button + TOAST_SIGNAL into a single wakeup so the outer
         // select shape stays unchanged.  Both result in a non-sprite
@@ -1552,7 +1532,7 @@ async fn wait_display_event(
             )
             .await
             {
-                Either::Second(Either4::First(_))  => return true,  // sprite timer
+                Either::Second(Either4::First(frame_due)) => return frame_due, // sprite timer (false: wake)
                 Either::First(Either3::First(_))   => return false, // button / toast
                 Either::First(Either3::Second(_))  => return false, // BLE pairing
                 Either::First(Either3::Third(_))                    // minute tick
@@ -1584,7 +1564,7 @@ async fn wait_display_event(
         )
         .await
         {
-            Either::Second(_)                  => return true,  // sprite timer
+            Either::Second(frame_due)          => return frame_due, // sprite timer (false: wake)
             Either::First(Either3::First(_))   => return false, // button / toast
             Either::First(Either3::Second(_))  => return false, // BLE pairing
             Either::First(Either3::Third(_))                    // minute tick

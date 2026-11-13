@@ -684,6 +684,12 @@ pub fn close() {
     crate::FULL_REFRESH_PENDING.store(true, Ordering::Relaxed);
 }
 
+/// A modal sub-view whose numbers change by themselves (the stats bars).
+/// Task 5's diary and Task 9's hint view join it.
+pub fn live_modal_view_open() -> bool {
+    STATS_VIEW.load(Ordering::Relaxed)
+}
+
 pub fn is_open() -> bool {
     MODAL_KIND.load(Ordering::Relaxed) != 0
 }
