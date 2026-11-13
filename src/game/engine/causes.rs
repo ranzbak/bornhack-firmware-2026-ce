@@ -14,7 +14,7 @@ pub enum StrainWhy {
     Tired,
     Heavy,
     WornOut,
-    Sore,
+    Overdone,
 }
 
 impl StrainWhy {
@@ -24,7 +24,7 @@ impl StrainWhy {
         StrainWhy::Tired,
         StrainWhy::Heavy,
         StrainWhy::WornOut,
-        StrainWhy::Sore,
+        StrainWhy::Overdone,
     ];
 
     fn why(self) -> &'static str {
@@ -34,7 +34,7 @@ impl StrainWhy {
             StrainWhy::Tired => "sport: tired",
             StrainWhy::Heavy => "sport: heavy",
             StrainWhy::WornOut => "sport: worn out",
-            StrainWhy::Sore => "sport: sore",
+            StrainWhy::Overdone => "sport: too much",
         }
     }
 }
@@ -181,16 +181,51 @@ impl Cause {
     }
 
     /// A one-byte code, so a cause can cross a task boundary in an atomic.
+    /// An exhaustive match: a new variant does not compile until it has one.
     pub fn pack(self) -> u8 {
-        // `all` is the one list; a code is the position in it.
-        Cause::all().position(|c| c == self).unwrap_or(0) as u8
+        match self {
+            Cause::FoodComa => 0,
+            Cause::TreatTooSoon => 1,
+            Cause::NoTreatBuzz => 2,
+            Cause::DrinkDulled => 3,
+            Cause::OneTooMany => 4,
+            Cause::DryMouth => 5,
+            Cause::Relapse => 6,
+            Cause::Sloshing => 7,
+            Cause::Grumpy => 8,
+            Cause::Groggy => 9,
+            Cause::WornOut => 10,
+            Cause::StillHungOver => 11,
+            Cause::OnlyNumbed => 12,
+            Cause::OverRelaxed => 13,
+            Cause::WellRested => 14,
+            Cause::TornMuscle(w) => TORN_BASE + w as u8,
+            Cause::Strained(w) => STRAINED_BASE + w as u8,
+            Cause::BadNight(u) => BAD_NIGHT_BASE + u as u8,
+        }
     }
 
     /// Inverse of [`pack`](Self::pack).
     pub fn unpack(v: u8) -> Option<Cause> {
-        Cause::all().nth(v as usize)
+        let at = |base: u8| v.checked_sub(base).map(usize::from);
+        match v {
+            0..=14 => PLAIN.get(v as usize).copied(),
+            TORN_BASE..STRAINED_BASE => StrainWhy::ALL
+                .get(at(TORN_BASE)?)
+                .map(|w| Cause::TornMuscle(*w)),
+            STRAINED_BASE..BAD_NIGHT_BASE => StrainWhy::ALL
+                .get(at(STRAINED_BASE)?)
+                .map(|w| Cause::Strained(*w)),
+            _ => Unsettled::ALL
+                .get(at(BAD_NIGHT_BASE)?)
+                .map(|u| Cause::BadNight(*u)),
+        }
     }
 }
+
+const TORN_BASE: u8 = 16;
+const STRAINED_BASE: u8 = 32;
+const BAD_NIGHT_BASE: u8 = 48;
 
 /// How many causes wait for the UI.
 pub const CAUSE_QUEUE: usize = 4;

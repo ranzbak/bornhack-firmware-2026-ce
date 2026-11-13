@@ -42,6 +42,9 @@ thread_local! {
 
 /// Engine ticks per simulated minute.
 const TICKS_PER_MINUTE: u32 = 6;
+/// Most engine wakes `preview_sleep` steps through: a night is at most
+/// `SELF_WAKE_MIN` long and each wake is at least a segment.
+const PREVIEW_NIGHT_MAX_WAKES: u32 = 512;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -848,17 +851,28 @@ impl GameState {
         c.causes.iter().copied().find(|cause| cause.is_warning())
     }
 
-    /// What lying down now would cost: a bad night when something unsettles
-    /// the pet, grogginess when it is already rested to the brim.
+    /// First warning cause of the night the pet would have if put to bed now
+    /// and left alone until it wakes itself. Runs the real starter on a clone
+    /// and drives it with the engine's own next-wake computation (closed-form
+    /// segments, no fixed-step polling); `None` when sleep is refused or the
+    /// night is fine.
     pub fn preview_sleep(&self) -> Option<causes::Cause> {
         if self.sleep_refusal().is_some() {
             return None;
         }
-        if let Some(why) = regime::unsettled_by(self) {
-            return Some(causes::Cause::BadNight(why));
+        let mut c = self.clone();
+        c.causes = causes::CauseQueue::default();
+        if !c.sleep() {
+            return None;
         }
-        (self.energy as i32 >= needs::ENERGY_HI_EDGE_PCT as i32 * needs::P)
-            .then_some(causes::Cause::Groggy)
+        for _ in 0..PREVIEW_NIGHT_MAX_WAKES {
+            if !c.is_sleeping {
+                break;
+            }
+            let next = c.next_wake_tick().max(c.last_update_tick + 1);
+            c.update(next);
+        }
+        c.causes.iter().copied().find(|cause| cause.is_warning())
     }
 
     /// First warning cause that waking the pet now would produce; `None` when

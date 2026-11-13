@@ -278,6 +278,10 @@ pub fn wake(s: &mut GameState, by_player: bool) {
             }
         }
     }
+    // The night as slept, before a station rest forgives the oversleep:
+    // minutes slept short of oversleeping, and how many of them were poor.
+    let span = s.sleep_min.saturating_sub(s.oversleep_min);
+    let poor = span.saturating_sub(s.good_sleep_min);
     if s.no_groggy {
         s.no_groggy = false;
         s.oversleep_min = 0;
@@ -288,10 +292,8 @@ pub fn wake(s: &mut GameState, by_player: bool) {
         s.fitness = bump(s.fitness, -(lvl(t::GROGGY_FIT_PCT()) as i64));
         s.causes.push(Cause::Groggy);
     }
-    // Minutes slept short of oversleeping, and how many of them were poor.
-    let span = s.sleep_min.saturating_sub(s.oversleep_min);
-    let poor = span.saturating_sub(s.good_sleep_min);
-    if poor >= RESTLESS_MIN && poor as u32 * BAD_NIGHT_POOR_SHARE_DEN > span as u32 {
+    let bad_night = poor >= RESTLESS_MIN && poor as u32 * BAD_NIGHT_POOR_SHARE_DEN > span as u32;
+    if bad_night {
         let why = s.bed_why.or_else(|| unsettled_by(s));
         s.causes
             .push(Cause::BadNight(why.unwrap_or(Unsettled::Unknown)));
@@ -301,7 +303,10 @@ pub fn wake(s: &mut GameState, by_player: bool) {
     }
     if s.good_sleep_min >= t::GOOD_SLEEP_LINE_MIN() {
         s.rested_min = t::RESTED_MIN();
-        s.causes.push(Cause::WellRested);
+        // A night cannot be both bad and good in the diary.
+        if !bad_night {
+            s.causes.push(Cause::WellRested);
+        }
     }
     s.bed_why = None;
 }

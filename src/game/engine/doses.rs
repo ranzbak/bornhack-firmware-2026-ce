@@ -250,25 +250,26 @@ fn exercise(s: &mut GameState) {
     // Every multiplier looks at the pet as it was before the session.
     // i64 so absurd CFG multipliers cannot overflow; clamped before use.
     let mut strain = lvl(t::DOSE_EXERCISE_STRAIN_PCT()) as i64;
-    // What made the session hard, first that held (also the strain multipliers).
-    let blame = if (s.fullness as i32) < needs::full_lo() {
+    let scale = |strain: i64, pct: u16| strain * pct as i64 / 100;
+    // The session's handicaps: each feeds its multiplier and names the blame.
+    let hungry = (s.fullness as i32) < needs::full_lo();
+    let thirsty = (s.hydration as i32) < needs::water_lo();
+    let tired = (s.energy as i32) < needs::energy_lo();
+    let heavy = s.weight as i32 > needs::weight_hi();
+    let blame = if hungry {
         Some(StrainWhy::Hungry)
-    } else if (s.hydration as i32) < needs::water_lo() {
+    } else if thirsty {
         Some(StrainWhy::Thirsty)
-    } else if (s.energy as i32) < needs::energy_lo() {
+    } else if tired {
         Some(StrainWhy::Tired)
-    } else if s.weight as i32 > needs::weight_hi() {
+    } else if heavy {
         Some(StrainWhy::Heavy)
     } else if s.deprived {
         Some(StrainWhy::WornOut)
     } else {
         None
     };
-    let scale = |strain: i64, pct: u16| strain * pct as i64 / 100;
-    if (s.fullness as i32) < needs::full_lo()
-        || (s.energy as i32) < needs::energy_lo()
-        || (s.hydration as i32) < needs::water_lo()
-    {
+    if hungry || tired || thirsty {
         strain = scale(strain, t::DOSE_STRAIN_NEED_PCT());
     }
     if s.rested_min > 0 {
@@ -277,7 +278,7 @@ fn exercise(s: &mut GameState) {
     if s.fitness as i32 >= lvl(t::DOSE_STRAIN_FIT_MIN_PCT()) {
         strain = scale(strain, t::DOSE_STRAIN_FIT_PCT());
     }
-    if s.weight as i32 > needs::weight_hi() {
+    if heavy {
         strain = scale(strain, t::DOSE_STRAIN_HEAVY_PCT());
     }
     if s.deprived {
@@ -300,7 +301,7 @@ fn exercise(s: &mut GameState) {
         s.injured_min = t::DOSE_INJURY_MIN();
         bump(&mut s.health, -lvl(t::DOSE_INJURY_HEALTH_PCT()));
         s.causes
-            .push(Cause::TornMuscle(blame.unwrap_or(StrainWhy::Sore)));
+            .push(Cause::TornMuscle(blame.unwrap_or(StrainWhy::Overdone)));
     } else {
         bump(&mut s.fitness, lvl(t::DOSE_EXERCISE_FIT_PCT()));
         if let Some(why) = blame {

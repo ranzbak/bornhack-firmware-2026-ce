@@ -4031,7 +4031,9 @@ mod causes {
     use bornhack_aegg::game::engine::causes::{Cause, CauseQueue, StrainWhy, Unsettled};
     use bornhack_aegg::game::engine::needs::P;
     use bornhack_aegg::game::engine::regime::{sleep_quality_pm, unsettled_by};
-    use bornhack_aegg::game::engine::thresholds::{HATCHING_TICKS, SLEEP_QUALITY_POOR_PM};
+    use bornhack_aegg::game::engine::thresholds::{
+        DEPRIVED_NIGHTS, HATCHING_TICKS, SLEEP_QUALITY_POOR_PM,
+    };
     use bornhack_aegg::game::engine::{Action, DrinkKind, FoodKind, GameState, PetKind, Phase};
 
     fn pct(v: i32) -> u16 {
@@ -4319,13 +4321,174 @@ mod causes {
         assert_eq!(unsettled_by(&s), Some(Unsettled::Drinks));
     }
 
+
+    /// First warning of really sleeping `s` to its self-wake.
+    fn real_night(s: &GameState) -> Option<Cause> {
+        let mut c = s.clone();
+        c.take_causes();
+        assert!(c.sleep());
+        c.update(c.last_update_tick + 800 * 6);
+        assert!(!c.is_sleeping);
+        first_warning(&c.take_causes())
+    }
+
+    #[test]
+    fn preview_sleep_is_the_real_night() {
+        let night = Some(Cause::BadNight(Unsettled::Drinks));
+        // (energy %, booze %, station rest, what the real night warns)
+        let cases = [
+            (5, 35, false, None),
+            (30, 35, false, Some(Cause::Groggy)),
+            (5, 50, false, night),
+            (30, 50, false, night),
+            (95, 0, false, Some(Cause::Groggy)),
+            (95, 0, true, None),
+            (5, 0, false, None),
+            (30, 0, false, Some(Cause::Groggy)),
+        ];
+        for (energy, booze, rest, want) in cases {
+            let mut s = pet();
+            s.energy = pct(energy);
+            s.booze = pct(booze);
+            if rest {
+                s.station_rest();
+            }
+            let tag = format!("energy {energy} booze {booze} rest {rest}");
+            assert_eq!(real_night(&s), want, "the real night: {tag}");
+            let before = s.clone();
+            assert_eq!(s.preview_sleep(), want, "the preview: {tag}");
+            assert_eq!(s, before, "{tag}");
+        }
+        let mut s = pet();
+        s.is_sleeping = true;
+        assert_eq!(s.preview_sleep(), None, "a sleeper cannot lie down");
+    }
+
+    #[test]
+    fn a_station_rest_night_is_not_a_bad_night() {
+        let mut s = pet();
+        s.station_rest();
+        sleep_through(&mut s, 400);
+        assert!(!s.is_sleeping, "oversleep self-wake");
+        let got = causes_of(&mut s);
+        assert!(!got.iter().any(|c| matches!(c, Cause::BadNight(_))), "{got:?}");
+    }
+
+    #[test]
+    fn short_nights_wear_the_pet_out() {
+        let mut s = pet();
+        s.energy = pct(30);
+        s.short_nights = DEPRIVED_NIGHTS() - 1;
+        sleep_through(&mut s, 30);
+        assert!(s.night);
+        assert!(s.wake());
+        assert!(causes_of(&mut s).contains(&Cause::WornOut));
+        assert!(s.deprived);
+        // Already worn out: no second warning.
+        assert!(s.sleep());
+        s.update(s.last_update_tick + 30 * 6);
+        assert!(s.wake());
+        assert!(!causes_of(&mut s).contains(&Cause::WornOut));
+    }
+
+    #[test]
+    fn oversleeping_leaves_the_pet_groggy() {
+        let mut s = pet();
+        s.energy = pct(95);
+        sleep_through(&mut s, 400);
+        assert!(causes_of(&mut s).contains(&Cause::Groggy));
+    }
+
+    #[test]
+    fn waking_with_a_hangover_says_so() {
+        let mut s = pet();
+        s.energy = pct(30);
+        s.hangover_min = 5000;
+        sleep_through(&mut s, 10);
+        assert!(s.wake());
+        assert!(causes_of(&mut s).contains(&Cause::StillHungOver));
+    }
+
+    #[test]
+    fn a_bad_night_without_a_known_reason_is_unknown() {
+        // Put to sleep by hand (no bed_why); settled again by the wake.
+        let mut s = pet();
+        s.energy = pct(30);
+        s.booze = pct(50);
+        s.is_sleeping = true;
+        s.night = true;
+        s.update(s.last_update_tick + 200 * 6);
+        s.booze = 0;
+        assert_eq!(unsettled_by(&s), None);
+        assert!(s.wake());
+        assert!(causes_of(&mut s).contains(&Cause::BadNight(Unsettled::Unknown)));
+    }
+
+    #[test]
+    fn collapse_remembers_what_was_wrong() {
+        let mut s = pet();
+        s.energy = 0;
+        s.booze = pct(50);
+        s.update(s.last_update_tick + 6);
+        assert!(s.is_sleeping);
+        assert_eq!(s.bed_why, Some(Unsettled::Drinks));
+    }
+
+    #[test]
+    fn a_full_belly_sloshes() {
+        let mut s = pet();
+        s.fullness = pct(77);
+        s.hydration = pct(50);
+        assert!(run(&mut s, Action::Drink, None, Some(DrinkKind::Water)));
+        assert_eq!(causes_of(&mut s), vec![Cause::Sloshing]);
+    }
+
+    #[test]
+    fn a_pet_already_over_the_band_is_not_one_too_many() {
+        let mut s = pet();
+        s.booze = pct(60);
+        assert!(run(&mut s, Action::Drink, None, Some(DrinkKind::Beer)));
+        assert!(!causes_of(&mut s).contains(&Cause::OneTooMany));
+    }
+
+    #[test]
+    fn preview_respects_the_wallet() {
+        let mut s = pet();
+        s.money_enabled = true;
+        s.money = 0;
+        assert_eq!(s.preview(Action::Feed, Some(FoodKind::Pizza), None), None);
+        s.money = 1000;
+        assert_eq!(
+            s.preview(Action::Feed, Some(FoodKind::Pizza), None),
+            Some(Cause::FoodComa)
+        );
+        assert_eq!(s.money, 1000, "the preview charges nothing");
+    }
+
+    #[test]
+    fn a_bad_night_is_not_also_well_rested() {
+        // Poor for 400 minutes, then settled for 320: both counters pass
+        // their lines in one 720-minute night.
+        let mut s = pet();
+        s.energy = pct(0);
+        s.booze = pct(52);
+        s.hydration = pct(90);
+        s.fullness = pct(60);
+        sleep_through(&mut s, 800);
+        assert!(!s.is_sleeping);
+        let got = causes_of(&mut s);
+        assert!(got.iter().any(|c| matches!(c, Cause::BadNight(_))), "{got:?}");
+        assert!(!got.contains(&Cause::WellRested), "{got:?}");
+    }
+
     #[test]
     fn preview_matches_what_the_dose_does() {
         let mut states: Vec<GameState> = Vec::new();
+        // Truly fresh: hatched, no presets.
+        let mut fresh = GameState::new_egg(7, PetKind(0));
+        fresh.update(HATCHING_TICKS() as u32);
+        states.push(fresh);
         states.push(pet());
-        let mut s = pet();
-        s.fullness = pct(50);
-        states.push(s);
         let mut s = pet();
         s.hydration = pct(30);
         s.booze = pct(30);
@@ -4425,15 +4588,9 @@ mod causes {
     }
 
     #[test]
-    fn preview_sleep_and_wake_read_the_state() {
+    fn preview_wake_reads_the_state() {
         let mut s = pet();
         s.energy = pct(30);
-        assert_eq!(s.preview_sleep(), None);
-        s.booze = pct(35);
-        assert_eq!(s.preview_sleep(), Some(Cause::BadNight(Unsettled::Drinks)));
-        let mut s = pet();
-        s.energy = pct(95);
-        assert_eq!(s.preview_sleep(), Some(Cause::Groggy));
         assert_eq!(s.preview_wake(), None, "awake");
         let mut s = pet();
         s.energy = pct(30);
@@ -4451,9 +4608,15 @@ mod causes {
             assert!(!c.what().is_empty() && !c.why().is_empty());
             assert_eq!(Cause::unpack(c.pack()), Some(c));
         }
-        assert_eq!(n, 15 + 6 + 6 + 8, "every variant once");
+        assert_eq!(n, 35, "every variant once");
+        assert_eq!(Cause::all().count(), 35);
+        let mut codes: Vec<u8> = Cause::all().map(|c| c.pack()).collect();
+        codes.sort();
+        codes.dedup();
+        assert_eq!(codes.len(), 35, "every code is distinct");
         assert_eq!(Cause::unpack(255), None);
         assert_eq!(Cause::TornMuscle(StrainWhy::WornOut).why(), "sport: worn out");
+        assert_eq!(Cause::Strained(StrainWhy::Overdone).why(), "sport: too much");
         assert_eq!(Cause::BadNight(Unsettled::Unknown).why(), "slept badly");
         assert_eq!(Cause::WellRested.what(), "well rested");
     }
