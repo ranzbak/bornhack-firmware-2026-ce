@@ -399,16 +399,6 @@ pub async fn on_battle_result(data: &[u8]) {
 mod tests {
     use super::*;
 
-    fn base_stats() -> PetStats {
-        // A cheap way to get a valid PetStats without going through the
-        // full lifecycle module: build a fresh egg, mark it Active, and
-        // snapshot it directly.
-        use crate::game::engine::{GameState, PetKind, Phase};
-        let mut state = GameState::new_egg(1, PetKind::from_u8(1));
-        state.phase = Phase::Active;
-        state.stats(0)
-    }
-
     #[test]
     fn result_msg_full_round_trip_preserves_species() {
         let msg = BattleResultMsg {
@@ -463,38 +453,6 @@ mod tests {
         let back = BattleResultMsg::from_bytes(&buf).unwrap();
         assert_eq!(back.target_kind, 0);
         assert_eq!(back.challenger_kind, 2);
-    }
-
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
-    fn derive_combat_stats_stays_in_bounds() {
-        let stats = base_stats();
-        let combat = derive_combat_stats(&stats, 0, 0, 0);
-        assert!(combat.attack >= 1 && combat.attack <= 100);
-        assert!(combat.defense >= 1 && combat.defense <= 100);
-        assert!(combat.speed >= 1 && combat.speed <= 100);
-        assert!(combat.max_hp >= 20 && combat.max_hp <= 150);
-
-        let combat_max = derive_combat_stats(&stats, 100, 100, 100);
-        assert!(combat_max.attack <= 100);
-        assert!(combat_max.defense <= 100);
-        assert!(combat_max.speed <= 100);
-        assert!(combat_max.max_hp <= 150);
-    }
-
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
-    fn permanent_conditions_reduce_combat_stats() {
-        let mut stats = base_stats();
-        let healthy = derive_combat_stats(&stats, 50, 50, 50);
-
-        stats.diabetic = true;
-        stats.alcoholic = true;
-        let sick = derive_combat_stats(&stats, 50, 50, 50);
-
-        assert!(sick.attack < healthy.attack);
-        assert!(sick.defense < healthy.defense);
-        assert!(sick.speed < healthy.speed);
     }
 
     #[test]

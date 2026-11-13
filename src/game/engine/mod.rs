@@ -817,6 +817,13 @@ impl GameState {
     /// Returns the absolute tick time to wake up at.  The caller should
     /// set a timer for `next_wake_tick - last_update_tick` ticks.
     pub fn next_wake_tick(&self) -> u32 {
+        if self.phase == Phase::Gone || self.hibernating {
+            return u32::MAX;
+        }
+        // Hatching countdown.
+        if self.phase == Phase::Hatching {
+            return self.last_update_tick + self.hatching_countdown as u32;
+        }
         todo!("BornPets v2 plan 1: v2 wake scheduler (later task)")
     }
 }
@@ -1466,148 +1473,6 @@ mod overweight_diabetes_tests {
         assert_eq!(state.cooldown_battle, BATTLE_COOLDOWN());
     }
 
-    /// Sustained overweight for `DIABETES_ONSET_TICKS()` flips `diabetic`
-    /// permanently true; dropping weight back down afterward does not
-    /// reverse it.  Exercises `check_diabetes()` directly (it's a private
-    /// method, reachable from this same-file test module) so the test
-    /// isolates the weight/diabetes mechanic from the unrelated
-    /// hunger/tired/leaving lifecycle — driving thousands of ticks
-    /// through the full `update()` with hunger/tired left unattended
-    /// would let the *existing* neglect mechanics kill the pet
-    /// (`Phase::Gone`) long before the multi-day diabetes window elapses.
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
-    fn sustained_overweight_triggers_permanent_diabetes() {
-        let mut state = GameState::new_egg(1, PetKind::DEFAULT);
-        state.weight = OVERWEIGHT_TRIGGER() + 1;
-
-        // v1 helper removed in task 2: state.check_diabetes(DIABETES_ONSET_TICKS() + 10);
-        assert!(state.diabetic, "should become diabetic after sustained overweight");
-
-        // Dropping weight back down afterward must not clear the flag.
-        state.weight = 0;
-        // v1 helper removed in task 2: state.check_diabetes(10);
-        assert!(state.diabetic, "diabetes should be permanent");
-    }
-
-    /// Overweight time resets if weight drops back below the trigger
-    /// before the onset threshold is reached — no premature diabetes.
-    #[test]
-    fn overweight_progress_resets_on_recovery() {
-        let mut state = GameState::new_egg(2, PetKind::DEFAULT);
-        state.weight = OVERWEIGHT_TRIGGER() + 1;
-
-        // Advance partway toward onset, then recover.
-        // v1 helper removed in task 2: state.check_diabetes(DIABETES_ONSET_TICKS() / 2);
-        state.weight = 0;
-        // v1 helper removed in task 2: state.check_diabetes(1);
-        assert!(!state.diabetic);
-
-        // Even after further time at low weight, no diabetes should appear.
-        // v1 helper removed in task 2: state.check_diabetes(DIABETES_ONSET_TICKS());
-        assert!(!state.diabetic, "recovering before onset should reset progress");
-    }
-
-    /// Pizza should pack on far more weight than Salad for feeding the
-    /// same duration — the whole point of the food system tying into
-    /// the overweight/diabetes mechanic.
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
-    fn unhealthy_food_gains_more_weight_than_healthy_food() {
-        let run = |food: FoodKind| -> u16 {
-            let mut state = GameState::new_egg(7, PetKind::DEFAULT);
-            state.update(HATCHING_TICKS() as u32);
-            assert!(state.feed(food));
-            state.update(state.last_update_tick + FEED_DURATION() as u32);
-            state.weight
-        };
-
-        let salad_weight = run(FoodKind::Salad);
-        let apple_weight = run(FoodKind::Apple);
-        let pizza_weight = run(FoodKind::Pizza);
-        let cake_weight = run(FoodKind::Cake);
-
-        assert!(
-            salad_weight < apple_weight,
-            "Salad ({salad_weight}) should gain less weight than Apple ({apple_weight})"
-        );
-        assert!(
-            apple_weight < pizza_weight,
-            "Apple ({apple_weight}) should gain less weight than Pizza ({pizza_weight})"
-        );
-        assert!(
-            pizza_weight < cake_weight,
-            "Pizza ({pizza_weight}) should gain less weight than Cake ({cake_weight})"
-        );
-    }
-
-    /// Food choice must not change hunger relief ordering in the wrong
-    /// direction — Cake is the worst hunger relief (dessert, not
-    /// filling), Pizza the best (very filling).
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
-    fn cake_is_least_filling_pizza_is_most_filling() {
-        let run = |food: FoodKind| -> u16 {
-            let mut state = GameState::new_egg(9, PetKind::DEFAULT);
-            state.update(HATCHING_TICKS() as u32);
-            state.fullness = HUNGER_RATE().saturating_mul(10_000); // build up hunger first
-            assert!(state.feed(food));
-            state.update(state.last_update_tick + FEED_DURATION() as u32);
-            state.fullness
-        };
-
-        let cake_hunger = run(FoodKind::Cake);
-        let pizza_hunger = run(FoodKind::Pizza);
-        assert!(
-            pizza_hunger < cake_hunger,
-            "Pizza should relieve more hunger than Cake (pizza={pizza_hunger}, cake={cake_hunger})"
-        );
-    }
-
-    /// Water and Cola shouldn't move `drunk` at all; Whiskey should move
-    /// it the most, Beer less. Ties the drink system to the same
-    /// weight/diabetes-style permanent-condition mechanic.
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
-    fn alcoholic_drinks_raise_drunk_non_alcoholic_dont() {
-        let run = |drink: DrinkKind| -> u16 {
-            let mut state = GameState::new_egg(11, PetKind::DEFAULT);
-            state.update(HATCHING_TICKS() as u32);
-            assert!(state.drink(drink));
-            state.update(state.last_update_tick + DRINK_DURATION() as u32);
-            state.booze
-        };
-
-        let water_drunk = run(DrinkKind::Water);
-        let cola_drunk = run(DrinkKind::Cola);
-        let beer_drunk = run(DrinkKind::Beer);
-        let whiskey_drunk = run(DrinkKind::Whiskey);
-
-        assert_eq!(water_drunk, 0, "Water should never raise drunk");
-        assert_eq!(cola_drunk, 0, "Cola should never raise drunk");
-        assert!(
-            beer_drunk < whiskey_drunk,
-            "Beer ({beer_drunk}) should raise drunk less than Whiskey ({whiskey_drunk})"
-        );
-        assert!(whiskey_drunk > 0, "Whiskey should raise drunk");
-    }
-
-    /// Sustained drunkenness for `ALCOHOLIC_ONSET_TICKS()` flips
-    /// `alcoholic` permanently true — mirrors the diabetes onset test.
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
-    fn sustained_drunk_triggers_permanent_alcoholism() {
-        let mut state = GameState::new_egg(13, PetKind::DEFAULT);
-        state.booze = DRUNK_TRIGGER() + 1;
-
-        // v1 helper removed in task 2: state.check_alcoholism(ALCOHOLIC_ONSET_TICKS() + 10);
-        assert!(state.dependent, "should become alcoholic after sustained drunkenness");
-
-        state.booze = 0;
-        // v1 helper removed in task 2: state.check_alcoholism(10);
-        assert!(state.dependent, "alcoholism should be permanent");
-    }
-
     /// `friend_boost(true)` used to compute `STAT_MAX() * 2 / 5` with the
     /// multiply in u16 space — since STAT_MAX() is 65535, that overflows
     /// before the divide ever runs (panics under overflow-checks, silently
@@ -1630,63 +1495,6 @@ mod overweight_diabetes_tests {
         assert!(
             after_big > after_small,
             "meeting a new friend (big={after_big}) should lift mood more than an already-known one (small={after_small})"
-        );
-    }
-
-    /// `ticks_to_next_rate_change()`'s sick-boundary estimate used to omit
-    /// the diabetes/alcoholism penalty entirely, treating a diabetic pet's
-    /// `sick` growth as if it were only the ~1/tick base rate. That made
-    /// the piecewise update loop size a segment far larger than reality,
-    /// so `check_leaving()` could charge the whole oversized segment as
-    /// "maxed" in one shot — enough to jump straight from Active to Gone
-    /// on a long fast-forward (e.g. Skip 1 day), skipping Leaving
-    /// entirely. With the penalty folded in, the boundary should be close
-    /// (tens to low hundreds of ticks), not tens of thousands.
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
-    fn sick_rate_estimate_includes_diabetes_penalty() {
-        let mut state = GameState::new_egg(23, PetKind::DEFAULT);
-        state.update(HATCHING_TICKS() as u32);
-        state.diabetic = true;
-        state.med_cd_min = 0;
-        state.active_action = None;
-        // v1 field removed in task 2: state.cooldown_heal = 0;
-        state.health = 0;
-        // Keep every other boundary far away so sick's own crossing is the
-        // one this test's estimate is exercising.
-        state.fullness = 0;
-        state.energy = 0;
-        // v1 field removed in task 2: state.cooldown_feed = 0;
-        // v1 field removed in task 2: state.cooldown_relax = 0;
-        // v1 field removed in task 2: state.cooldown_play = 0;
-
-        let _ = &state;
-        let ticks = u32::MAX; // v1 helper removed in task 2: state.ticks_to_next_rate_change()
-        assert!(
-            ticks < 10_000,
-            "sick boundary estimate ({ticks} ticks) should reflect the diabetes penalty rate, not just the ~1/tick base rate"
-        );
-    }
-
-    /// `next_wake_tick()` must account for every cooldown that can gate an
-    /// action, including Battle's — otherwise the scheduler never wakes the
-    /// CPU specifically for a battle cooldown expiring (it self-corrects on
-    /// the next unrelated wake, but the omission was a real gap relative to
-    /// every other action cooldown this function tracks).
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
-    fn next_wake_tick_accounts_for_battle_cooldown() {
-        let mut state = GameState::new_egg(19, PetKind::DEFAULT);
-        state.update(HATCHING_TICKS() as u32);
-        state.last_update_tick = 1000;
-        state.cooldown_battle = 42;
-
-        // No other cooldown/action pending shorter than this, so the
-        // battle cooldown should be the binding constraint.
-        let wake = state.next_wake_tick();
-        assert!(
-            wake <= 1000 + 42,
-            "next_wake_tick ({wake}) should wake no later than the battle cooldown expiring at 1042"
         );
     }
 
@@ -1743,50 +1551,6 @@ mod overweight_diabetes_tests {
         assert!(state.only_pets());
         assert_eq!(state.active_action, Some(Action::OnlyPets));
         assert!(!state.only_pets(), "action already in progress");
-    }
-
-    /// Driving the Only-pets action to completion (via the same public
-    /// `update()` path real time would use — mirrors how Feed/Drink
-    /// completion is exercised elsewhere in this test module), starting
-    /// above `BROKE_THRESHOLD`, awards the "hobby" branch: +HAX and a
-    /// happiness bump, plus its own cooldown.
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
-    fn only_pets_hobby_completion_awards_hax_and_happiness() {
-        let mut state = GameState::new_egg(33, PetKind::DEFAULT);
-        state.update(HATCHING_TICKS() as u32);
-        state.money_enabled = true;
-        state.money = 50; // >= BROKE_THRESHOLD, so this exercises the hobby branch.
-        state.mood = STAT_MAX();
-
-        assert!(state.only_pets());
-        state.update(state.last_update_tick + PLAY_DURATION() as u32);
-
-        assert_eq!(state.money, 50 + ONLYPETS_HOBBY_REWARD);
-        assert_eq!(state.mood, STAT_MAX() - HAPPINESS_STEP);
-        assert!(state.cooldown_onlypets > 0);
-        assert_eq!(state.active_action, None);
-    }
-
-    /// Stage 5: below `BROKE_THRESHOLD`, Only-pets completion forces the
-    /// "broke" branch instead — big pay, but happiness *drops* rather than
-    /// rises.
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
-    fn only_pets_broke_branch_pays_100_and_drops_happiness() {
-        let mut state = GameState::new_egg(34, PetKind::DEFAULT);
-        state.update(HATCHING_TICKS() as u32);
-        state.money_enabled = true;
-        state.money = 5; // < BROKE_THRESHOLD
-        state.mood = 1000;
-
-        assert!(state.only_pets());
-        state.update(state.last_update_tick + PLAY_DURATION() as u32);
-
-        assert_eq!(state.money, 5 + ONLYPETS_BROKE_REWARD);
-        assert_eq!(state.mood, 1000 + HAPPINESS_STEP);
-        assert!(state.cooldown_onlypets > 0);
-        assert_eq!(state.active_action, None);
     }
 
     // ── Stage 3: "things cost money" ────────────────────────────────────
