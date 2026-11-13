@@ -543,6 +543,8 @@ impl GameState {
         }
         let mut minutes = ticks / TICKS_PER_MINUTE;
         self.tick_rem = (ticks % TICKS_PER_MINUTE) as u8;
+        // Minutes still to step singly after a runaway target was seen.
+        let mut steep = 0u32;
         while minutes > 0 {
             let mut dt = solver::seg_len(self, minutes).clamp(1, minutes);
             // Mood and health crossing a line of their own is not bounded by
@@ -555,18 +557,40 @@ impl GameState {
             // still costs a handful of steps, not one per minute.
             let before = solver::sig(self);
             let (m0, t0) = (self.mood as i32, regime::mood_target(self));
+            if steep > 0 {
+                steep -= 1;
+                dt = 1;
+            }
             while dt > 1 {
                 let mut trial = self.clone();
                 advance::advance(&mut trial, dt);
                 #[cfg(feature = "simulator")]
                 ADVANCE_CALLS.with(|c| c.set(c.get() + 1));
                 let (m1, t1) = (trial.mood as i32, regime::mood_target(&trial));
-                // Full step all the way, and the target (linear inside a
-                // segment) stayed on the far side of mood at both ends, so it
-                // was never met midway.
-                let full_step = (m1 - m0).unsigned_abs() == thresholds::MOOD_STEP() as u32 * dt
-                    && if m1 > m0 { t0 >= m0 && t1 >= m1 } else { t0 <= m0 && t1 <= m1 };
-                if solver::sig(&trial) == before && (m0 == t0 || full_step) {
+                // Mood and target are linear inside a segment only up to
+                // integer truncation: each truncating term of `mood_target`
+                // (seven: four `* 3 / 2`, three `/ 2`) wobbles the target by
+                // under 1 per minute, so R = 7 + 1 (R22c). Mood on its target
+                // is safe if the target moves at most MOOD_STEP - R per
+                // minute; a full step is safe if the target led mood by R at
+                // both ends, so it was never met midway.
+                const R: i32 = 8;
+                let step = thresholds::MOOD_STEP() as i32;
+                let on_target = m0 == t0 && (t1 - t0).abs() + R <= (step - R) * dt as i32;
+                let full_step = (m1 - m0).abs() == step * dt as i32
+                    && if m1 > m0 { t0 >= m0 + R && t1 >= m1 + R } else { t0 <= m0 - R && t1 <= m1 - R };
+                let sig_same = solver::sig(&trial) == before;
+                if sig_same && (on_target || full_step) {
+                    break;
+                }
+                // On its target but the target runs away faster than mood can
+                // follow: shorter segments see the same slope, go straight to
+                // one minute, and skip the trials for the next few minutes
+                // (single minutes are always exact), instead of paying
+                // log2(dt) trials every minute.
+                if sig_same && m0 == t0 && (t1 - t0).abs() > (step - R) * dt as i32 {
+                    dt = 1;
+                    steep = 4;
                     break;
                 }
                 dt = dt.div_ceil(2);

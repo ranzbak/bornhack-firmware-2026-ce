@@ -1179,11 +1179,18 @@ mod zone_check {
 
     #[test]
     fn target_clamped_at_zero_is_a_zone() {
+        // Penalty 73080 > MAX: the target is clamped at 0 and leaves the clamp
+        // part-way through the span as health recovers.
         let mut s = calm();
-        s.fullness = pct(97);
-        s.hydration = (MAX as f32 * 0.997) as u16;
-        s.fun = pct(86);
-        s.booze = pct(37);
+        s.fullness = 63767;
+        s.hydration = 65317;
+        s.fun = 56219;
+        s.energy = 34436;
+        s.dirt = 53097;
+        s.booze = 24026;
+        s.weight = 58314;
+        s.fitness = 12941;
+        s.health = 27148;
         s.mood = 0;
         equivalent("target at 0", &s, 132);
     }
@@ -1195,6 +1202,7 @@ mod zone_check {
         bornhack_aegg::game::engine::ADVANCE_CALLS.with(|c| c.set(0));
         f.update(720 * 6);
         let n = bornhack_aegg::game::engine::ADVANCE_CALLS.with(|c| c.get());
+        println!("calm 720 min: {n} advance calls");
         assert!(n <= 200, "{n} advance calls");
     }
 
@@ -1285,5 +1293,69 @@ mod zone_check_fast_target {
             slow.last_update_tick = fast.last_update_tick;
             assert_eq!(fast, slow, "{minutes} min");
         }
+    }
+}
+
+mod rounding_margin {
+    use bornhack_aegg::game::engine::advance::advance;
+    use bornhack_aegg::game::engine::needs::MAX;
+    use bornhack_aegg::game::engine::regime::mood_target;
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase};
+
+    /// Mood on, or one full step off, a target moving at about MOOD_STEP per
+    /// minute: the 3/2 and 1/2 truncations make the target only nearly linear.
+    #[test]
+    fn update_is_exact_near_the_mood_step() {
+        let mut x: u64 = 0x1234_5678_9abc_def1;
+        let mut r = |n: u32| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x % n as u64) as u32
+        };
+        let (mut cand, mut bad) = (0, 0);
+        for _ in 0..200_000 {
+            let mut s = GameState::new_egg(1, PetKind(0));
+            s.phase = Phase::Active;
+            s.hatching_countdown = 0;
+            s.is_sleeping = r(4) == 0;
+            s.fullness = r(65536) as u16;
+            s.hydration = r(65536) as u16;
+            s.fun = r(65536) as u16;
+            s.energy = (r(60000) + 3000) as u16;
+            s.dirt = r(65536) as u16;
+            s.booze = if r(3) == 0 { r(40000) as u16 } else { 0 };
+            s.weight = r(65536) as u16;
+            s.fitness = r(65536) as u16;
+            s.health = (r(65000) + 500) as u16;
+            let t0 = mood_target(&s);
+            let mut a = s.clone();
+            a.mood = t0 as u16;
+            advance(&mut a, 1);
+            if ((mood_target(&a) - t0).abs() - 120).abs() > 3 {
+                continue;
+            }
+            for moff in [0i32, 120, -120, 1, -1, 240, -240] {
+                let mut s2 = s.clone();
+                s2.mood = (t0 + moff).clamp(0, MAX) as u16;
+                cand += 1;
+                for n in [2u32, 3, 5, 9, 17, 40] {
+                    let mut fast = s2.clone();
+                    fast.update(n * 6);
+                    let mut slow = s2.clone();
+                    for _ in 0..n {
+                        advance(&mut slow, 1);
+                    }
+                    slow.age_ticks = fast.age_ticks;
+                    slow.last_update_tick = fast.last_update_tick;
+                    if fast != slow {
+                        bad += 1;
+                        break;
+                    }
+                }
+            }
+        }
+        assert!(cand > 500, "only {cand} candidates");
+        assert_eq!(bad, 0, "{bad} of {cand} near-step states differ");
     }
 }
