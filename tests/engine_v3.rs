@@ -602,7 +602,11 @@ mod advance_wake {
         s.health = pct(30);
         advance(&mut s, 1);
         assert!(s.is_sleeping);
-        assert!(s.health >= pct(30), "no collapse loss at or under 33 %");
+        assert_eq!(
+            s.health,
+            pct(30) + 14,
+            "no collapse loss at or under 33 %, just the recovery"
+        );
     }
 
     #[test]
@@ -2534,9 +2538,7 @@ mod status_wake {
         let now = s.last_update_tick;
         let st = s.stats(now);
         assert_eq!(
-            (
-                st.hunger, st.tired, st.healthy, st.happy, st.fit, st.drunk
-            ),
+            (st.hunger, st.tired, st.healthy, st.happy, st.fit, st.drunk),
             (50, 40, 90, 70, 45, 80)
         );
         assert_eq!(

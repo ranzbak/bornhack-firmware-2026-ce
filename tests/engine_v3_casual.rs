@@ -21,11 +21,16 @@ fn casual_routines_delta_matches_oracle() {
         let o = sim::run_routine(&r, 30, Driver::Oracle);
         let d = sim::run_routine(&r, 30, Driver::Delta);
         println!("casual {name}: oracle {o:?}\n               delta  {d:?}");
-        assert_eq!(o.alive, d.alive, "{name}");
-        assert!(
-            (o.avg_mood_pct as i32 - d.avg_mood_pct as i32).abs() <= 1,
-            "{name} mood"
-        );
+        // R21: the delta engine is exact, so every field the oracle reports
+        // is equal (the wake count exists only for the delta driver).
+        assert_eq!(o.alive, d.alive, "{name}: alive");
+        assert_eq!(o.phase, d.phase, "{name}: phase");
+        assert_eq!(o.avg_mood_pct, d.avg_mood_pct, "{name}: avg mood");
+        assert_eq!(o.end_health_pct, d.end_health_pct, "{name}: end health");
+        assert_eq!(o.min_health_pct, d.min_health_pct, "{name}: min health");
+        assert_eq!(o.end_fitness_pct, d.end_fitness_pct, "{name}: fitness");
+        assert_eq!(o.end_weight_pct, d.end_weight_pct, "{name}: weight");
+        assert_eq!(o.injuries, d.injuries, "{name}: injuries");
     }
 }
 
