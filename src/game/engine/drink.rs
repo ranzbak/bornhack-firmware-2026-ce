@@ -35,30 +35,11 @@ impl DrinkKind {
     pub fn is_alcoholic(self) -> bool {
         !matches!(self, DrinkKind::Water | DrinkKind::Cola)
     }
-
-    /// HAX price to buy this drink. Only Water is "healthy" (pricier).
-    pub fn hax_price(self) -> u32 {
-        match self {
-            DrinkKind::Water => 15,
-            DrinkKind::Cola | DrinkKind::Beer | DrinkKind::Wine | DrinkKind::Whiskey => 10,
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Water (the only "healthy" drink) costs 15 HAX; every other drink
-    /// (non-alcoholic Cola included) costs 10.
-    #[test]
-    fn hax_price_matches_health_tier() {
-        assert_eq!(DrinkKind::Water.hax_price(), 15);
-        assert_eq!(DrinkKind::Cola.hax_price(), 10);
-        assert_eq!(DrinkKind::Beer.hax_price(), 10);
-        assert_eq!(DrinkKind::Wine.hax_price(), 10);
-        assert_eq!(DrinkKind::Whiskey.hax_price(), 10);
-    }
 
     #[test]
     fn only_water_and_cola_are_non_alcoholic() {

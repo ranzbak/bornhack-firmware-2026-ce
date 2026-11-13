@@ -17,6 +17,7 @@ pub mod debug;
 pub mod doses;
 pub mod drink;
 pub mod food;
+pub mod hint;
 pub mod needs;
 pub mod regime;
 #[cfg(feature = "simulator")]
@@ -218,6 +219,16 @@ pub enum MiniGame {
     BlackHole,
     Nim,
     BornJeweled,
+}
+
+impl MiniGame {
+    pub const ALL: [MiniGame; 5] = [
+        MiniGame::TicTacToe,
+        MiniGame::LightsOut,
+        MiniGame::BlackHole,
+        MiniGame::Nim,
+        MiniGame::BornJeweled,
+    ];
 }
 
 /// The complete game state.  Serialisable to ekv for save/restore.
@@ -705,11 +716,16 @@ impl GameState {
         true
     }
 
+    /// The price of an action that has no food or drink choice.
+    fn flat_price(&self, a: Action) -> Option<u32> {
+        doses::price(a, None, None, self.hard_mode)
+    }
+
     /// Start the feed action with the chosen food.  Returns false if not
     /// available.
     pub fn feed(&mut self, food: FoodKind) -> bool {
-        let price = food.hax_price(self.hard_mode);
-        if !self.start_action(Action::Feed, Some(price), FEED_DURATION()) {
+        let price = doses::price(Action::Feed, Some(food), None, self.hard_mode);
+        if !self.start_action(Action::Feed, price, FEED_DURATION()) {
             return false;
         }
         self.active_food = Some(food);
@@ -718,12 +734,12 @@ impl GameState {
 
     /// Start the heal action (Aspirine costs HAX).
     pub fn heal(&mut self) -> bool {
-        self.start_action(Action::Heal, Some(ASPIRINE_HAX_COST), HEAL_DURATION())
+        self.start_action(Action::Heal, self.flat_price(Action::Heal), HEAL_DURATION())
     }
 
     /// Start the play action.
     pub fn play(&mut self) -> bool {
-        self.start_action(Action::Play, Some(PLAY_HAX_COST), PLAY_DURATION())
+        self.start_action(Action::Play, self.flat_price(Action::Play), PLAY_DURATION())
     }
 
     /// Send the pet to "Only pets" to earn HAX. Timed action like Play.
@@ -769,7 +785,7 @@ impl GameState {
     pub fn medicate(&mut self) -> bool {
         self.start_action(
             Action::Medicate,
-            Some(medication_price(self.hard_mode)),
+            self.flat_price(Action::Medicate),
             MEDICATE_DURATION(),
         )
     }
@@ -780,7 +796,7 @@ impl GameState {
     pub fn ozempic(&mut self) -> bool {
         self.start_action(
             Action::Ozempic,
-            Some(medication_price(self.hard_mode)),
+            self.flat_price(Action::Ozempic),
             OZEMPIC_DURATION(),
         )
     }
@@ -791,7 +807,11 @@ impl GameState {
         if doses::refusal(self, Action::Drink, Some(drink)).is_some() {
             return false;
         }
-        if !self.start_action(Action::Drink, Some(drink.hax_price()), DRINK_DURATION()) {
+        if !self.start_action(
+            Action::Drink,
+            doses::price(Action::Drink, None, Some(drink), self.hard_mode),
+            DRINK_DURATION(),
+        ) {
             return false;
         }
         self.active_drink = Some(drink);
@@ -803,7 +823,7 @@ impl GameState {
     pub fn rehab(&mut self) -> bool {
         self.start_action(
             Action::Rehab,
-            Some(rehab_price(self.hard_mode)),
+            self.flat_price(Action::Rehab),
             REHAB_DURATION(),
         )
     }
@@ -1022,6 +1042,52 @@ impl GameState {
             None => self.cooldown_battle,
         };
         (cooldown > 0).then(|| doses::Reason::Wait(cooldown as u32 * 10))
+    }
+
+    /// Why the pet would turn `r` away now, or `None` when it would take it.
+    /// Built only from the primitives the menu rows use: `refusal_for`,
+    /// `sleep_refusal`, `game_refusal` and the price (`doses::price`,
+    /// `can_afford`, money mode only).
+    pub fn remedy_reason(&self, r: hint::Remedy) -> Option<doses::Reason> {
+        use hint::Remedy;
+        let priced = |a: Action, food: Option<FoodKind>, drink: Option<DrinkKind>| {
+            let price = doses::price(a, food, drink, self.hard_mode)?;
+            (self.money_enabled && !self.can_afford(price)).then_some(doses::Reason::CantAfford)
+        };
+        let gate = |a: Action, drink: Option<DrinkKind>| {
+            self.refusal_for(a, drink)
+                .or_else(|| priced(a, None, drink))
+        };
+        match r {
+            Remedy::Feed => {
+                let cheapest = FoodKind::ALL
+                    .into_iter()
+                    .min_by_key(|&f| doses::price(Action::Feed, Some(f), None, self.hard_mode))?;
+                self.refusal_for(Action::Feed, None)
+                    .or_else(|| priced(Action::Feed, Some(cheapest), None))
+            }
+            Remedy::Water => gate(Action::Drink, Some(DrinkKind::Water)),
+            Remedy::Sleep => self.sleep_refusal(),
+            Remedy::Play => gate(Action::Play, None),
+            Remedy::Game => {
+                let mut first = None;
+                for g in MiniGame::ALL {
+                    match self.game_refusal(Some(g)) {
+                        None => return None,
+                        why => first = first.or(why),
+                    }
+                }
+                first
+            }
+            Remedy::Relax => gate(Action::Relax, None),
+            Remedy::Wash => gate(Action::Wash, None),
+            Remedy::Exercise => gate(Action::Exercise, None),
+            Remedy::Medicine => gate(Action::Heal, None),
+            Remedy::Insulin => gate(Action::Medicate, None),
+            Remedy::Rehab => gate(Action::Rehab, None),
+            Remedy::Defrost => (!self.hibernating)
+                .then_some(doses::Reason::Refused(doses::Refusal::NoNeed)),
+        }
     }
 
     /// The reasons that stop every action alike.
@@ -2314,7 +2380,7 @@ mod overweight_diabetes_tests {
     // ── Stage 3: "things cost money" ────────────────────────────────────
 
     /// Feeding charges by the food's health tier — healthy (Salad) costs
-    /// more than unhealthy (Burger), mirroring `FoodKind::hax_price`.
+    /// more than unhealthy (Burger), mirroring `doses::price`.
     #[test]
     fn feed_charges_by_food_health() {
         let mut state = GameState::new_egg(40, PetKind::DEFAULT);
@@ -2336,7 +2402,7 @@ mod overweight_diabetes_tests {
     }
 
     /// Drinking charges by the drink's health tier — healthy (Water) costs
-    /// more than unhealthy (Cola), mirroring `DrinkKind::hax_price`.
+    /// more than unhealthy (Cola), mirroring `doses::price`.
     #[test]
     fn drink_charges_by_health() {
         let mut state = GameState::new_egg(42, PetKind::DEFAULT);

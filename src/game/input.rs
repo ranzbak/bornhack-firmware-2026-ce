@@ -138,7 +138,13 @@ pub fn dispatch(btn: ButtonId) -> bool {
     // ── Active: modal or icon navigation ─────────────────────────────
     if modal::is_open() {
         match btn {
-            ButtonId::Cancel => modal::close(),
+            // On the hint view Cancel steps back to the list; a second one
+            // closes the modal, as on every popover view.
+            ButtonId::Cancel => {
+                if !modal::dismiss_hint() {
+                    modal::close();
+                }
+            }
             ButtonId::Up => modal::cursor_up(),
             ButtonId::Down => modal::cursor_down(),
             ButtonId::Fire | ButtonId::Execute => modal::activate(),

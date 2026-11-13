@@ -112,6 +112,40 @@ impl Reason {
     }
 }
 
+/// The HAX price of an action in the current mode, `None` for a free one. The
+/// one price table: the starters charge it, the menu shows it and the hint
+/// checks it. `food` / `drink` name the choice for Feed / Drink. Healthy food
+/// and water cost more than junk; hard (US) mode raises healthy food, the
+/// medications and rehab.
+pub fn price(
+    a: Action,
+    food: Option<FoodKind>,
+    drink: Option<DrinkKind>,
+    hard: bool,
+) -> Option<u32> {
+    match a {
+        Action::Feed => food.map(|f| match f {
+            FoodKind::Salad | FoodKind::Apple => {
+                if hard {
+                    20
+                } else {
+                    15
+                }
+            }
+            FoodKind::Frikandel | FoodKind::Pizza | FoodKind::Cake => 10,
+        }),
+        Action::Drink => drink.map(|d| match d {
+            DrinkKind::Water => 15,
+            DrinkKind::Cola | DrinkKind::Beer | DrinkKind::Wine | DrinkKind::Whiskey => 10,
+        }),
+        Action::Heal => Some(super::ASPIRINE_HAX_COST),
+        Action::Play => Some(super::PLAY_HAX_COST),
+        Action::Medicate | Action::Ozempic => Some(super::medication_price(hard)),
+        Action::Rehab => Some(super::rehab_price(hard)),
+        Action::Exercise | Action::Wash | Action::Relax | Action::OnlyPets => None,
+    }
+}
+
 /// A wait of `secs` seconds as "45s", "59m" or "2h05" (the longest, 72 h,
 /// is "72h00").
 pub fn fmt_wait(secs: u32) -> heapless::String<8> {

@@ -4630,3 +4630,405 @@ mod causes {
         assert_eq!(Cause::WellRested.what(), "well rested");
     }
 }
+
+mod hint {
+    use bornhack_aegg::game::engine::debug::DebugPoke;
+    use bornhack_aegg::game::engine::doses::{Reason, Refusal};
+    use bornhack_aegg::game::engine::hint::{
+        Ask, Hint, Remedy, Subject, hint, otherwise, remedies, subject_line,
+    };
+    use bornhack_aegg::game::engine::needs::P;
+    use bornhack_aegg::game::engine::status::{Condition, Word, conditions};
+    use bornhack_aegg::game::engine::thresholds::HATCHING_TICKS;
+    use bornhack_aegg::game::engine::{
+        Action, DrinkKind, FoodKind, GameState, PetKind, Phase, doses,
+    };
+
+    const POPOVER_COLS: usize = 18;
+
+    fn pct(v: i32) -> u16 {
+        (v * P) as u16
+    }
+
+    fn pet() -> GameState {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        assert_eq!(s.phase, Phase::Active);
+        s.is_sleeping = false;
+        s.tick_rem = 0;
+        s.money_enabled = false;
+        s
+    }
+
+    fn comfy() -> GameState {
+        let mut s = pet();
+        s.debug_poke(DebugPoke::Comfort).unwrap();
+        s
+    }
+
+    const POKES: [DebugPoke; 15] = [
+        DebugPoke::Hungry,
+        DebugPoke::Thirsty,
+        DebugPoke::Stuffed,
+        DebugPoke::Tired,
+        DebugPoke::Bored,
+        DebugPoke::Dirty,
+        DebugPoke::Fat,
+        DebugPoke::Thin,
+        DebugPoke::Unfit,
+        DebugPoke::Drunk,
+        DebugPoke::HungOver,
+        DebugPoke::Groggy,
+        DebugPoke::Injured,
+        DebugPoke::Diabetic,
+        DebugPoke::Dependent,
+    ];
+
+    fn all_subjects() -> Vec<Subject> {
+        let mut v: Vec<Subject> = Word::ALL.iter().map(|&w| Subject::Word(w)).collect();
+        v.extend([
+            Subject::WornOut,
+            Subject::Egg,
+            Subject::Gone,
+            Subject::Hibernating,
+        ]);
+        v
+    }
+
+    fn lines(s: &GameState) -> (String, String) {
+        let (a, b) = hint(s).lines();
+        (a.as_str().to_string(), b.as_str().to_string())
+    }
+
+    #[test]
+    fn every_word_and_condition_has_a_hint() {
+        for sub in all_subjects() {
+            assert!(!subject_line(sub).is_empty(), "{sub:?}");
+            assert!(
+                !remedies(sub).is_empty() || !otherwise(sub).is_empty(),
+                "{sub:?} has neither a remedy nor a fixed line"
+            );
+        }
+        // Each Condition, in a state where it is the only thing wrong, is
+        // covered by the subject written here (not derived from the code).
+        type Setup = fn(&mut GameState);
+        let table: [(Condition, Setup, Subject); 10] = [
+            (Condition::Injured, |s| s.injured_min = 600, Subject::Word(Word::Injured)),
+            (Condition::Sore, |s| s.strain = pct(60), Subject::Word(Word::Sore)),
+            (Condition::HungOver, |s| s.hangover_min = 300, Subject::Word(Word::HungOver)),
+            (Condition::Groggy, |s| s.groggy_min = 100, Subject::Word(Word::Groggy)),
+            (Condition::WornOut, |s| s.deprived = true, Subject::WornOut),
+            (
+                Condition::Diabetic,
+                |s| {
+                    s.diabetic = true;
+                    s.insulin_min = 0;
+                },
+                Subject::Word(Word::NoInsulin),
+            ),
+            (
+                Condition::Diabetic,
+                |s| {
+                    s.diabetic = true;
+                    s.insulin_min = 5000;
+                },
+                Subject::Word(Word::Content),
+            ),
+            (
+                Condition::Dependent,
+                |s| {
+                    s.dependent = true;
+                    s.rehab_min = 0;
+                },
+                Subject::Word(Word::NeedsRehab),
+            ),
+            (
+                Condition::InRehab,
+                |s| {
+                    s.dependent = true;
+                    s.rehab_min = 3000;
+                },
+                Subject::Word(Word::Content),
+            ),
+            (Condition::WellRested, |s| s.rested_min = 200, Subject::Word(Word::WellRested)),
+        ];
+        for (c, setup, want) in table {
+            let mut s = comfy();
+            setup(&mut s);
+            assert!(conditions(&s).has(c), "{c:?} set up");
+            assert_eq!(hint(&s).subject, want, "{c:?}");
+        }
+        for c in Condition::ALL {
+            assert!(table.iter().any(|t| t.0 == c), "{c:?} is not in the table");
+        }
+    }
+
+    /// Every state the owner's requirement covers, labelled.
+    fn states() -> Vec<(String, GameState)> {
+        let mut out: Vec<(String, GameState)> = Vec::new();
+        for hard in [false, true] {
+            for money in [None, Some(0), Some(5), Some(1000)] {
+                let mut base = comfy();
+                base.hard_mode = hard;
+                if let Some(m) = money {
+                    base.money_enabled = true;
+                    base.money = m;
+                }
+                let tag = format!("hard={hard} money={money:?}");
+                out.push((format!("{tag} comfy"), base.clone()));
+                for p in POKES {
+                    let mut s = base.clone();
+                    s.debug_poke(p).unwrap();
+                    out.push((format!("{tag} {p:?}"), s.clone()));
+                    let mut asleep = s.clone();
+                    asleep.is_sleeping = true;
+                    out.push((format!("{tag} {p:?} asleep"), asleep));
+                    for a in [Action::Play, Action::Wash] {
+                        let mut busy = s.clone();
+                        busy.active_action = Some(a);
+                        busy.action_ticks_remaining = 30;
+                        out.push((format!("{tag} {p:?} busy {a:?}"), busy));
+                    }
+                }
+                let mut s = base.clone();
+                s.debug_poke(DebugPoke::Injured).unwrap();
+                s.debug_poke(DebugPoke::Bored).unwrap();
+                out.push((format!("{tag} injured bored"), s.clone()));
+                s.med_cd_min = 120;
+                out.push((format!("{tag} injured med_cd 120"), s));
+                let mut s = base.clone();
+                s.deprived = true;
+                out.push((format!("{tag} worn out"), s.clone()));
+                s.is_sleeping = true;
+                out.push((format!("{tag} worn out asleep"), s));
+                let mut s = base.clone();
+                s.rested_min = 100;
+                out.push((format!("{tag} well rested"), s));
+                for g in 0..2 {
+                    let mut s = base.clone();
+                    s.debug_poke(DebugPoke::Bored).unwrap();
+                    s.cooldown_tictactoe = 10;
+                    s.cooldown_lightsout = 10;
+                    s.cooldown_blackhole = 10;
+                    s.cooldown_nim = 10;
+                    s.cooldown_bornjeweled = if g == 0 { 10 } else { 0 };
+                    out.push((format!("{tag} bored games {g}"), s));
+                }
+                let mut s = base.clone();
+                s.hibernating = true;
+                out.push((format!("{tag} hibernating"), s));
+            }
+        }
+        out.push(("egg".into(), GameState::new_egg(7, PetKind(0))));
+        let mut gone = pet();
+        gone.phase = Phase::Gone;
+        out.push(("gone".into(), gone));
+        out
+    }
+
+    #[test]
+    fn suggested_action_is_never_refused() {
+        let mut asked = std::collections::HashSet::new();
+        for (name, s) in states() {
+            let h = hint(&s);
+            match h.ask {
+                Ask::Do(r) => {
+                    assert_eq!(s.remedy_reason(r), None, "{name}: {r:?}");
+                    asked.insert(r);
+                }
+                Ask::Refused(why) => {
+                    let first = remedies(h.subject)[0];
+                    assert_eq!(Some(why), s.remedy_reason(first), "{name}");
+                }
+                Ask::Say(_) => assert!(remedies(h.subject).is_empty(), "{name}"),
+            }
+        }
+        // The state list is wide enough to reach most remedies.
+        for r in [Remedy::Feed, Remedy::Water, Remedy::Sleep, Remedy::Game, Remedy::Wash] {
+            assert!(asked.contains(&r), "{r:?} never suggested");
+        }
+    }
+
+    #[test]
+    fn money_zero_never_suggests_a_priced_remedy() {
+        let mut s = comfy();
+        s.money_enabled = true;
+        s.money = 0;
+        s.debug_poke(DebugPoke::Hungry).unwrap();
+        assert_eq!(hint(&s).ask, Ask::Refused(Reason::CantAfford));
+        assert_eq!(lines(&s), ("I'm starving!".into(), "but can't afford".into()));
+        s.money = 10;
+        assert_eq!(hint(&s).ask, Ask::Do(Remedy::Feed));
+        s.hard_mode = true;
+        s.fullness = pct(20);
+        s.money = 9;
+        assert_eq!(hint(&s).ask, Ask::Refused(Reason::CantAfford));
+    }
+
+    #[test]
+    fn the_danger_hint_wins() {
+        let mut s = comfy();
+        s.dirt = pct(86);
+        s.fun = pct(25);
+        let h = hint(&s);
+        assert_eq!(h.subject, Subject::Word(Word::Filthy));
+        assert_eq!(h.ask, Ask::Do(Remedy::Wash));
+        assert_eq!(lines(&s), ("I'm filthy!".into(), "Wash me, please.".into()));
+    }
+
+    #[test]
+    fn hungry_but_busy_says_why() {
+        let mut s = comfy();
+        s.fullness = pct(20);
+        s.active_action = Some(Action::Play);
+        s.action_ticks_remaining = 30;
+        assert_eq!(lines(&s), ("I'm hungry!".into(), "but busy".into()));
+    }
+
+    #[test]
+    fn an_injured_bored_pet_asks_for_a_game() {
+        let mut s = comfy();
+        s.injured_min = 600;
+        s.fun = pct(10);
+        let h = hint(&s);
+        assert_eq!(h.subject, Subject::Word(Word::Bored));
+        assert_eq!(h.ask, Ask::Do(Remedy::Game));
+        assert_eq!(lines(&s), ("I'm bored!".into(), "Play a game!".into()));
+    }
+
+    #[test]
+    fn medicine_on_cooldown_says_wait() {
+        let mut s = comfy();
+        s.injured_min = 600;
+        s.med_cd_min = 120;
+        assert_eq!(hint(&s).subject, Subject::Word(Word::Injured));
+        assert_eq!(lines(&s), ("I'm injured!".into(), "but wait 2h00".into()));
+        s.med_cd_min = 0;
+        assert_eq!(lines(&s), ("I'm injured!".into(), "I need medicine.".into()));
+    }
+
+    #[test]
+    fn egg_gone_and_hibernating_have_their_own_lines() {
+        let egg = GameState::new_egg(7, PetKind(0));
+        assert_eq!(hint(&egg).subject, Subject::Egg);
+        assert_eq!(lines(&egg), ("*wobble*".into(), "I'm hatching!".into()));
+
+        let mut gone = pet();
+        gone.phase = Phase::Gone;
+        assert_eq!(hint(&gone).subject, Subject::Gone);
+        assert_eq!(lines(&gone), ("...".into(), "Your pet left.".into()));
+
+        let mut frozen = comfy();
+        frozen.hibernating = true;
+        assert_eq!(hint(&frozen).subject, Subject::Hibernating);
+        assert_eq!(hint(&frozen).ask, Ask::Do(Remedy::Defrost));
+        assert_eq!(lines(&frozen), ("Brrr, frozen!".into(), "Defrost me!".into()));
+    }
+
+    #[test]
+    fn fixed_lines_and_worn_out() {
+        let mut s = comfy();
+        assert_eq!(lines(&s), ("I'm happy!".into(), "Thanks!".into()));
+        s.rested_min = 100;
+        assert_eq!(lines(&s), ("I feel great!".into(), "Thanks!".into()));
+        s.deprived = true;
+        assert_eq!(lines(&s), ("I'm worn out!".into(), "Put me to bed.".into()));
+        let mut s = comfy();
+        s.booze = pct(20);
+        assert_eq!(lines(&s), ("I'm tipsy!".into(), "Hic! Thanks!".into()));
+        let mut s = comfy();
+        s.is_sleeping = true;
+        assert_eq!(lines(&s), ("Zzz...".into(), "Let me sleep.".into()));
+        let mut s = comfy();
+        s.debug_poke(DebugPoke::Stuffed).unwrap();
+        assert_eq!(lines(&s), ("I'm stuffed!".into(), "Let me digest.".into()));
+        let mut s = comfy();
+        s.diabetic = true;
+        s.insulin_min = 0;
+        assert_eq!(lines(&s), ("I'm diabetic!".into(), "I need insulin.".into()));
+        let mut s = comfy();
+        s.dependent = true;
+        s.rehab_min = 0;
+        assert_eq!(lines(&s), ("I'm dependent!".into(), "I need rehab.".into()));
+        let mut s = comfy();
+        s.hydration = pct(30);
+        assert_eq!(lines(&s), ("I'm thirsty!".into(), "Water, please.".into()));
+    }
+
+    const ALL_REMEDIES: [Remedy; 12] = [
+        Remedy::Feed,
+        Remedy::Water,
+        Remedy::Sleep,
+        Remedy::Play,
+        Remedy::Game,
+        Remedy::Relax,
+        Remedy::Wash,
+        Remedy::Exercise,
+        Remedy::Medicine,
+        Remedy::Insulin,
+        Remedy::Rehab,
+        Remedy::Defrost,
+    ];
+
+    #[test]
+    fn hint_lines_fit_the_popover() {
+        let reasons = [
+            Reason::Refused(Refusal::NotThirsty),
+            Reason::Refused(Refusal::AlreadyClean),
+            Reason::Refused(Refusal::Injured),
+            Reason::Refused(Refusal::Asleep),
+            Reason::Refused(Refusal::NoNeed),
+            Reason::Refused(Refusal::Tired),
+            Reason::Wait(59),
+            Reason::Wait(72 * 3600),
+            Reason::CantAfford,
+            Reason::Busy,
+            Reason::Hibernating,
+            Reason::Egg,
+            Reason::Gone,
+        ];
+        let cols = |s: &str| s.chars().count();
+        for sub in all_subjects() {
+            let mut asks = vec![Ask::Say(otherwise(sub))];
+            asks.extend(ALL_REMEDIES.iter().map(|&r| Ask::Do(r)));
+            asks.extend(reasons.iter().map(|&r| Ask::Refused(r)));
+            for ask in asks {
+                let (a, b) = Hint { subject: sub, ask }.lines();
+                assert!(cols(&a) <= POPOVER_COLS, "{sub:?} line 1 {a:?}");
+                assert!(cols(&b) <= POPOVER_COLS, "{sub:?} {ask:?} line 2 {b:?}");
+            }
+        }
+        let (_, b) = Hint { subject: Subject::Word(Word::Injured), ask: Ask::Refused(Reason::Wait(72 * 3600)) }.lines();
+        assert_eq!(b.as_str(), "but wait 72h00");
+    }
+
+    /// The prices before `doses::price` became the one table.
+    #[test]
+    fn the_price_table_is_unchanged() {
+        let old_food = |f: FoodKind, hard: bool| match f {
+            FoodKind::Salad | FoodKind::Apple => if hard { 20 } else { 15 },
+            FoodKind::Frikandel | FoodKind::Pizza | FoodKind::Cake => 10,
+        };
+        let old_drink = |d: DrinkKind| match d {
+            DrinkKind::Water => 15,
+            _ => 10,
+        };
+        for hard in [false, true] {
+            for f in FoodKind::ALL {
+                assert_eq!(doses::price(Action::Feed, Some(f), None, hard), Some(old_food(f, hard)), "{f:?} hard={hard}");
+            }
+            for d in [DrinkKind::Water, DrinkKind::Cola, DrinkKind::Beer, DrinkKind::Wine, DrinkKind::Whiskey] {
+                assert_eq!(doses::price(Action::Drink, None, Some(d), hard), Some(old_drink(d)), "{d:?}");
+            }
+            assert_eq!(doses::price(Action::Heal, None, None, hard), Some(1));
+            assert_eq!(doses::price(Action::Play, None, None, hard), Some(10));
+            let (med, rehab) = if hard { (45, 75) } else { (15, 15) };
+            assert_eq!(doses::price(Action::Medicate, None, None, hard), Some(med));
+            assert_eq!(doses::price(Action::Ozempic, None, None, hard), Some(med));
+            assert_eq!(doses::price(Action::Rehab, None, None, hard), Some(rehab));
+            for a in [Action::Exercise, Action::Wash, Action::Relax, Action::OnlyPets] {
+                assert_eq!(doses::price(a, None, None, hard), None, "{a:?}");
+            }
+        }
+    }
+}

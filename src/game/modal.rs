@@ -92,6 +92,7 @@ impl ModalKind {
         match self {
             Self::Stats => &[
                 Item::ViewStats,
+                Item::Hint,
                 Item::Diary,
                 Item::RolledStats,
                 Item::Friends,
@@ -185,6 +186,7 @@ impl ModalKind {
 enum Item {
     Cancel,
     ViewStats,
+    Hint,
     Diary,
     RolledStats,
     Friends,
@@ -295,6 +297,7 @@ impl Item {
         match self {
             Self::Cancel => "Cancel",
             Self::ViewStats => "View stats",
+            Self::Hint => "Hint",
             Self::Diary => "Diary",
             Self::RolledStats => "Rolled stats",
             Self::Friends => "Friends",
@@ -340,16 +343,13 @@ impl Item {
     /// price. Takes `stats` so Hard (US) mode can report the actual
     /// effective price rather than the normal-mode base.
     fn hax_price(self, stats: &super::engine::PetStats) -> Option<u32> {
+        use super::engine::doses::price;
         match self {
-            Self::FeedFood(food) => Some(food.hax_price(stats.hard_mode)),
-            Self::DrinkChoice(drink) => Some(drink.hax_price()),
-            Self::GiveMedicine => Some(super::engine::ASPIRINE_HAX_COST),
-            Self::PlayNow => Some(super::engine::PLAY_HAX_COST),
-            Self::GiveMedication | Self::Ozempic => {
-                Some(super::engine::medication_price(stats.hard_mode))
+            Self::FeedFood(food) => price(super::engine::Action::Feed, Some(food), None, stats.hard_mode),
+            _ => {
+                let (action, drink) = self.action()?;
+                price(action, None, drink, stats.hard_mode)
             }
-            Self::Rehab => Some(super::engine::rehab_price(stats.hard_mode)),
-            _ => None,
         }
     }
 
@@ -366,66 +366,56 @@ impl Item {
         if stats.hibernating && !matches!(self, Self::Debug(_)) {
             return matches!(
                 self,
-                Self::Cancel | Self::ViewStats | Self::Diary | Self::RolledStats | Self::WakeUp,
+                Self::Cancel
+                    | Self::ViewStats
+                    | Self::Hint
+                    | Self::Diary
+                    | Self::RolledStats
+                    | Self::WakeUp,
             );
         }
-        match self {
-            Self::Cancel
-            | Self::ViewStats
-            | Self::Diary
-            | Self::RolledStats
-            | Self::Friends
-            | Self::PlayMusic
-            | Self::Song(_)
-            | Self::Debug(_) => true,
-            Self::DrinkChoice(drink) => {
-                stats.can_drink
-                    && (drink != super::engine::DrinkKind::Water || stats.can_drink_water)
-                    && (!stats.money_enabled || stats.money >= drink.hax_price())
+        // Money mode: the price must be covered, the same check as
+        // `GameState::remedy_reason` (the hint) makes.
+        let affordable = self
+            .hax_price(stats)
+            .is_none_or(|price| !stats.money_enabled || stats.money >= price);
+        affordable
+            && match self {
+                Self::Cancel
+                | Self::ViewStats
+                | Self::Hint
+                | Self::Diary
+                | Self::RolledStats
+                | Self::Friends
+                | Self::PlayMusic
+                | Self::Song(_)
+                | Self::Debug(_) => true,
+                Self::DrinkChoice(drink) => {
+                    stats.can_drink
+                        && (drink != super::engine::DrinkKind::Water || stats.can_drink_water)
+                }
+                Self::Rehab => stats.can_rehab,
+                Self::Battle => stats.can_battle,
+                Self::FeedFood(_) => stats.can_feed,
+                Self::GiveMedicine => stats.can_heal,
+                Self::GiveMedication => stats.can_medicate,
+                Self::Ozempic => stats.can_ozempic,
+                Self::ExerciseNow => stats.can_exercise,
+                Self::Sleep => stats.can_sleep,
+                Self::Relax => stats.can_relax,
+                Self::Wash => stats.can_wash,
+                Self::WakeFromSleep => stats.can_wake,
+                Self::PlayNow => stats.can_play,
+                // Never gated by price: the escape hatch when broke.
+                Self::OnlyPets => stats.can_only_pets,
+                Self::TicTacToe => stats.can_play_tictactoe,
+                Self::LightsOut => stats.can_play_lightsout,
+                Self::BlackHole => stats.can_play_blackhole,
+                Self::Nim => stats.can_play_nim,
+                Self::BornJeweled => stats.can_play_bornjeweled,
+                Self::Hibernate => true,
+                Self::WakeUp => false,
             }
-            Self::Rehab => {
-                stats.can_rehab
-                    && (!stats.money_enabled
-                        || stats.money >= super::engine::rehab_price(stats.hard_mode))
-            }
-            Self::Battle => stats.can_battle,
-            Self::FeedFood(food) => {
-                stats.can_feed
-                    && (!stats.money_enabled || stats.money >= food.hax_price(stats.hard_mode))
-            }
-            Self::GiveMedicine => {
-                stats.can_heal
-                    && (!stats.money_enabled || stats.money >= super::engine::ASPIRINE_HAX_COST)
-            }
-            Self::GiveMedication => {
-                stats.can_medicate
-                    && (!stats.money_enabled
-                        || stats.money >= super::engine::medication_price(stats.hard_mode))
-            }
-            Self::Ozempic => {
-                stats.can_ozempic
-                    && (!stats.money_enabled
-                        || stats.money >= super::engine::medication_price(stats.hard_mode))
-            }
-            Self::ExerciseNow => stats.can_exercise,
-            Self::Sleep => stats.can_sleep,
-            Self::Relax => stats.can_relax,
-            Self::Wash => stats.can_wash,
-            Self::WakeFromSleep => stats.can_wake,
-            Self::PlayNow => {
-                stats.can_play
-                    && (!stats.money_enabled || stats.money >= super::engine::PLAY_HAX_COST)
-            }
-            // Never gated — the escape hatch when broke.
-            Self::OnlyPets => stats.can_only_pets,
-            Self::TicTacToe => stats.can_play_tictactoe,
-            Self::LightsOut => stats.can_play_lightsout,
-            Self::BlackHole => stats.can_play_blackhole,
-            Self::Nim => stats.can_play_nim,
-            Self::BornJeweled => stats.can_play_bornjeweled,
-            Self::Hibernate => true,
-            Self::WakeUp => false,
-        }
     }
 
     /// The warning this row's dose would cause (the engine's pure preview), or
@@ -543,6 +533,10 @@ impl Item {
             Self::ViewStats => {
                 STATS_PAGE.store(0, Ordering::Relaxed);
                 STATS_VIEW.store(true, Ordering::Relaxed);
+                super::note_live_view_drawn();
+            }
+            Self::Hint => {
+                HINT_VIEW.store(true, Ordering::Relaxed);
                 super::note_live_view_drawn();
             }
             Self::Diary => {
@@ -690,6 +684,9 @@ static MODAL_POS: AtomicU8 = AtomicU8::new(0);
 static STATS_VIEW: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 /// Which stats page shows: 0 = Needs, 1 = Body. Opening the view resets it.
 static STATS_PAGE: AtomicU8 = AtomicU8::new(0);
+/// When true, the Stats modal shows the pet's hint (a speech view) instead of
+/// the menu list.
+static HINT_VIEW: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 pub fn open(kind: ModalKind) {
     // Start on the first row that can be used, so a disabled first row
@@ -705,6 +702,7 @@ pub fn open(kind: ModalKind) {
 }
 
 pub fn close() {
+    HINT_VIEW.store(false, Ordering::Relaxed);
     STATS_VIEW.store(false, Ordering::Relaxed);
     STATS_PAGE.store(0, Ordering::Relaxed);
     MODAL_KIND.store(ModalKind::None as u8, Ordering::Relaxed);
@@ -713,14 +711,23 @@ pub fn close() {
     crate::FULL_REFRESH_PENDING.store(true, Ordering::Relaxed);
 }
 
-/// A modal sub-view whose numbers change by themselves (the stats bars).
-/// Task 5's diary and Task 9's hint view join it.
+/// A modal sub-view whose numbers change by themselves: the stats bars and
+/// the hint (its wait and the pet's need drift).
 pub fn live_modal_view_open() -> bool {
-    STATS_VIEW.load(Ordering::Relaxed)
+    STATS_VIEW.load(Ordering::Relaxed) || HINT_VIEW.load(Ordering::Relaxed)
+}
+
+/// Leave the hint view for the Stats list. True when it was showing (the
+/// button is spent); false when there was nothing to dismiss.
+pub fn dismiss_hint() -> bool {
+    HINT_VIEW.swap(false, Ordering::Relaxed)
 }
 
 /// Show the other stats page. Only while the stats view shows.
 pub fn flip_page() {
+    if dismiss_hint() {
+        return;
+    }
     if STATS_VIEW.load(Ordering::Relaxed) {
         STATS_PAGE.store(stats_page().other() as u8, Ordering::Relaxed);
     }
@@ -763,6 +770,9 @@ fn step_cursor(len: usize, from: usize, forward: bool) -> usize {
 /// Move the cursor one row up or down. Disabled rows are NOT skipped: the
 /// player can rest on one and press it to be told why it is disabled.
 fn move_cursor(forward: bool) {
+    if dismiss_hint() {
+        return;
+    }
     // While the stats-bar sub-view is showing there's no item list on
     // screen to move a cursor through — ignore Up/Down so it doesn't
     // silently advance MODAL_POS underneath the bars (surfacing as a
@@ -793,6 +803,9 @@ pub fn cursor_down() {
 /// "Cancel" closes the modal.  Action items dispatch to the game engine
 /// via `lifecycle`.  "View stats" opens the stats bar display.
 pub fn activate() {
+    if dismiss_hint() {
+        return;
+    }
     // If stats view is showing, any activation closes it.
     if STATS_VIEW.load(Ordering::Relaxed) {
         STATS_VIEW.store(false, Ordering::Relaxed);
@@ -960,6 +973,9 @@ where
     // Stats view: show stat bars instead of the menu.
     if STATS_VIEW.load(Ordering::Relaxed) {
         return draw_stats_view(display);
+    }
+    if HINT_VIEW.load(Ordering::Relaxed) {
+        return draw_hint_view(display);
     }
 
     let pos = MODAL_POS.load(Ordering::Relaxed) as usize;
@@ -1168,6 +1184,75 @@ where
         })
     });
     display.draw_iter(pixels)
+}
+
+// ---------------------------------------------------------------------------
+// Hint view — the pet says what it needs
+// ---------------------------------------------------------------------------
+
+/// Longest pet name the title shows: the popover title budget (18 columns)
+/// less " says".
+const HINT_NAME_COLS: usize = 13;
+
+/// "<name> says", the name cut to fit the title; "Your pet says" unnamed.
+fn hint_title(name: &str) -> heapless::String<24> {
+    let mut t: heapless::String<24> = heapless::String::new();
+    if name.is_empty() {
+        let _ = t.push_str("Your pet");
+    } else {
+        for c in name.chars().take(HINT_NAME_COLS) {
+            let _ = t.push(c);
+        }
+    }
+    let _ = t.push_str(" says");
+    t
+}
+
+fn draw_hint_view<D>(display: &mut D) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    use super::lifecycle;
+
+    super::note_live_view_drawn();
+    // Bring the pet up to date, then ask it.
+    if lifecycle::cycle().is_none() {
+        return Ok(());
+    }
+    let Some(hint) = lifecycle::hint() else {
+        return Ok(());
+    };
+    let (one, two) = hint.lines();
+
+    ui::draw_popover_frame(
+        display,
+        Point::new(MARGIN, MARGIN),
+        Size::new(MODAL_W, MODAL_H),
+        BORDER,
+    )?;
+    let inner_x = MARGIN + BORDER as i32;
+    let inner_y = MARGIN + BORDER as i32;
+    let inner_w = MODAL_W - BORDER * 2;
+    let title = hint_title(super::lifecycle::pet_name());
+    ui::draw_title_bar(display, title.as_str(), Point::new(inner_x, inner_y), inner_w)?;
+
+    let mid_x = MARGIN + MODAL_W as i32 / 2;
+    let body_y = inner_y + TITLE_H + (MODAL_H as i32 - TITLE_H - 2 * BORDER as i32) / 2;
+    crate::ui::draw_text(
+        display,
+        one.as_str(),
+        Point::new(mid_x, body_y - 10),
+        TEXT_BOLD_BLACK,
+        crate::ui::CENTERED,
+    )?;
+    crate::ui::draw_text(
+        display,
+        two.as_str(),
+        Point::new(mid_x, body_y + 10),
+        TEXT_BLACK,
+        crate::ui::CENTERED,
+    )?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1549,7 +1634,7 @@ mod tests {
             ModalKind::Stats.items().iter().map(|i| i.label()).collect();
         assert_eq!(
             labels,
-            ["View stats", "Diary", "Rolled stats", "Friends", "Cancel"]
+            ["View stats", "Hint", "Diary", "Rolled stats", "Friends", "Cancel"]
         );
     }
 
@@ -1862,6 +1947,163 @@ mod tests {
             let t = super::title_text(ModalKind::Feed, None, None, Some(cause));
             assert!(t.chars().count() <= 18, "{t:?}");
         }
+        lifecycle::set_state_for_test(None);
+    }
+
+    // ── Task 9: the hint ─────────────────────────────────────────────────
+
+    /// The menu rows each remedy stands for.
+    fn rows_of(r: crate::game::engine::hint::Remedy) -> std::vec::Vec<Item> {
+        use crate::game::engine::hint::Remedy;
+        match r {
+            Remedy::Feed => FoodKind::ALL.iter().map(|&f| Item::FeedFood(f)).collect(),
+            Remedy::Water => vec![Item::DrinkChoice(crate::game::engine::DrinkKind::Water)],
+            Remedy::Sleep => vec![Item::Sleep],
+            Remedy::Play => vec![Item::PlayNow],
+            Remedy::Game => vec![
+                Item::TicTacToe,
+                Item::LightsOut,
+                Item::BlackHole,
+                Item::Nim,
+                Item::BornJeweled,
+            ],
+            Remedy::Relax => vec![Item::Relax],
+            Remedy::Wash => vec![Item::Wash],
+            Remedy::Exercise => vec![Item::ExerciseNow],
+            Remedy::Medicine => vec![Item::GiveMedicine],
+            Remedy::Insulin => vec![Item::GiveMedication],
+            Remedy::Rehab => vec![Item::Rehab],
+            Remedy::Defrost => vec![Item::WakeUp],
+        }
+    }
+
+    const ALL_REMEDIES: [crate::game::engine::hint::Remedy; 12] = {
+        use crate::game::engine::hint::Remedy::*;
+        [Feed, Water, Sleep, Play, Game, Relax, Wash, Exercise, Medicine, Insulin, Rehab, Defrost]
+    };
+
+    type Shape = fn(&mut GameState);
+
+    #[test]
+    fn hint_and_menu_agree() {
+        let _guard = crate::game::lock_test_state();
+        let shapes: [(&str, bool, bool, Shape); 17] = [
+            ("calm", false, false, |_| {}),
+            ("hungry", true, false, |s| s.fullness = pct(20)),
+            ("thirsty", true, true, |s| s.hydration = pct(20)),
+            ("tired", false, false, |s| s.energy = pct(10)),
+            ("bored", false, false, |s| s.fun = pct(10)),
+            ("dirty", false, false, |s| s.dirt = pct(80)),
+            ("injured", false, false, |s| s.injured_min = 600),
+            ("injured cd", false, false, |s| {
+                s.injured_min = 600;
+                s.med_cd_min = 120;
+            }),
+            ("diabetic", true, false, |s| s.diabetic = true),
+            ("diabetic hard", true, true, |s| s.diabetic = true),
+            ("dependent", true, true, |s| s.dependent = true),
+            ("in rehab", true, false, |s| {
+                s.dependent = true;
+                s.rehab_min = 900;
+            }),
+            ("asleep", false, false, |s| s.is_sleeping = true),
+            ("busy", false, false, |s| {
+                s.active_action = Some(crate::game::engine::Action::Play);
+                s.action_ticks_remaining = 30;
+            }),
+            ("broke", true, false, |s| {
+                s.money = 0;
+                s.fullness = pct(20);
+                s.diabetic = true;
+            }),
+            ("games cooling", false, false, |s| {
+                s.cooldown_tictactoe = 9;
+                s.cooldown_lightsout = 9;
+                s.cooldown_blackhole = 9;
+                s.cooldown_nim = 9;
+            }),
+            ("frozen", false, false, |s| s.hibernating = true),
+        ];
+        for (name, money, hard, shape) in shapes {
+            let stats = menu_pet(money, hard, shape);
+            for r in ALL_REMEDIES {
+                let mut reason = None;
+                lifecycle::with_state(|s| {
+                    reason = s.remedy_reason(r);
+                    false
+                });
+                let menu = rows_of(r).iter().any(|i| i.available(&stats));
+                assert_eq!(reason.is_none(), menu, "{name}: {r:?} reason {reason:?}");
+            }
+        }
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn hint_row_opens_the_speech_view() {
+        let _guard = crate::game::lock_test_state();
+        let mut pet = active_pet();
+        pet.is_sleeping = false;
+        pet.fullness = pct(20);
+        lifecycle::set_state_for_test(Some(pet));
+        lifecycle::set_pet_name(b"Twelve_chars");
+        let labels: std::vec::Vec<&str> =
+            ModalKind::Stats.items().iter().map(|i| i.label()).collect();
+        assert_eq!(
+            labels,
+            ["View stats", "Hint", "Diary", "Rolled stats", "Friends", "Cancel"]
+        );
+        // Names that fit, and names that are cut to fit.
+        assert_eq!(super::hint_title("Twelve_chars").as_str(), "Twelve_chars says");
+        assert_eq!(super::hint_title("").as_str(), "Your pet says");
+        assert_eq!(super::hint_title("A_very_long_name_indeed").chars().count(), 18);
+        assert!(super::hint_title("A_very_long_name_indeed").ends_with(" says"));
+
+        super::open(ModalKind::Stats);
+        super::cursor_down();
+        super::activate();
+        assert!(super::live_modal_view_open());
+        let mut c = crate::game::test_canvas::Canvas::new();
+        super::draw_modal(&mut c).unwrap();
+        use embedded_graphics::prelude::*;
+        use embedded_graphics::primitives::Rectangle;
+        let body = Rectangle::new(Point::new(12, 32), Size::new(128, 98));
+        assert!(c.any(body, crate::BLACK), "the speech is drawn");
+        // Any button returns to the Stats list; it does not close the modal.
+        super::cursor_down();
+        assert!(!super::live_modal_view_open());
+        assert!(super::is_open());
+        super::activate();
+        assert!(super::live_modal_view_open());
+        super::flip_page();
+        assert!(!super::live_modal_view_open());
+        super::activate();
+        assert!(super::dismiss_hint());
+        assert!(super::is_open());
+        assert!(!super::dismiss_hint(), "a second Cancel is not a hint dismiss");
+        super::activate();
+        super::activate();
+        assert!(!super::live_modal_view_open());
+        assert!(super::is_open());
+        super::close();
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn the_hint_view_is_redrawn_within_an_idle_frame() {
+        let _guard = crate::game::lock_test_state();
+        lifecycle::set_state_for_test(Some(active_pet()));
+        super::open(ModalKind::Stats);
+        super::cursor_down();
+        super::activate();
+        let now = lifecycle::now_tick();
+        crate::game::LIVE_DRAWN_TICK.store(now, core::sync::atomic::Ordering::Relaxed);
+        assert!(crate::game::live_view_open());
+        assert!(
+            crate::game::next_ui_deadline_tick() <= now + crate::game::pacing::IDLE_FRAME_TICKS
+        );
+        super::close();
+        assert!(!crate::game::live_view_open());
         lifecycle::set_state_for_test(None);
     }
 }

@@ -100,8 +100,13 @@ Stats interact: if several are out of band, the pet becomes miserable
 faster, and a miserable pet is worse off everywhere. Keep on top of things
 before they spiral!
 
-The Stats menu offers "View stats" (a two-page view: page 2 covers the
-conditions, Fit and Booze), "Diary", "Rolled stats", and "Friends" for the
+The Stats menu reads View stats, Hint, Diary, Rolled stats, Friends, Cancel.
+"View stats" is a two-page view (page 2 covers the conditions, Fit and
+Booze). "Hint": your pet tells you its most pressing need and what helps
+(for example "I'm hungry! / Please feed me."). It never asks for something
+the game would refuse: when the action is not possible it says why ("but
+busy", "but wait 2h00", "but can't afford"). Any button returns to the
+menu. "Friends" lists the
 pets your badge has met over the mesh (see
 [Friends & the SHDW Channel](#friends--the-shdw-channel) below). Your
 lifetime Battle win/loss record shows in the title of the Battle picker

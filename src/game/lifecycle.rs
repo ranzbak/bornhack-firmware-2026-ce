@@ -648,6 +648,12 @@ pub fn refusal_for(
     state.refusal_for(action, drink)
 }
 
+/// What the pet says it needs now (the Stats menu's Hint row).
+pub fn hint() -> Option<super::engine::hint::Hint> {
+    let state = unsafe { (*GAME.get()).as_ref() }?;
+    Some(super::engine::hint::hint(state))
+}
+
 /// The first warning that `action` would cause now (see `GameState::preview`).
 pub fn preview(
     action: super::engine::Action,

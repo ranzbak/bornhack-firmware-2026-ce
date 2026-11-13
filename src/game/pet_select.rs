@@ -11,7 +11,7 @@
 //! Money mode is chosen fresh every time (new game and new generation
 //! alike), defaulting to "With money" (money on, normal prices).
 //! "Hard (US)" plays with money on but some prices higher — see
-//! `engine::medication_price`/`engine::rehab_price`/`FoodKind::hax_price`.
+//! `engine::medication_price`/`engine::rehab_price`/`doses::price`.
 
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
