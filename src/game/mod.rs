@@ -361,10 +361,15 @@ pub fn clear_battle_anim() {
 /// have triggered a redraw (e.g. an NFC station bonus arriving while
 /// the display task is parked).
 pub fn show_toast(toast: Toast) {
-    TOAST_MSG.store(toast as u8, Ordering::Relaxed);
-    TOAST.start();
+    raise_toast(toast);
     #[cfg(feature = "embassy-core")]
     crate::TOAST_SIGNAL.signal(());
+}
+
+/// Raise a toast without waking the display loop.
+fn raise_toast(toast: Toast) {
+    TOAST_MSG.store(toast as u8, Ordering::Relaxed);
+    TOAST.start();
 }
 
 /// The cause toast: what went wrong (bold red, on the HAX row), then why
@@ -377,9 +382,15 @@ where
         return Ok(());
     };
     let style = crate::ui::TOP_LEFT;
-    crate::ui::draw_text(display, cause.what(), TOAST_POS, crate::ui::TEXT_BOLD_RED, style)?;
     let second = TOAST_POS + Point::new(0, TOAST_LINE_DY);
-    crate::ui::draw_text(display, cause.why(), second, crate::ui::TEXT_RED, style)?;
+    for (text, at, ink) in [
+        (cause.what(), TOAST_POS, crate::ui::TEXT_BOLD_RED),
+        (cause.why(), second, crate::ui::TEXT_RED),
+    ] {
+        let pad = Point::new(STATUS_BACKING_PAD / 2, 0);
+        draw_backing(display, at - pad, backing_width(text))?;
+        crate::ui::draw_text(display, text, at, ink, style)?;
+    }
     Ok(())
 }
 
@@ -416,13 +427,16 @@ where
 /// seats properly on the full-waveform path.  `partial_idle` upstream keeps
 /// this from re-flashing once the message is drawn.
 pub fn status_wants_full_refresh() -> bool {
-    TOAST.is_active()
+    // A modal covers the red message and the status line: its redraws are
+    // plain delta refreshes, and the closing redraw gets the full one.
+    !modal::is_open()
+        && (TOAST.is_active()
         || DIABETES_ALERT.is_active()
         || ALCOHOLISM_ALERT.is_active()
         || lifecycle::display_anim() == engine::DisplayAnim::Gone
         || (!lifecycle::is_hibernating()
             && lifecycle::status_line().is_some_and(|l| l.danger))
-        || battle_view::wants_full_refresh()
+        || battle_view::wants_full_refresh())
 }
 
 /// Tell the player why an action was refused or a row is disabled.
@@ -450,10 +464,13 @@ pub fn full_screen_view_up() -> bool {
         || bornjeweled::is_active()
 }
 
-/// Tell the player what went wrong and why (silent: no buzz).
+/// Tell the player what went wrong and why (silent: no buzz). It does not
+/// signal the display loop: the only caller is the cause drain inside
+/// `lifecycle::cycle`, and every `cycle` caller is a draw or input path that
+/// redraws right after, so a signal would only abort that very refresh.
 pub fn show_cause(c: engine::causes::Cause) {
     CAUSE_CODE.store(c.pack(), Ordering::Relaxed);
-    show_toast(Toast::Cause);
+    raise_toast(Toast::Cause);
 }
 
 /// The toast that is up now.
@@ -515,12 +532,19 @@ pub fn live_view_open() -> bool {
 /// polling it would wake the badge every tick for as long as it is left up.
 pub fn next_ui_deadline_tick() -> u32 {
     let now = lifecycle::now_tick();
-    let overlay = TOAST.is_active()
-        || DIABETES_ALERT.is_active()
-        || ALCOHOLISM_ALERT.is_active();
     let mut next = lifecycle::sleep_anim_deadline_tick();
-    if overlay {
-        next = next.min(now.saturating_add(1));
+    // Only the main screen clears a toast or alert, so none is counted while
+    // a full-screen view hides it. It is handled normally once the view closes.
+    if !full_screen_view_up() {
+        for (flag, min_ms) in [
+            (&TOAST, TOAST_MIN_VISIBLE_MS),
+            (&DIABETES_ALERT, DIABETES_ALERT_MIN_VISIBLE_MS),
+            (&ALCOHOLISM_ALERT, DIABETES_ALERT_MIN_VISIBLE_MS),
+        ] {
+            if flag.is_active() {
+                next = next.min(flag.clear_tick(min_ms, now));
+            }
+        }
     }
     if live_view_open() {
         let drawn = LIVE_DRAWN_TICK.load(Ordering::Relaxed);
@@ -574,6 +598,22 @@ pub const PET_AREA_TOP: usize = SEP_TOP as usize + 1;
 // ── Public entry point
 // ────────────────────────────────────────────────────────
 
+/// Width of the white backing behind a line of 7x13 text.
+fn backing_width(text: &str) -> i32 {
+    text.chars().count() as i32 * STATUS_CHAR_W + STATUS_BACKING_PAD
+}
+
+/// White backing for one line of text, so it reads over the sprite. `top_left`
+/// is the backing's corner and `w` its width ([`backing_width`]).
+fn draw_backing<D>(display: &mut D, top_left: Point, w: i32) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    Rectangle::new(top_left, Size::new(w as u32, STATUS_LINE_H as u32))
+        .into_styled(PrimitiveStyle::with_fill(crate::WHITE))
+        .draw(display)
+}
+
 /// Draw the status line at the bottom of the pet area: bottom-centred, bold
 /// black (bold red in danger), each line on a white backing of its own width
 /// plus [`STATUS_BACKING_PAD`] so it reads over the sprite. A second line sits
@@ -594,13 +634,12 @@ where
     let count = text.split('\n').count() as i32;
     for (i, row) in text.split('\n').enumerate() {
         let base = STATUS_BASE_Y - (count - 1 - i as i32) * STATUS_LINE_H;
-        let w = row.chars().count() as i32 * STATUS_CHAR_W + STATUS_BACKING_PAD;
-        Rectangle::new(
+        let w = backing_width(row);
+        draw_backing(
+            display,
             Point::new(STATUS_CENTER_X - w / 2, base - (STATUS_LINE_H - 1)),
-            Size::new(w as u32, STATUS_LINE_H as u32),
-        )
-        .into_styled(PrimitiveStyle::with_fill(crate::WHITE))
-        .draw(display)?;
+            w,
+        )?;
         crate::ui::draw_text(
             display,
             row,
@@ -608,6 +647,64 @@ where
             style,
             crate::ui::CENTERED_BOTTOM,
         )?;
+    }
+    Ok(())
+}
+
+/// The action feedback toast, shown until the first render at or after
+/// `TOAST_MIN_VISIBLE_MS` has elapsed since it was raised.
+fn draw_toast<D>(display: &mut D) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    // Clear first: an expired toast is dropped on this wake and never redrawn.
+    TOAST.clear_if_elapsed(TOAST_MIN_VISIBLE_MS);
+    if TOAST.is_active() {
+        let toast = Toast::from_u8(TOAST_MSG.load(Ordering::Relaxed));
+        // Dynamic toasts (station cooldown) format their text at draw
+        // time from a small atomic; everything else uses the static
+        // message table.
+        let mut dyn_buf: heapless::String<48> = heapless::String::new();
+        let msg: &str = if let Toast::Reason = toast {
+            let why = engine::doses::Reason::unpack(
+                REASON_KIND.load(Ordering::Relaxed),
+                REASON_SECS.load(Ordering::Relaxed),
+            );
+            dyn_buf.push_str(why.text().as_str()).ok();
+            dyn_buf.as_str()
+        } else if let Toast::DebugInfo = toast {
+            // Read live: the toast shows what the engine is doing now.
+            if let Some(info) = lifecycle::debug_info() {
+                let line = info.line();
+                dyn_buf.push_str(line.as_str()).ok();
+            }
+            dyn_buf.as_str()
+        } else if let Toast::StationCooldown = toast {
+            let secs = STATION_COOLDOWN_SECS.load(Ordering::Relaxed);
+            let m = secs / 60;
+            let s = secs % 60;
+            let _ = core::fmt::Write::write_fmt(&mut dyn_buf, format_args!("wait {}:{:02}", m, s));
+            dyn_buf.as_str()
+        } else {
+            toast.message()
+        };
+        if let Toast::Cause = toast {
+            draw_cause_toast(display)?;
+        } else if !msg.is_empty() {
+            
+            
+            use embedded_graphics::text::{Text};
+            let style = crate::ui::TOP_LEFT;
+            Text::with_text_style(
+                msg,
+                TOAST_POS,
+                // Red so the action feedback (-hunger / -sick / +inspired /
+                // bonus) pops against the black UI.
+                crate::ui::TEXT_BOLD_RED,
+                style,
+            )
+            .draw(display)?;
+        }
     }
     Ok(())
 }
@@ -843,56 +940,7 @@ where
         .into_styled(PrimitiveStyle::with_fill(BLACK))
         .draw(display)?;
 
-    // Action feedback toast — shown until the first render at or
-    // after TOAST_MIN_VISIBLE_MS has elapsed since show_toast.
-    if TOAST.is_active() {
-        let toast = Toast::from_u8(TOAST_MSG.load(Ordering::Relaxed));
-        // Dynamic toasts (station cooldown) format their text at draw
-        // time from a small atomic; everything else uses the static
-        // message table.
-        let mut dyn_buf: heapless::String<48> = heapless::String::new();
-        let msg: &str = if let Toast::Reason = toast {
-            let why = engine::doses::Reason::unpack(
-                REASON_KIND.load(Ordering::Relaxed),
-                REASON_SECS.load(Ordering::Relaxed),
-            );
-            dyn_buf.push_str(why.text().as_str()).ok();
-            dyn_buf.as_str()
-        } else if let Toast::DebugInfo = toast {
-            // Read live: the toast shows what the engine is doing now.
-            if let Some(info) = lifecycle::debug_info() {
-                let line = info.line();
-                dyn_buf.push_str(line.as_str()).ok();
-            }
-            dyn_buf.as_str()
-        } else if let Toast::StationCooldown = toast {
-            let secs = STATION_COOLDOWN_SECS.load(Ordering::Relaxed);
-            let m = secs / 60;
-            let s = secs % 60;
-            let _ = core::fmt::Write::write_fmt(&mut dyn_buf, format_args!("wait {}:{:02}", m, s));
-            dyn_buf.as_str()
-        } else {
-            toast.message()
-        };
-        if let Toast::Cause = toast {
-            draw_cause_toast(display)?;
-        } else if !msg.is_empty() {
-            
-            
-            use embedded_graphics::text::{Text};
-            let style = crate::ui::TOP_LEFT;
-            Text::with_text_style(
-                msg,
-                TOAST_POS,
-                // Red so the action feedback (-hunger / -sick / +inspired /
-                // bonus) pops against the black UI.
-                crate::ui::TEXT_BOLD_RED,
-                style,
-            )
-            .draw(display)?;
-        }
-        TOAST.clear_if_elapsed(TOAST_MIN_VISIBLE_MS);
-    }
+    draw_toast(display)?;
 
     // The status line replaces the old corner banners. A hibernating pet is
     // frozen, so it says nothing.
@@ -1075,6 +1123,123 @@ impl Drop for TestState {
 
 #[cfg(test)]
 mod tests {
+    fn active_test_pet() -> crate::game::engine::GameState {
+        use crate::game::engine::{GameState, PetKind, Phase};
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.phase = Phase::Active;
+        s
+    }
+
+    #[test]
+    fn a_toast_or_alert_behind_a_full_screen_view_pulls_no_deadline() {
+        let _guard = super::lock_test_state();
+        let _clear = ClearPet;
+        crate::game::lifecycle::set_state_for_test(Some(active_test_pet()));
+        for alert in [None, Some(&super::DIABETES_ALERT), Some(&super::ALCOHOLISM_ALERT)] {
+            match alert {
+                None => super::show_toast(super::Toast::Feed),
+                Some(a) => a.start(),
+            }
+            let now = crate::game::lifecycle::now_tick();
+            assert!(super::next_ui_deadline_tick() <= now + 1, "drawable: cleared next wake");
+            super::diary_view::open();
+            assert!(super::full_screen_view_up());
+            let now = crate::game::lifecycle::now_tick();
+            assert!(
+                super::next_ui_deadline_tick() > now + 1,
+                "nothing can clear it behind the view"
+            );
+            super::diary_view::close();
+            let now = crate::game::lifecycle::now_tick();
+            assert!(super::next_ui_deadline_tick() <= now + 1, "handled again once the view closes");
+            super::TOAST.clear();
+            super::DIABETES_ALERT.clear();
+            super::ALCOHOLISM_ALERT.clear();
+        }
+    }
+
+    #[test]
+    fn a_cause_behind_a_modal_is_logged_but_not_toasted() {
+        use crate::game::engine::causes::Cause;
+        let _guard = super::lock_test_state();
+        let _clear = ClearPet;
+        crate::game::lifecycle::set_state_for_test(Some(active_test_pet()));
+        super::modal::open(super::modal::ModalKind::Stats);
+        crate::game::lifecycle::with_state(|s| {
+            s.causes.push(Cause::FoodComa);
+            true
+        });
+        crate::game::lifecycle::cycle();
+        assert_eq!(crate::game::lifecycle::diary().len(), 1);
+        assert_eq!(super::current_toast_for_test(), super::Toast::None);
+    }
+
+    #[test]
+    fn an_expired_toast_is_cleared_before_the_draw_not_after() {
+        let _guard = super::lock_test_state();
+        super::show_toast(super::Toast::Feed);
+        let mut fresh = Canvas::new();
+        super::draw_toast(&mut fresh).unwrap();
+        assert!(fresh.any(rows(0, 151), RED), "a fresh toast is drawn");
+        assert!(super::TOAST.is_active());
+        super::TOAST.backdate_for_test(super::TOAST_MIN_VISIBLE_MS);
+        let mut late = Canvas::new();
+        super::draw_toast(&mut late).unwrap();
+        assert!(!late.any(rows(0, 151), RED), "an expired toast is never redrawn");
+        assert!(!super::TOAST.is_active());
+    }
+
+    #[test]
+    fn a_toast_deadline_is_its_remaining_time_never_in_the_past() {
+        let _guard = super::lock_test_state();
+        super::show_toast(super::Toast::Feed);
+        assert_eq!(super::TOAST.clear_tick(super::TOAST_MIN_VISIBLE_MS, 500), 501);
+        assert_eq!(super::TOAST.clear_tick(25_000, 500), 503, "the remaining time, rounded up");
+        super::TOAST.backdate_for_test(60_000);
+        assert_eq!(super::TOAST.clear_tick(25_000, 500), 501, "past due: next tick");
+    }
+
+    #[test]
+    fn no_full_refresh_is_forced_while_a_modal_hides_the_status() {
+        let _guard = super::lock_test_state();
+        let _clear = ClearPet;
+        let mut s = active_test_pet();
+        s.fullness = (10 * crate::game::engine::needs::P) as u16;
+        crate::game::lifecycle::set_state_for_test(Some(s));
+        assert!(super::status_wants_full_refresh(), "danger on the main screen");
+        super::show_toast(super::Toast::Feed);
+        super::modal::open(super::modal::ModalKind::Stats);
+        assert!(!super::status_wants_full_refresh(), "the popover covers it");
+        super::modal::close();
+        assert!(super::status_wants_full_refresh(), "the closing redraw gets the flash");
+    }
+
+    #[test]
+    fn the_cause_toast_lines_sit_on_white_over_a_sprite() {
+        use crate::game::engine::causes::Cause;
+        let cause = Cause::FoodComa;
+        super::CAUSE_CODE.store(cause.pack(), core::sync::atomic::Ordering::Relaxed);
+        let mut c = Canvas::new();
+        c.fill(BLACK);
+        super::draw_cause_toast(&mut c).unwrap();
+        for (text, y) in [
+            (cause.what(), super::TOAST_POS.y),
+            (cause.why(), super::TOAST_POS.y + super::TOAST_LINE_DY),
+        ] {
+            let w = text.chars().count() as i32 * super::STATUS_CHAR_W + super::STATUS_BACKING_PAD;
+            let x0 = super::TOAST_POS.x - super::STATUS_BACKING_PAD / 2;
+            let h = super::STATUS_LINE_H;
+            for x in x0..x0 + w {
+                assert_eq!(c.get(x, y), crate::WHITE, "{text}: backing top at x={x}");
+                assert_eq!(c.get(x, y + h - 1), crate::WHITE, "{text}: backing bottom at x={x}");
+            }
+            assert_eq!(c.get(x0 + w, y + 5), BLACK, "{text}: no wider");
+            // The two lines stack, so only the outer edges touch the sprite.
+            let outer = if y == super::TOAST_POS.y { y - 1 } else { y + h };
+            assert_eq!(c.get(x0 + 20, outer), BLACK, "{text}: no taller");
+        }
+    }
+
     #[test]
     fn the_cause_toast_clears_the_hax_balance() {
         use embedded_graphics::prelude::*;

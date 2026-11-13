@@ -403,8 +403,11 @@ fn log_causes(state: &mut GameState) {
     for cause in causes.iter() {
         log_cause(*cause, at_min);
     }
+    // The diary logs always; the toast only where it can be seen and cleared:
+    // not behind a full-screen view, nor under a modal's popover.
     if let Some(first) = causes.iter().next()
         && !super::full_screen_view_up()
+        && !super::modal::is_open()
     {
         super::show_cause(*first);
     }
