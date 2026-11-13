@@ -4,7 +4,9 @@ Report only. Nothing in the repo was changed. The audit of the current rules is 
 
 The model was prototyped and tuned in a standalone integer-only Rust crate: `scratchpad/simv2/src/main.rs` (no dependency on the firmware engine, about 400 lines). Every number marked **(sim)** below is the value in that prototype and produced the result table in section 7. Everything marked **(guess)** has not been simulated.
 
-**Latest revision:** weight is now separate from fitness, booze separate from junk food, Rehab and Ozempic have new rules, Relax and injury remedies were added (section 15), and hard mode became a healthcare satire with debt and eviction (section 16). Sections 15 and 16 hold the current rules and result tables; 13.5 and earlier tables are kept as history.
+**Current results are in section 18** (owner decisions of section 17 applied and re-simulated) and the NFC station format is in section 19.
+
+**Earlier revision:** weight is now separate from fitness, booze separate from junk food, Rehab and Ozempic have new rules, Relax and injury remedies were added (section 15), and hard mode became a healthcare satire with debt and eviction (section 16). Sections 15 and 16 hold the current rules and result tables; 13.5 and earlier tables are kept as history.
 
 **Engine constraint (owner):** the existing delta engine stays. Section 13 describes how the model runs on it, lists the boundaries, and holds the current result tables (step oracle against delta engine). Where sections 6 to 8 and 12.3 show older numbers, section 13.5 is authoritative.
 
@@ -616,6 +618,8 @@ These remove the worst of today's spam without the band model: Aspirine cooldown
 
 **Phase 4. Demo mode.**
 New `engine/demo.rs` with `demo_policy(&mut GameState, rng)` as in 8.1 and 13.3. It is called from inside the segment loop after each segment and once more after any action; it never schedules a periodic wake. Its six scheduled times and its policy thresholds are fed to the solver (`seg_len`) and to `next_wake_tick`, so the CPU sleeps until the pet's next intended action. The health clamp and leaving bypass live in `advance`. `settings.rs` toggle with the "fix me first" guard; `lifecycle.rs` suppresses the buzzer; display loop in `src/bin/embassy.rs` (around line 717) uses the 5-minute calm idle when `demo` is set; status line vocabulary; beacon flag bit in `friends.rs` (keep the old beacon size accepted). Save impact: the two demo bytes are already in the v3 layout from phase 2.
+
+**Phase 3a. NFC stations (section 19.7).** New signed plaintext format with the three old phrases kept as aliases; `station.rs` only.
 
 **Phase 5a. Hard mode (section 16).** Depends on phase 2 and on the money layer. In order: signed `money` and the affordability checks in `modal.rs` (debt); the pay path with deductible, copay and insurance in `engine/mod.rs`; insulin creep and the half dose; surprise bills (pending bill as a scheduled event, small bill screen, text table in a new `engine/satire.rs` so the strings sit in one place); eviction (countdown, status words, `PetRecord` reason bit, farewell text in `mod.rs`); prior authorization last. Every delayed item (bill, authorization, insurance lapse, plan week, eviction) is a timer handed to the solver and to `next_wake_tick`; none polls. Tests: the money runs of 16.2 as regression (working healthy player never under -150; diabetic with two shifts positive; non-workers evicted). Crowdfunding and the cross-border pharmacy go into the battle protocol phase (12.7) as two more SHDW message types.
 
@@ -1553,7 +1557,7 @@ Demo mode: no money, so none of this applies; a demo pet cannot be evicted.
 
 ## 17. Owner decisions (2026-11-13)
 
-Answers to the open questions of sections 11 and 12.8. These override earlier text. Numbers that change balance are **not yet re-simulated**; the next simulation pass must apply them and re-check every target (routines, spam, neglect, demo floor, battle matrix, hard-mode money).
+Answers to the open questions of sections 11 and 12.8. These override earlier text. **Applied and re-simulated: see 18.1 for the status of every row** (applied or design only, and whether its target held).
 
 ### Core rules
 
@@ -1615,7 +1619,341 @@ Answers to the open questions of sections 11 and 12.8. These override earlier te
 
 ---
 
+## 18. Owner decisions applied: current results
+
+**This section holds the current result tables for the whole design.** Tables in sections 6 to 8, 12.3, 13.5, 15.7 to 15.9 and 16.2 are history. Everything here was produced by `scratchpad/simv2` after applying section 17, on both drivers (step oracle / delta engine) where two numbers are shown. Simulations were run one at a time on two cores.
+
+### 18.1 Status of every section 17 row
+
+| # | Decision | Applied | Target held? |
+|---|---|---|---|
+| 1 | Hygiene kept | yes (already in) | yes |
+| 2 | Lazy path left as is | yes | yes: mood 75, health 65, fitness 44, weight 74 |
+| 3 | Bands narrowed by 5 | yes, as whole points: lower edge +3, upper edge -2 (the model works in whole percent). Fullness 38 to 78, hydration 38 to 83, energy from 33, stimulation 33 to 73, dirt to 58, booze to 38, weight 38 to 63, fitness from 43. Battle thresholds moved with them | yes: a balanced player still thrives (mood 96), a sporty one 87, a reactive one 97 |
+| 4 | Oversleep allowance 4 h | yes (self-wake moved to 5 h of oversleep) | yes: the balanced routine is no longer groggy (0 nights, was 11) |
+| 5 | Sleep-deprived | yes. A "night" is a sleep that starts under 50 % energy, so naps and parking a rested pet do not count | yes: a pet woken after 5 hours every night is worn out, not gone (mood 64, health 93, lowest 43, deprived on 28 of 30 days) |
+| 6 | Drinks fill the belly by 2 | yes | yes |
+| 7 | Beer hydrates +20 | yes | **partly.** The party animal first died on day 11 to 16 under the narrower bands. I halved the health damage of being over 80 % weight (4 to 2 per minute). It now survives, diabetic and on insulin, mood 64, health 45 to 62. Needs the owner (18.7) |
+| 8 | Refusals | yes: water over 85 % hydration and a wash under 25 % dirt are refused before anything else happens (a refused action does not wake the pet). Added: plain water never lifts hydration past 90 %, so an accepted drink cannot waterlog | yes: water spam and wash spam survive (mood 71 and 75). Sleep spam survives (mood 75, groggy 100 times) |
+| 9 | Stepwise ceiling and thirst | already in | yes |
+| 10 | Diabetes reversal | yes: 7 days in total under 65 % weight and over 60 % fitness | yes: a fit, normal-weight diabetic pet is clear after 22 doses of insulin (about a week) |
+| 11 | Demo switching rule | design only (no simulation needed) | n/a |
+| 12 | Demo pet never exercises | yes | **held, at a price.** Fitness settles at 24 to 26 %; the pet is permanently sluggish and its health is capped at 55 to 65 %. The floor is safe (lowest health 43, never Leaving). But it is gloomier than before: see 18.3 and 18.7 |
+| 13 | Demo pet follows the clock | yes: bed drawn between 22:00 and 23:30, up between 07:00 and 08:30. In the daytime it only sleeps as a two-hour nap when worn out. Unset clock (own rhythm) not simulated | yes |
+| 14 | Reaction delay 10 to 30 min | yes | yes |
+| 15 | Demo vs demo auto-accept | design only | n/a |
+| 16 | Decline costs mood -3 for 1 h | in the rules; no routine declines | not exercised |
+| 17 | No answer: fight the snapshot | design only | n/a |
+| 18 | Fat and unfit: stamina floor 1 | yes | yes: 41 % overall (was 33), 18 % against an average pet, 2 % against a fit one |
+| 19 | Drink strength unchanged | yes | yes |
+| 20 | No stance | n/a | n/a |
+| 21 | Flags only inside a challenge | design: beacon back to six numbers (power, guard, speed, HP, stamina, focus), 24 bytes; picker estimate marked `~` | n/a |
+| 22 | 100 HAX per win | yes | **breaks the economy as predicted.** See 18.5 and 18.7 |
+| 23 | Thin and unfit raised | yes: floors for everyone of power 33, guard 14, HP 60 | yes: it beats injured pets 96 %, wasted 78 %, hung over 53 %; overall 22 % (was 2) |
+| 23a | Hibernating pets auto-accept without effect | design only | n/a |
+| 24 | No shop | yes | the surplus grows: see 18.5 |
+| 25 | Eviction fixed at -600 / 48 h | yes | yes |
+| 26 | Insulin cap 60 | yes | yes: a diabetic pet on one shift a day settles around -160 HAX (overdue notice, never a final notice); two shifts are comfortably positive |
+| 27 | Prior authorization as a popup with Appeal | yes: 25 % of paid medication requests; costs one extra press, nothing else | yes: 5 to 10 popups per month for a diabetic or a frequently injured pet |
+| 28 | Wake cap 2 h | yes | yes: 18.6 |
+| 29 | Idle frame every 5 min | counted in 18.6 | n/a |
+| 30 | Catch up at most 12 h on boot | design only | not simulated |
+| 31 | v2 to v3 upgrade path | design only | n/a |
+| 32 | Health status entry dropped | design only | n/a |
+
+### 18.2 What broke and how it was retuned
+
+| Problem after applying section 17 | Cause | Retune |
+|---|---|---|
+| Party animal gone on day 11 to 16 | narrower bands plus permanent overweight | overweight health damage 4 to 2 per minute. Flagged for the owner |
+| Water spam and wash spam still lethal | not the spam: the spam rows' shared base routine underfed the pet, and an accepted water at 84 % jumped to 100 % | spam rows now use the balanced routine without sport as their base; plain water stops at 90 %; refusals are checked before the pet is woken |
+| Sleep spam counted as three short nights and made the pet sleep-deprived | every sleep session counted as a night | a night is a sleep that starts under 50 % energy |
+| Short sleeper never became sleep-deprived | the pet collapsed around midnight and slept long enough | the routine now wakes it after five hours every night |
+| Demo pet's display state changed 52 to 56 times a day | I was counting every band crossing of every need | the wake-up count now uses what the main screen shows (the status word of the largest penalty, sprite state). Same engine, more honest metric: 29 to 32 a day |
+| Dependent party animal could not work, lost its insurance and was evicted on day 4.5 | it tried to work at 16:30, after sport, when it was under the energy band | the routine now works at noon. The trap itself is real and stays: a worn-out pet cannot work |
+| Thin and unfit still lost to hung-over pets (21 %) | floors too low | power 33, guard 14, HP 60 |
+
+### 18.3 Routines (oracle / delta)
+
+| Routine | Outcome | Avg mood | End health | Min health | End fitness | Presses/day | Injuries | Groggy | Grumpy | Display changes/day | Engine wakes/day (2 h cap) | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Balanced | alive / alive | 96 / 96 | 100 / 100 | 80 / 80 | 96 / 96 | 12.7 / 12.7 | 0 / 0 | 0 / 0 | 0 / 0 | 4 | 11 | weight 43 / 62 |
+| Sporty | alive / alive | 87 / 87 | 100 / 100 | 84 / 84 | 98 / 98 | 14.0 / 14.0 | 0 / 0 | 0 / 0 | 0 / 0 | 2 | 8 | weight 45 / 45 |
+| Lazy with treats | alive / alive | 75 / 74 | 65 / 65 | 59 / 59 | 44 / 44 | 11.5 / 11.5 | 0 / 0 | 1 / 1 | 0 / 0 | 1 | 9 | weight 74 / 75 |
+| Party animal | alive / alive | 64 / 64 | 45 / 62 | 33 / 38 | 28 / 28 | 14.5 / 14.5 | 0 / 0 | 0 / 0 | 13 / 14 | 4 | 10 | weight 99 / 100 DIABETIC |
+| Reader (reactive) | alive / alive | 97 / 97 | 100 / 100 | 80 / 80 | 94 / 98 | 13.1 / 13.0 | 0 / 0 | 0 / 0 | 0 / 0 | 3 | 11 | weight 64 / 65 |
+| Short sleeper (woken after 5 h) | alive / alive | 64 / 64 | 93 / 93 | 43 / 43 | 97 / 97 | 12.3 / 12.3 | 0 / 0 | 0 / 0 | 58 / 58 | 6 | 12 | weight 43 / 43; deprived days 28 / 28 |
+| Spam feed (pizza /30min) | gone d1.7 / gone d1.7 | 9 / 9 | 0 / 0 | 0 / 0 | 46 / 46 | 38.0 / 38.0 | 0 / 0 | 0 / 0 | 40 / 40 | 32 | 34 | weight 100 / 100; deprived days 1 / 1 |
+| Spam play | gone d1.8 / gone d1.8 | 11 / 11 | 0 / 0 | 0 / 0 | 99 / 99 | 52.3 / 52.3 | 0 / 0 | 0 / 0 | 38 / 38 | 35 | 36 | weight 47 / 47; deprived days 1 / 1 |
+| Spam sport | gone d4.0 / gone d4.0 | 33 / 34 | 0 / 0 | 0 / 0 | 95 / 95 | 14.4 / 14.3 | 4 / 4 | 0 / 0 | 15 / 15 | 7 | 10 | weight 21 / 21; deprived days 2 / 2 |
+| Spam beer | gone d1.5 / gone d1.5 | 24 / 24 | 0 / 0 | 0 / 0 | 49 / 49 | 41.5 / 41.5 | 0 / 0 | 0 / 0 | 10 / 10 | 12 | 14 | weight 100 / 100; deprived days 1 / 1 DEPENDENT |
+| Spam cake | gone d1.8 / gone d1.8 | 14 / 14 | 0 / 0 | 0 / 0 | 48 / 48 | 46.4 / 46.4 | 0 / 0 | 0 / 0 | 44 / 44 | 34 | 36 | weight 100 / 100; deprived days 1 / 1 |
+| Spam water | alive / alive | 71 / 71 | 50 / 50 | 40 / 40 | 24 / 24 | 18.4 / 18.4 | 0 / 0 | 0 / 0 | 21 / 21 | 6 | 10 | weight 61 / 61; deprived days 13 / 13; refused 675 / 675 |
+| Never drinks (else balanced) | gone d2.2 / gone d2.2 | 37 / 38 | 0 / 0 | 0 / 0 | 72 / 72 | 8.9 / 8.9 | 0 / 0 | 0 / 0 | 1 / 1 | 4 | 11 | weight 51 / 51 |
+| Spam sleep | alive / alive | 75 / 75 | 55 / 55 | 55 / 55 | 0 / 0 | 12.8 / 12.8 | 0 / 0 | 100 / 100 | 0 / 0 | 4 | 11 | weight 62 / 62 |
+| Spam wash | alive / alive | 75 / 74 | 48 / 55 | 39 / 31 | 21 / 24 | 11.6 / 11.5 | 0 / 0 | 2 / 3 | 12 / 11 | 3 | 7 | weight 61 / 59; deprived days 4 / 4; refused 930 / 930 |
+| Old habits (max all bars) | gone d17.2 / gone d17.8 | 44 / 45 | 0 / 0 | 0 / 0 | 93 / 98 | 18.0 / 18.1 | 13 / 13 | 0 / 0 | 26 / 26 | 6 | 14 | weight 100 / 97; refused 25 / 26 DIABETIC |
+| Neglect + spam medicine | gone d7.3 / gone d7.3 | 8 / 8 | 0 / 0 | 0 / 0 | 24 / 24 | 9.7 / 9.7 | 0 / 0 | 0 / 0 | 180 / 180 | 28 | 28 | weight 17 / 17; deprived days 6 / 6 |
+| Twice a day | alive / alive | 61 / 61 | 49 / 49 | 44 / 44 | 25 / 25 | 12.0 / 12.0 | 0 / 0 | 0 / 0 | 1 / 1 | 4 | 14 | weight 100 / 100 DIABETIC |
+| Once a day | gone d2.0 / gone d2.0 | 42 / 42 | 0 / 0 | 0 / 0 | 49 / 49 | 4.3 / 4.3 | 0 / 0 | 0 / 0 | 1 / 1 | 4 | 13 | weight 43 / 43 |
+| Absent | gone d1.7 / gone d1.7 | 26 / 26 | 0 / 0 | 0 / 0 | 49 / 49 | 0.0 / 0.0 | 0 / 0 | 0 / 0 | 0 / 0 | 3 | 12 | weight 39 / 39 |
+| Balanced + stations daily | alive / alive | 97 / 97 | 100 / 100 | 81 / 81 | 97 / 97 | 11.7 / 11.6 | 0 / 0 | 28 / 29 | 0 / 0 | 6 | 12 | weight 56 / 54 |
+| Party animal + stations daily | alive / alive | 84 / 84 | 65 / 65 | 61 / 59 | 28 / 28 | 13.2 / 13.3 | 0 / 0 | 3 / 3 | 0 / 0 | 6 | 10 | weight 71 / 76 |
+| Twice a day + stations daily | alive / alive | 67 / 67 | 55 / 55 | 53 / 53 | 20 / 20 | 12.7 / 12.7 | 0 / 0 | 29 / 29 | 0 / 0 | 4 | 13 | weight 100 / 100 DIABETIC |
+| Once a day + stations daily | gone d15.6 / gone d15.6 | 14 / 13 | 0 / 0 | 0 / 0 | 24 / 24 | 5.0 / 5.0 | 0 / 0 | 0 / 0 | 0 / 0 | 3 | 14 | weight 1 / 1 |
+| Stations daily, nothing else | gone d8.6 / gone d8.6 | 14 / 14 | 0 / 0 | 0 / 0 | 21 / 21 | 1.0 / 1.0 | 0 / 0 | 0 / 0 | 0 / 0 | 4 | 13 | weight 3 / 3; refused 7 / 7 |
+
+The delta engine matches the oracle on every row except the party animal's end health (45 against 62), which is a knife-edge pet living at its diabetes-lowered ceiling.
+
+Demo mode:
+
+| Run | Avg mood | Thriving / fine / off / poorly / miserable, oracle vs delta | Self-care actions/day | End health | Min health | End fitness | End weight | Events/day | Engine wakes/day (2 h cap) | Hours in Leaving |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Demo alone #1 | 58 / 59 | 7/36/46/9/0 vs 10/36/44/9/0 | 17.3 / 16.3 | 56 / 59 | 55 / 55 | 26 / 24 | 73 / 63 | 31 | 34 | 0 / 0 |
+| Demo alone #2 | 59 / 60 | 8/39/44/8/0 vs 8/42/41/7/0 | 16.7 / 17.0 | 65 / 63 | 54 / 58 | 25 / 26 | 61 / 62 | 31 | 35 | 0 / 0 |
+| Demo alone #3 | 62 / 52 | 16/32/43/7/0 vs 7/18/51/21/0 | 16.4 / 17.8 | 55 / 46 | 54 / 43 | 24 / 24 | 75 / 82 | 32 | 35 | 0 / 0 |
+| Demo + daily helper #1 | 63 / 57 | 10/51/32/4/0 vs 4/38/44/11/0 | 14.9 / 15.4 | 65 / 65 | 64 / 55 | 33 / 34 | 64 / 62 | 29 | 32 | 0 / 0 |
+| Demo + daily helper #2 | 62 / 60 | 9/45/39/5/0 vs 7/44/42/6/0 | 15.5 / 15.9 | 65 / 65 | 55 / 60 | 35 / 25 | 66 / 65 | 29 | 32 | 0 / 0 |
+| Demo alone #4 | 58 / 58 | 10/31/47/11/0 vs 9/33/45/11/0 | 16.9 / 16.7 | 56 / 58 | 54 / 54 | 24 / 25 | 65 / 66 | 31 | 34 | 0 / 0 |
+| Demo alone #5 | 60 / 59 | 7/40/45/6/0 vs 8/38/45/8/0 | 17.1 / 16.6 | 59 / 55 | 55 / 55 | 25 / 24 | 71 / 68 | 30 | 34 | 0 / 0 |
+
+- **Fitness without self-exercise:** yes, it drifts to the unfit build. All unattended demo pets end at 24 to 26 % fitness within about two weeks. Consequences: sluggish (a constant mood penalty of about 9 points, energy draining a quarter faster), health capped at 55 to 65 %.
+- **Floor:** safe. Lowest health in any run 43 %, no Leaving, no dependence. The 25 % clamp never engaged.
+- **Mood:** an unattended demo pet now thrives only 7 to 16 % of the time, is "fine" 18 to 42 %, "off" 41 to 51 % and "poorly" 6 to 21 %. Before these decisions it thrived about 65 %. Three decisions stack here: no exercise, narrower bands, and its deliberately late reactions.
+- **Player help now matters, modestly:** one look a day at 18:00 with a sport session lifts fitness to 25 to 35 % and the "fine or better" share from about 45 % to about 52 %. The helper often finds the pet too tired for sport; a morning visit would do more (not simulated).
+- A variant in which the pet takes short walks (active play, not sport) when under 45 % fitness showed no effect in the prototype; I did not find out why, so it is not offered as a result.
+
+### 18.4 Battle
+
+| row \ col | Fit | Fit 1 beer | Thin fit | Sumo | Sumo 2 beers | Well rested | Average | Fat unfit | Fat unfit 3 beers | Thin unfit | Wasted | Dependent sober | Hung over | Injured | **Avg** |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| fit, normal weight | 49 | 46 | 57 | 44 | 42 | 58 | 81 | 96 | 95 | 99 | 99 | 92 | 99 | 100 | **82** |
+| fit, one beer | 52 | 50 | 66 | 44 | 44 | 64 | 87 | 98 | 97 | 99 | 99 | 94 | 99 | 100 | **84** |
+| thin and fit | 43 | 34 | 50 | 17 | 22 | 44 | 74 | 90 | 85 | 97 | 98 | 84 | 97 | 100 | **74** |
+| sumo (heavy, fit) | 53 | 54 | 82 | 49 | 38 | 53 | 86 | 98 | 97 | 99 | 99 | 96 | 99 | 100 | **85** |
+| sumo, two beers | 58 | 58 | 78 | 61 | 49 | 54 | 83 | 97 | 97 | 99 | 99 | 95 | 99 | 100 | **86** |
+| well rested | 41 | 33 | 54 | 46 | 47 | 50 | 82 | 98 | 95 | 99 | 99 | 92 | 99 | 100 | **81** |
+| average | 19 | 13 | 26 | 12 | 18 | 16 | 51 | 81 | 76 | 92 | 96 | 67 | 94 | 99 | **60** |
+| fat and unfit | 2 | 2 | 9 | 1 | 2 | 1 | 18 | 49 | 47 | 79 | 87 | 50 | 86 | 99 | **41** |
+| fat, unfit, three beers | 3 | 2 | 13 | 2 | 3 | 3 | 24 | 56 | 50 | 78 | 86 | 47 | 84 | 99 | **42** |
+| thin and unfit | 0 | 0 | 2 | 0 | 0 | 0 | 6 | 21 | 21 | 49 | 78 | 21 | 53 | 96 | **22** |
+| wasted | 0 | 0 | 0 | 0 | 0 | 0 | 3 | 13 | 13 | 20 | 49 | 7 | 23 | 57 | **9** |
+| dependent, sober (craving) | 5 | 5 | 15 | 3 | 4 | 8 | 34 | 53 | 52 | 77 | 90 | 50 | 78 | 98 | **44** |
+| wired | 8 | 5 | 12 | 4 | 7 | 6 | 27 | 50 | 52 | 74 | 89 | 45 | 74 | 97 | **41** |
+| bored | 11 | 7 | 16 | 7 | 11 | 9 | 36 | 64 | 59 | 81 | 93 | 55 | 84 | 99 | **48** |
+| hungry | 1 | 1 | 6 | 1 | 2 | 0 | 15 | 26 | 33 | 72 | 89 | 39 | 78 | 99 | **33** |
+| stuffed | 12 | 7 | 18 | 5 | 6 | 9 | 27 | 72 | 64 | 81 | 92 | 52 | 85 | 99 | **48** |
+| thirsty | 4 | 3 | 14 | 3 | 4 | 3 | 29 | 51 | 54 | 79 | 92 | 51 | 84 | 99 | **44** |
+| exhausted | 1 | 0 | 6 | 1 | 2 | 0 | 16 | 26 | 32 | 72 | 89 | 39 | 76 | 99 | **34** |
+| hung over | 0 | 0 | 1 | 0 | 0 | 0 | 5 | 11 | 17 | 48 | 79 | 19 | 49 | 95 | **20** |
+| injured | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3 | 44 | 1 | 4 | 48 | **2** |
+
+Six more builds were run (wired, bored, hungry, stuffed, thirsty, exhausted); their columns are omitted for width, their rows are averages over all twenty.
+
+- Top builds unchanged in order: sumo with two beers, sumo, fit with one beer, fit, well rested, all between 82 and 87 % and within 42 to 58 % of each other.
+- Fat and unfit has its puncher's chance (41 % overall). Thin and unfit beats the pets it should (22 % overall).
+
+Lifestyles, one fight a day at 20:00 (delta engine; the oracle agrees within two points):
+
+| Lifestyle | Outcome | Avg mood | End health | Min health | End fitness and weight | Booze at fight | Injuries | Fights fought | Refused | Win % vs average pet |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Fit fighter, 1 battle/day | alive | 96 | 100 | 84 | 96 w47 | 0 | 0 | 30 | 0 | 83 |
+| Fit fighter + 1 beer before | alive | 97 | 100 | 84 | 96 w48 | 13 | 0 | 30 | 0 | 80 |
+| Brawler, 1 battle/day | alive | 79 | 55 | 38 | 20 w78 | 28 | 0 | 30 | 0 | 26 |
+| Fit fighter, 6 battles/day | alive | 78 | 61 | 53 | 58 w55 | 0 | 16 | 88 | 92 | 24 |
+| Brawler, 6 battles/day | gone d6 | 55 | 0 | 0 | 23 w69 | 29 | 4 | 20 | 21 | 12 |
+| Brawler, no battles | alive | 75 | 55 | 55 | 20 w77 | 0 | 0 | 0 | 0 | 0 |
+| Sumo (heavy and fit), 1 battle/day | alive | 89 | 100 | 82 | 93 w73 | 0 | 0 | 30 | 0 | 82 |
+
+Head to head on the same days:
+
+- fit fighter beats brawler in 93 % of fights
+- tipsy fit fighter beats brawler in 94 % of fights
+- fit fighter beats tipsy fit fighter in 62 % of fights
+- sumo beats fit fighter in 39 % of fights
+- sumo beats brawler in 90 % of fights
+
+### 18.5 Money with 100 HAX per win
+
+Prices and income as in 15.9 and 16.1, with the section 17 changes (insulin cap 60, authorization popups). Battles are fought from 20:00, one every 30 minutes; the pet pays the battle costs; a player gives medicine after an injury, which is what triggers surprise bills in hard mode.
+
+| Player | Mode | Battles/day | HAX day 7 | day 14 | day 21 | day 30 | Lowest | From work | Battle prizes | Food and drink | Care paid | Surprise bills (count) | Denial popups | Avg mood | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Balanced, one shift a day | normal | 0 | 184 | 280 | 401 | 520 | 61 | 1515 | 0 | 1095 | 0 | 0 (0) | 0 | 84 |  |
+| Balanced, one shift a day | hard | 0 | 148 | 214 | 297 | 372 | 53 | 1515 | 0 | 1243 | 0 | 0 (0) | 0 | 84 | days under -150/-350/-600: 0.0/0.0/0.0 |
+| Balanced, never works | normal | 0 | -86 | -278 | -462 | -704 | -706 | 300 | 0 | 1104 | 0 | 0 (0) | 0 | 92 |  |
+| Balanced, never works | hard | 0 | -122 | -350 | -568 | -662 | -664 | 240 | 0 | 1002 | 0 | 0 (0) | 0 | 92 | EVICTED day 24.0; days under -150/-350/-600: 16.0/9.6/2.0 |
+| Balanced, one shift + 1 battle vs average pets | normal | 1 | 681 | 1037 | 1536 | 1964 | 61 | 1470 | 1500 | 1106 | 0 | 0 (0) | 0 | 78 | 15/29 fights won, 0 injuries |
+| Balanced, one shift + 1 battle vs average pets | hard | 1 | 647 | 965 | 1428 | 1808 | 53 | 1470 | 1500 | 1262 | 0 | 0 (0) | 0 | 78 | days under -150/-350/-600: 0.0/0.0/0.0; 15/29 fights won, 0 injuries |
+| Fit fighter, no work, 1 battle vs average pets | normal | 1 | 488 | 863 | 1240 | 1741 | 76 | 0 | 2600 | 959 | 0 | 0 (0) | 0 | 96 | 26/30 fights won, 0 injuries |
+| Fit fighter, no work, 1 battle vs average pets | hard | 1 | 450 | 781 | 1116 | 1557 | 72 | 0 | 2600 | 1143 | 0 | 0 (0) | 0 | 96 | days under -150/-350/-600: 0.0/0.0/0.0; 26/30 fights won, 0 injuries |
+| Fit fighter, no work, 3 battles vs average pets | normal | 3 | 755 | 1316 | 2066 | 3064 | 76 | 0 | 4000 | 971 | 65 | 0 (0) | 0 | 86 | 40/81 fights won, 13 injuries |
+| Fit fighter, no work, 3 battles vs average pets | hard | 3 | 391 | 727 | 1124 | 1898 | 72 | 0 | 4000 | 1163 | 65 | 974 (13) | 5 | 86 | days under -150/-350/-600: 0.0/0.0/0.0; 40/81 fights won, 13 injuries |
+| Fit fighter, no work, 3 battles vs equals | normal | 3 | 1455 | 1816 | 2666 | 3864 | 76 | 0 | 4800 | 971 | 65 | 0 (0) | 0 | 86 | 48/81 fights won, 13 injuries |
+| Fit fighter, no work, 3 battles vs equals | hard | 3 | 1091 | 1227 | 1724 | 2698 | 72 | 0 | 4800 | 1163 | 65 | 974 (13) | 5 | 86 | days under -150/-350/-600: 0.0/0.0/0.0; 48/81 fights won, 13 injuries |
+| Diabetic, one shift (second only when under 60 HAX) | normal | 0 | 79 | 170 | 291 | 410 | 36 | 1515 | 0 | 1095 | 110 | 0 (0) | 0 | 84 | 22 insulin doses, diabetes reversed |
+| Diabetic, one shift (second only when under 60 HAX) | hard | 0 | -146 | -170 | -157 | -162 | -201 | 1245 | 0 | 1243 | 264 | 0 (0) | 10 | 79 | days under -150/-350/-600: 22.0/0.0/0.0; 22 insulin doses, diabetes reversed |
+| Diabetic, one shift + 1 battle vs equals | normal | 1 | 576 | 1027 | 1626 | 2154 | 36 | 1470 | 1800 | 1106 | 110 | 0 (0) | 0 | 78 | 18/29 fights won, 0 injuries; 22 insulin doses, diabetes reversed |
+| Diabetic, one shift + 1 battle vs equals | hard | 1 | 383 | 771 | 1334 | 1814 | -111 | 1440 | 1800 | 1262 | 264 | 0 (0) | 10 | 78 | days under -150/-350/-600: 0.0/0.0/0.0; 18/29 fights won, 0 injuries; 22 insulin doses, diabetes reversed |
+| Diabetic, two shifts every day | normal | 0 | 223 | 615 | 995 | 1539 | 87 | 2620 | 0 | 1071 | 110 | 0 (0) | 0 | 84 | 22 insulin doses, diabetes reversed |
+| Diabetic, two shifts every day | hard | 0 | 73 | 402 | 750 | 1254 | 16 | 2620 | 0 | 1215 | 251 | 0 (0) | 10 | 84 | days under -150/-350/-600: 0.0/0.0/0.0; 22 insulin doses, diabetes reversed |
+| Diabetic, never works | normal | 0 | -191 | -388 | -572 | -814 | -816 | 300 | 0 | 1104 | 110 | 0 (0) | 0 | 91 | 22 insulin doses, diabetes reversed |
+| Diabetic, never works | hard | 0 | -997 | -997 | -997 | -997 | -997 | 60 | 0 | 277 | 880 | 0 (0) | 9 | 91 | EVICTED day 6.8; days under -150/-350/-600: 4.8/3.4/2.0; 20 insulin doses |
+| Diabetic, never works, 3 battles vs average pets | normal | 3 | 650 | 1206 | 1956 | 2954 | 66 | 0 | 4000 | 971 | 175 | 0 (0) | 0 | 85 | 40/81 fights won, 13 injuries; 22 insulin doses, diabetes reversed |
+| Diabetic, never works, 3 battles vs average pets | hard | 3 | -549 | -782 | -782 | -782 | -782 | 0 | 1000 | 346 | 1030 | 506 (6) | 9 | 79 | EVICTED day 9.0; days under -150/-350/-600: 4.0/2.7/2.0; 10/25 fights won, 6 injuries; 22 insulin doses, diabetes reversed |
+| Dependent party animal, works, takes rehab | normal | 0 | -2 | -23 | -46 | -123 | -123 | 1210 | 0 | 1283 | 150 | 0 (0) | 0 | 63 | rehab completed |
+| Dependent party animal, works, takes rehab | hard | 0 | -96 | -155 | -214 | -339 | -339 | 1210 | 0 | 1439 | 210 | 0 (0) | 0 | 62 | days under -150/-350/-600: 15.5/0.0/0.0; rehab completed |
+| Dependent party animal, never works, takes rehab | normal | 0 | -246 | -492 | -737 | -1056 | -1056 | 300 | 0 | 1306 | 150 | 0 (0) | 0 | 86 | rehab completed |
+| Dependent party animal, never works, takes rehab | hard | 0 | -786 | -786 | -786 | -786 | -786 | 40 | 0 | 176 | 750 | 0 (0) | 0 | 71 | EVICTED day 4.5; days under -150/-350/-600: 2.0/2.0/2.0; still dependent |
+
+Reading it:
+
+- **Battles dominate income.** One win is worth 2.2 shifts of work. A pet with one shift and one fight a day earns as much from fighting (1500) as from working (1470). A fit fighter that never works makes 2600 HAX a month from one fight a day against average pets, and 4000 to 4800 from three, against 1515 for a daily shift.
+- **Hard mode is trivialised for a healthy fighter.** It never works, is never insured, and still ends the month 1557 to 2698 HAX up. Its only hard-mode cost is the surprise bills after injuries: 13 bills, 974 HAX, in the three-fights-a-day run.
+- **The battle costs do limit volume, not income.** Three fights a day brought 13 injuries a month and dropped the win rate against average pets from 87 % to 49 %, yet prizes still rose.
+- **Fighting does not rescue a sick pet that will not work.** The uninsured diabetic who fights three times a day was evicted on day 9: uninsured insulin, bills and injuries outran its prizes.
+- **A healthy working player** ends the month at +520 (normal) or +372 (hard) without fighting, and near +1900 with one fight a day. With no shop the surplus is unused.
+- Surprise bills and authorization popups are now exercised: 6 to 13 bills and 5 to 10 popups a month in the runs that use medicine.
+- The dependent party animal that works completes Rehab and sits under an overdue notice for half the month (lowest -339); the one that never works is evicted on day 4.5.
+
+**Proposed limits on battle income (not applied; the owner set 100 HAX):**
+
+1. **First win of the day pays 100, later wins that day pay 20.** Keeps the headline number, caps a fighter at about one extra shift a day. My recommendation.
+2. Prize only against a live opponent that answered (not the fallback snapshot fight), and once per opponent per day. Ties income to meeting people, which suits a festival.
+3. The loser pays: 50 from the loser, 50 from "the house". Zero-sum half; not recommended, losing HAX to a stranger's challenge is unpleasant.
+4. Leave it: fighting is simply the best job. Then hard mode needs a fighter-specific cost (for example no prize while uninsured) to keep its stake.
+
+### 18.6 Wake-ups and refreshes with the 2-hour cap and the 5-minute idle
+
+| Pet | Display changes/day | Engine wake-ups/day (2 h cap) | Today's engine |
+|---|---|---|---|
+| Player's pet (balanced, sporty, lazy, reactive) | 1 to 4 | 8 to 11 | 50 untouched; up to 181 cared for |
+| Party, short sleeper, old habits | 4 to 6 | 10 to 14 | |
+| Demo pet | 29 to 32 (about 16 self-care actions and 15 status changes) | 32 to 35 | |
+
+Add one wake-up per action for the end of its animation (about 13 a day for a player, 16 for a demo pet). All cases are below today's 50.
+
+Refreshes per day: 288 idle frames at one per 5 minutes, plus status changes, plus two per action. About 320 a day for a player's pet and about 350 for a demo pet, against up to 8640 today on a pet with a multi-frame idle.
+
+### 18.7 Needs the owner again
+
+1. **100 HAX per win breaks the economy** (18.5). Pick a limit, or accept fighting as the main income.
+2. **The unattended demo pet is now mostly "off".** If that is gloomier than a desk companion should be: allow it light exercise, or stop its fitness falling below 40 %, or give it earlier reactions (it currently waits until a need is 2 to 5 points outside the narrowed band).
+3. **Party path:** I halved the overweight health damage to keep it alive. Accept, or let the party animal die without weight management.
+4. **Top-every-bar-up player** is gone on day 17 (13 injuries, diabetic). Intended as "spam loses", or too harsh for an eager beginner?
+5. **Bands as whole points** (+3 / -2) instead of 2.5 each side. Fine, or switch the model to half points?
+6. **Nap-tent station and oversleep** (19.4): an afternoon energy fix makes a pet with a normal bedtime oversleep that night.
+
+---
+
+## 19. NFC magic stations
+
+Owner requirement: the magic places stay part of the game (tap the badge, the pet gets a fix), and the signed station message should carry v2 variable names and values instead of three fixed phrases that each reset one old stat.
+
+### 19.1 Today
+
+`station.rs` `apply()` receives the verified plaintext of a signed NFC command (`NFC_README.md`: the reader sends `plaintext || 64-byte signature`, the signature covers `challenge || plaintext`, `Lc` at most 255, so the plaintext is at most 191 bytes). It trims, lowercases, rejects anything over 32 bytes, and matches exactly three phrases: `more food` sets `hunger = 0`, `more drugs` sets `sick = 0`, `sleep like a bear` sets `tired = 0`. Each has its own cooldown of 30 ticks (5 minutes), held in RAM. Stations work for any pet that is not Gone.
+
+In v2 "hunger = 0" would mean a stuffed pet, and the three phrases cannot reach the new needs.
+
+### 19.2 The new plaintext
+
+Text, not binary. Reasons: the current commands are text, a station operator can read and write it with any NFC tool, the longest preset below is 62 bytes against a 191-byte limit, and a text parser of this size is about 60 lines of `no_std` Rust. The APDU, challenge and signature scheme do not change at all; only the signed string does.
+
+```text
+message    = "fix" SP "s=" station *( SP item )
+station    = 1*8( ALPHA / DIGIT )                 ; which magic place this is
+item       = level / clear / cooldown
+level      = name op value
+name       = "full" / "water" / "energy" / "fun" / "dirt" / "booze" / "strain" / "fit" / "weight" / "health"
+op         = "=" / ">" / "<" / "+" / "-"
+value      = 1*3DIGIT                             ; percent, 0 to 100
+clear      = "clear=" cond *( "," cond )
+cond       = "hangover" / "injury" / "groggy" / "deprived" / "dependence" / "diabetes"
+cooldown   = "cd=" 1*4DIGIT                       ; minutes, for this station
+```
+
+All lowercase ASCII, single spaces, at most 96 bytes (the badge's `normalize` limit is raised from 32 to 96).
+
+Operators: `=` set to exactly; `>` raise to at least (no effect if already higher); `<` lower to at most; `+` and `-` add or subtract. Most presets use `>` and `<`, which can only help.
+
+**What the badge does with the values:**
+
+- **Clamped into the safe range of that need**, so a station can never put a pet in a health-damage zone: fullness 15 to 95, water 15 to 95, energy 10 to 100, fun 0 to 100, dirt 0 to 85, booze 0 to 70, strain 0 to 60, fit 0 to 100, weight 20 to 80. `health` is capped at the pet's ceiling (fitness and diabetes still apply), so `health>100` means "as healthy as this pet can be".
+- A value over 100, a missing station id, or a malformed item **rejects the whole frame** (status `6A 82`, as today for an unknown command).
+- An **unknown name or condition is skipped**, so a newer reader can talk to an older badge; a frame with no item the badge understands is rejected.
+- `clear=dependence` and `clear=diabetes` are in the grammar because the message is signed by the owner's key and the owner decides what a magic place can do. Proposal: allow both, and do not put them on ordinary stations (19.5).
+- One message may set several needs. They are applied together at one engine event.
+
+**Cooldown.** Per station id instead of per phrase: the badge remembers the last 8 station ids it used with the time of use (RAM, as today). Default 5 minutes, the current value. `cd=` lets a station ask for longer (up to 1440 minutes), never shorter than 5. Two food stalls with different ids can be used back to back, as two different stations can today.
+
+**Mood.** Every accepted fix gives a mood bump of +5 (a treat for walking there), on top of whatever the fixed needs do to the mood target.
+
+### 19.3 Old phrases keep working
+
+The three phrases stay accepted as aliases, so existing readers work until they are updated:
+
+| Old phrase | Treated as | Was |
+|---|---|---|
+| `more food` | `fix s=food full>60 water>60` | `hunger = 0` |
+| `more drugs` | `fix s=drugs health>100 booze<20 clear=hangover,injury,groggy` | `sick = 0` |
+| `sleep like a bear` | `fix s=rest energy>100 clear=groggy,deprived` | `tired = 0` |
+
+None of them touches weight, none can stuff or waterlog the pet, and `sleep like a bear` does not put the pet to sleep. The aliases do not clear dependence or diabetes.
+
+### 19.4 How a fix interacts with the rest
+
+- **Delta engine:** the badge first catches up to now (`update`), applies the items, then recomputes the next boundary and wake time. A fix is an event like a button press.
+- **Demo mode:** works. It counts as player help: the policy pauses 30 minutes and the pet says thanks.
+- **Hibernation:** applied; time stays frozen, the pet wakes from hibernation later with the fixed values. (Today's code already accepts stations for any pet that is not Gone.)
+- **Asleep:** applied without waking the pet.
+- **Care score:** nothing special. The pet's mood improves and the score follows.
+- **Battle:** a snapshot already sent in a challenge is not changed by a later fix; the next beacon carries the new numbers.
+- **Hard mode:** free. No price, no bill, no authorization popup, no insurance needed. Toast: `Covered by magic. Not by your insurance.`
+- **Oversleep (open):** in the simulation a player with a normal bedtime who also visits the nap tent every afternoon was groggy on 28 of 30 mornings, because the pet went to bed nearly full and overslept. Proposal: a station energy fix also suppresses the groggy check of the next sleep. Not simulated.
+
+### 19.5 Reader side and presets
+
+The station software changes one thing: the string it signs. Ready-made presets:
+
+| Magic place | Plaintext |
+|---|---|
+| Food stall | `fix s=food1 full>60 water>60` |
+| Pharmacy | `fix s=pharm1 health>100 booze<20 clear=hangover,injury,groggy` |
+| Nap tent | `fix s=nap1 energy>100 clear=groggy,deprived` |
+| Spa | `fix s=spa1 dirt<10 fun<60 strain<10 clear=groggy` |
+| Bar recovery (the morning after) | `fix s=bar1 booze<10 water>60 clear=hangover` |
+| Water point | `fix s=water1 water>70` |
+| Gym (optional) | `fix s=gym1 fit+5 strain<20 cd=240` |
+| Clinic (optional, rare) | `fix s=clinic1 clear=dependence booze<5 cd=1440` |
+
+The last four are new capabilities: old readers are unaffected, a station needs the new string to offer them.
+
+### 19.6 Simulation
+
+The prototype has the three alias presets as actions. A festival player visits all three stations once a day at 15:00.
+
+| Player | Without stations | With a daily visit to all three |
+|---|---|---|
+| Balanced | alive, mood 96, health 100 | alive, mood 97, health 100 (groggy 28 mornings, see 19.4) |
+| Party animal | alive, mood 64, health 45 to 62, weight 100, diabetic | alive, mood 84, health 65, weight 71 to 76, not diabetic |
+| Twice a day | alive, mood 61, health 49 | alive, mood 67, health 55 |
+| Once a day | gone day 2.0 | gone day 15.6 |
+| Nothing else at all | gone day 1.7 | gone day 8.6 |
+
+Stations help a lot and do not replace care: a pet that lives on stations alone slowly starves its weight (the food fix fills the belly without adding body mass) and bores itself, and is gone in one to two weeks.
+
+### 19.7 Implementation (phase 3a, after the engine)
+
+`station.rs`: replace the three-way match with the parser above (`fix` grammar, 96-byte limit), keep the three phrases as aliases expanded before parsing, replace the three cooldown atomics with a table of 8 (id hash, tick), apply through one `GameState::station_fix(&[Item])` that clamps and then lets the engine recompute. `nfct.rs` and the signed channel are untouched. `NFC_README.md` and the reader tool get the new strings. No save-format impact (cooldowns stay in RAM). Tests: each preset on a pet at both extremes never lands a need in a danger zone; old phrases still accepted; unknown names skipped; malformed frames rejected.
+
+---
+
 ## Simulated versus guessed
+
+**After the owner decisions (sections 18 and 19), simulated:** narrowed bands; 4-hour oversleep; sleep-deprived; refusals; belly 2 and beer +20; diabetes reversal; demo pet without exercise, on the clock, with 10 to 30 minute reactions; stamina, power, guard and HP floors in battle; insulin cap 60; authorization popups; surprise bills (now triggered); 100 HAX per win in normal and hard mode; the three legacy station presets; wake-ups counted on the displayed state with a 2-hour cap.
+
+**After the owner decisions, guessed or not exercised:** the new station text format and its parser (only the three alias presets are in the prototype); spa, bar, gym and clinic presets; decline cost; demo-vs-demo and hibernating auto-accept; unset-clock behaviour of the demo pet; the 12-hour boot catch-up; the proposed limits on battle income; refresh counts (derived, not a display simulation); the suppression of grogginess after a station energy fix.
 
 **Latest revision, simulated:** weight and its rates, doses and penalties; booze split and junk tolerance; hangover; dependence, the Rehab course, relapse and recovering; diabetes with insulin cover; Ozempic's costs; Relax; medicine on an injury; groggy remedies; the battle changes, builds, matrix and lifestyles of 15.7; normal- and hard-mode prices, work income, insulin creep, deductible and copay, work insurance, debt with garnish, eviction; all routine and demo tables in 15.8 on both drivers.
 
