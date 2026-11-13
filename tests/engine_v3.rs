@@ -2156,7 +2156,17 @@ mod status_wake {
     }
 
     /// What a wake-up would have to show: any change here is a visible event.
-    fn obs(s: &GameState) -> (StatusWord, bool, DisplayAnim, bool, Phase, Option<Action>) {
+    fn obs(
+        s: &GameState,
+    ) -> (
+        StatusWord,
+        bool,
+        DisplayAnim,
+        bool,
+        Phase,
+        Option<Action>,
+        u8,
+    ) {
         let (w, d) = status(s);
         (
             w,
@@ -2165,6 +2175,7 @@ mod status_wake {
             s.is_sleeping,
             s.phase,
             s.active_action,
+            s.banner_bits(),
         )
     }
 
@@ -2209,7 +2220,51 @@ mod status_wake {
         s.injured_min = 30;
         s.groggy_min = 10;
         v.push(("injured then groggy", s));
+        let mut s = pet();
+        s.diabetic = true;
+        s.insulin_min = 45;
+        v.push(("insulin runs out: NEEDS MEDS", s));
+        let mut s = pet();
+        s.dependent = true;
+        s.rehab_min = 50;
+        v.push(("rehab runs out: NEEDS REHAB", s));
+        let mut s = pet();
+        s.weight = pct(62);
+        s.fitness = pct(60);
+        v.push(("weight nears the warning band", s));
+        let mut s = pet();
+        s.booze = pct(39);
+        v.push(("booze falls out of the warning band", s));
+        let mut s = pet();
+        s.weight = pct(85);
+        s.diabetes_min = 4 * 4319;
+        v.push(("diabetes onset", s));
+        let mut s = pet();
+        s.booze = pct(50);
+        s.dependence_min = 4 * 1199;
+        v.push(("dependence onset", s));
         v
+    }
+
+    #[test]
+    fn banner_flips_are_wake_points() {
+        let mut flips = 0;
+        for (name, s) in cases() {
+            let mut c = s.clone();
+            let b0 = c.banner_bits();
+            let t0 = c.last_update_tick;
+            if let Some(m) = (1..=120u32).find(|m| {
+                c.update(t0 + m * 6);
+                c.banner_bits() != b0
+            }) {
+                flips += 1;
+                assert!(
+                    s.next_wake_tick() <= t0 + m * 6,
+                    "{name}: banner flips at +{m}"
+                );
+            }
+        }
+        assert!(flips >= 5, "only {flips} banner cases flipped");
     }
 
     #[test]
@@ -3545,5 +3600,36 @@ mod leaving_win {
         gone.phase = Phase::Gone;
         gone.award_inspiration(MiniGame::Nim, 2);
         assert_eq!(gone.cooldown_nim, 0);
+    }
+}
+
+mod sleep_while_busy {
+    use bornhack_aegg::game::engine::doses::Reason;
+    use bornhack_aegg::game::engine::food::FoodKind;
+    use bornhack_aegg::game::engine::thresholds::HATCHING_TICKS;
+    use bornhack_aegg::game::engine::{GameState, PetKind};
+
+    #[test]
+    fn sleep_is_refused_busy_while_an_action_runs() {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        s.is_sleeping = false;
+        s.fullness = 0;
+        assert!(s.feed(FoodKind::Pizza));
+        assert!(matches!(s.sleep_refusal(), Some(Reason::Busy)));
+        assert!(!s.sleep());
+        assert!(!s.is_sleeping);
+        assert!(!s.stats(0).can_sleep);
+    }
+
+    #[test]
+    fn sleep_works_when_nothing_runs() {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        s.is_sleeping = false;
+        assert!(s.sleep_refusal().is_none());
+        assert!(s.stats(0).can_sleep);
+        assert!(s.sleep());
+        assert!(s.sleep_refusal().is_some());
     }
 }

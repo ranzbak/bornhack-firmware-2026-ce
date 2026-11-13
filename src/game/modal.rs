@@ -489,7 +489,7 @@ impl Item {
             Self::BlackHole => lifecycle::game_refusal(Some(MiniGame::BlackHole)),
             Self::Nim => lifecycle::game_refusal(Some(MiniGame::Nim)),
             Self::BornJeweled => lifecycle::game_refusal(Some(MiniGame::BornJeweled)),
-            Self::Sleep => stats.is_sleeping.then_some(Reason::Refused(Refusal::Asleep)),
+            Self::Sleep => lifecycle::sleep_refusal(),
             Self::WakeFromSleep => (!stats.is_sleeping).then_some(Reason::Refused(Refusal::NoNeed)),
             _ => match self.action() {
                 Some((a, d)) => lifecycle::refusal_for(a, d),
@@ -559,9 +559,7 @@ impl Item {
                 self.started(lifecycle::rehab(), super::Toast::Rehab);
             }
             Self::Sleep => {
-                lifecycle::sleep();
-                super::show_toast(super::Toast::Sleep);
-                close();
+                self.started(lifecycle::sleep(), super::Toast::Sleep);
             }
             Self::Relax => {
                 self.started(lifecycle::relax(), super::Toast::Relax);
@@ -1219,6 +1217,27 @@ mod tests {
             true
         });
         assert!(Item::Wash.available(&lifecycle::cycle().unwrap()));
+    }
+
+    #[test]
+    fn sleep_row_says_busy_while_an_action_runs() {
+        let _guard = crate::game::lock_test_state();
+        use crate::game::engine::doses::Reason;
+        lifecycle::start_new_game(PetKind(0), false, false);
+        lifecycle::with_state(|s| {
+            s.phase = Phase::Active;
+            true
+        });
+        assert!(Item::Sleep.available(&lifecycle::cycle().unwrap()));
+        lifecycle::with_state(|s| {
+            s.dirt = u16::MAX / 2;
+            true
+        });
+        assert!(lifecycle::wash());
+        let busy = lifecycle::cycle().unwrap();
+        assert!(!Item::Sleep.available(&busy));
+        assert!(matches!(Item::Sleep.reason(&busy), Reason::Busy));
+        assert!(!lifecycle::sleep());
     }
 
     #[test]

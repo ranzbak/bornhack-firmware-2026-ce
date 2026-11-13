@@ -221,15 +221,27 @@ pub fn apply_boot_catch_up(
     now_unix: u32,
     uptime_s: u32,
 ) -> bool {
+    boot_catch_up_minutes(s, done, boot_saved_unix, now_unix, uptime_s).is_some()
+}
+
+/// [`apply_boot_catch_up`] reporting the minutes applied: `None` when the
+/// catch-up was already taken, `Some(0)` when taken with nothing to apply.
+pub fn boot_catch_up_minutes(
+    s: &mut GameState,
+    done: &AtomicBool,
+    boot_saved_unix: u32,
+    now_unix: u32,
+    uptime_s: u32,
+) -> Option<u32> {
     if done.swap(true, Ordering::Relaxed) {
-        return false;
+        return None;
     }
     let minutes = deferred_catch_up_minutes(boot_saved_unix, now_unix, uptime_s);
     if minutes > 0 {
         s.catch_up(minutes);
         s.request_save();
     }
-    true
+    Some(minutes)
 }
 
 /// `saved_unix` as loaded at boot (RAM only). A save made before the clock
@@ -272,7 +284,13 @@ pub fn on_wall_clock_set(now_unix: u32) {
     if let Some(s) = unsafe { (*GAME.get()).as_mut() } {
         let uptime_s = (crate::platform::uptime_ms() / 1000) as u32;
         let saved = BOOT_SAVED_UNIX.load(Ordering::Relaxed);
-        apply_boot_catch_up(s, &CATCH_UP_DONE, saved, now_unix, uptime_s);
+        let applied = boot_catch_up_minutes(s, &CATCH_UP_DONE, saved, now_unix, uptime_s);
+        if applied.is_some_and(|m| m > 0) {
+            // The pet jumped ahead: wake the display loop so the screen, the
+            // status word and the banners show it now, not at the next
+            // scheduled wake.
+            crate::TOAST_SIGNAL.signal(());
+        }
     }
 }
 
@@ -386,24 +404,22 @@ pub fn is_diabetic_unmedicated() -> bool {
 /// [`is_diabetic_unmedicated`].
 pub fn is_alcoholic_untreated() -> bool {
     let state = unsafe { (*GAME.get()).as_ref() };
-    state.is_some_and(|s| s.dependent && s.rehab_min == 0)
+    state.is_some_and(|s| s.is_alcoholic_untreated())
 }
 
 /// Weight has crossed the warning band but the pet is not yet diabetic —
 /// drives the pre-permanence "OVERWEIGHT" banner so the multi-day slide
 /// toward diabetes is visible and winnable rather than a silent surprise.
 pub fn is_overweight_warning() -> bool {
-    use super::engine::needs;
     let state = unsafe { (*GAME.get()).as_ref() };
-    state.is_some_and(|s| !s.diabetic && s.weight as i32 > needs::weight_hi())
+    state.is_some_and(|s| s.is_overweight_warning())
 }
 
 /// Drunkenness has crossed the warning band but the pet is not yet
 /// alcoholic — the drink-arc twin of [`is_overweight_warning`].
 pub fn is_drunk_warning() -> bool {
-    use super::engine::needs;
     let state = unsafe { (*GAME.get()).as_ref() };
-    state.is_some_and(|s| !s.dependent && s.booze as i32 > needs::booze_hi())
+    state.is_some_and(|s| s.is_drunk_warning())
 }
 
 // ---------------------------------------------------------------------------
@@ -590,6 +606,12 @@ pub fn refusal_for(
 ) -> Option<super::engine::doses::Reason> {
     let state = unsafe { (*GAME.get()).as_ref() }?;
     state.refusal_for(action, drink)
+}
+
+/// Why the pet cannot be put to sleep now (`None` when it can).
+pub fn sleep_refusal() -> Option<super::engine::doses::Reason> {
+    let state = unsafe { (*GAME.get()).as_ref() }?;
+    state.sleep_refusal()
 }
 
 /// Why a mini-game (`Some`) or a Battle (`None`) cannot start now.
@@ -1030,7 +1052,7 @@ pub async fn save_if_needed() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        Severity, apply_boot_catch_up, catch_up_minutes, current_severity, deferred_catch_up_minutes,
+        Severity, apply_boot_catch_up, boot_catch_up_minutes, catch_up_minutes, current_severity, deferred_catch_up_minutes,
         event_at, forget_boot_gap, onset_alert_due, saved_unix_to_write,
     };
     use crate::game::engine::needs::P;
@@ -1102,6 +1124,18 @@ mod tests {
         stale.record_battle(true);
         stale.update(18);
         assert!(stale.cooldown_battle < s.cooldown_battle);
+    }
+
+    #[test]
+    fn boot_catch_up_reports_the_minutes_so_the_display_can_wake() {
+        let done = AtomicBool::new(false);
+        let mut s = pet();
+        assert_eq!(boot_catch_up_minutes(&mut s, &done, 1000, 1000 + 3600, 0), Some(60));
+        // Taken once; a re-sync does nothing and reports nothing.
+        assert_eq!(boot_catch_up_minutes(&mut s, &done, 1000, 1000 + 7200, 0), None);
+        let done = AtomicBool::new(false);
+        // Clock unknown for the saved time: taken, nothing applied, no wake.
+        assert_eq!(boot_catch_up_minutes(&mut s, &done, 0, 5000, 0), Some(0));
     }
 
     #[test]

@@ -720,9 +720,39 @@ impl GameState {
         self.start_action(Action::OnlyPets, None, PLAY_DURATION())
     }
 
-    /// Diabetic with the insulin window run out.
+    /// Diabetic with the insulin window run out ("NEEDS MEDS").
     pub fn is_diabetic_unmedicated(&self) -> bool {
         self.diabetic && self.insulin_min == 0
+    }
+
+    /// Alcoholic and the rehab-protection window has lapsed ("NEEDS REHAB").
+    pub fn is_alcoholic_untreated(&self) -> bool {
+        self.dependent && self.rehab_min == 0
+    }
+
+    /// Weight is past the warning band and the pet is not yet diabetic
+    /// ("OVERWEIGHT"): the slide toward diabetes is visible and winnable.
+    pub fn is_overweight_warning(&self) -> bool {
+        !self.diabetic && self.weight as i32 > needs::weight_hi()
+    }
+
+    /// Booze is past the warning band and the pet is not yet alcoholic
+    /// ("DRUNK"), the twin of [`Self::is_overweight_warning`].
+    pub fn is_drunk_warning(&self) -> bool {
+        !self.dependent && self.booze as i32 > needs::booze_hi()
+    }
+
+    /// Everything the banners and the onset takeovers read, one bit each.
+    /// Part of the wake view: each flips at a segment or timer bound (the
+    /// insulin and rehab timers, the weight and booze band edges, the onset
+    /// counters), so the wake stays exact.
+    pub fn banner_bits(&self) -> u8 {
+        (self.is_diabetic_unmedicated() as u8)
+            | (self.is_alcoholic_untreated() as u8) << 1
+            | (self.is_overweight_warning() as u8) << 2
+            | (self.is_drunk_warning() as u8) << 3
+            | (self.diabetic as u8) << 4
+            | (self.dependent as u8) << 5
     }
 
     /// Start a bath.
@@ -786,7 +816,18 @@ impl GameState {
 
     /// Put the pet to sleep.
     pub fn sleep(&mut self) -> bool {
-        self.is_alive() && doses::fall_asleep(self).is_ok()
+        self.sleep_refusal().is_none() && doses::fall_asleep(self).is_ok()
+    }
+
+    /// Why the pet cannot be put to sleep now, or `None`. Like every other
+    /// action it is turned away while another one runs (Busy), so a feed
+    /// never lands on a sleeping pet.
+    pub fn sleep_refusal(&self) -> Option<doses::Reason> {
+        if let Some(why) = self.cannot_act() {
+            return Some(why);
+        }
+        self.is_sleeping
+            .then_some(doses::Reason::Refused(doses::Refusal::Asleep))
     }
 
     /// Wake the pet up.
@@ -857,6 +898,7 @@ type Visible = (
     bool,
     Phase,
     Option<Action>,
+    u8,
 );
 
 impl GameState {
@@ -921,7 +963,15 @@ impl GameState {
 
     fn visible(&self) -> Visible {
         let (word, danger) = status::status(self);
-        (word, danger, self.display_anim(), self.is_sleeping, self.phase, self.active_action)
+        (
+            word,
+            danger,
+            self.display_anim(),
+            self.is_sleeping,
+            self.phase,
+            self.active_action,
+            self.banner_bits(),
+        )
     }
 
     /// The tick at which the engine must run next: when something the
@@ -1227,7 +1277,7 @@ impl GameState {
             can_rehab: can(Action::Rehab),
             can_relax: can(Action::Relax),
             can_wash: can(Action::Wash),
-            can_sleep: alive && !self.is_sleeping,
+            can_sleep: self.sleep_refusal().is_none(),
             can_wake: self.is_sleeping,
             can_play_tictactoe: can_game(Some(MiniGame::TicTacToe)),
             can_play_lightsout: can_game(Some(MiniGame::LightsOut)),
