@@ -6,6 +6,7 @@
 //! starters call before waking or charging and `apply` calls again, so the
 //! rule exists once. Every dose number is a `Thresholds` field.
 
+use super::causes::{Cause, StrainWhy};
 use super::needs::{self, MAX, P};
 use super::thresholds as t;
 use super::{Action, DrinkKind, FoodKind, GameState};
@@ -135,6 +136,10 @@ const WATER_CAP_PCT: i32 = 90;
 /// Wash is refused below this dirt level (fixed safety edge of the dirt need).
 const WASH_REFUSE_PCT: i32 = 25;
 
+/// A drink gives less than this share (percent) of its mood and energy to a
+/// pet this drunk: it is barely felt.
+const DULLED_DIM_PCT: i32 = 50;
+
 /// A level shifted by `delta`, clamped to the level range.
 fn bump(level: &mut u16, delta: i32) {
     *level = (*level as i32 + delta).clamp(0, MAX) as u16;
@@ -245,6 +250,20 @@ fn exercise(s: &mut GameState) {
     // Every multiplier looks at the pet as it was before the session.
     // i64 so absurd CFG multipliers cannot overflow; clamped before use.
     let mut strain = lvl(t::DOSE_EXERCISE_STRAIN_PCT()) as i64;
+    // What made the session hard, first that held (also the strain multipliers).
+    let blame = if (s.fullness as i32) < needs::full_lo() {
+        Some(StrainWhy::Hungry)
+    } else if (s.hydration as i32) < needs::water_lo() {
+        Some(StrainWhy::Thirsty)
+    } else if (s.energy as i32) < needs::energy_lo() {
+        Some(StrainWhy::Tired)
+    } else if s.weight as i32 > needs::weight_hi() {
+        Some(StrainWhy::Heavy)
+    } else if s.deprived {
+        Some(StrainWhy::WornOut)
+    } else {
+        None
+    };
     let scale = |strain: i64, pct: u16| strain * pct as i64 / 100;
     if (s.fullness as i32) < needs::full_lo()
         || (s.energy as i32) < needs::energy_lo()
@@ -280,13 +299,22 @@ fn exercise(s: &mut GameState) {
     if s.strain as i32 > needs::strain_inj() {
         s.injured_min = t::DOSE_INJURY_MIN();
         bump(&mut s.health, -lvl(t::DOSE_INJURY_HEALTH_PCT()));
+        s.causes
+            .push(Cause::TornMuscle(blame.unwrap_or(StrainWhy::Sore)));
     } else {
         bump(&mut s.fitness, lvl(t::DOSE_EXERCISE_FIT_PCT()));
+        if let Some(why) = blame {
+            s.causes.push(Cause::Strained(why));
+        }
     }
 }
 
 fn relax(s: &mut GameState) {
+    let fun = s.fun as i32;
     bump(&mut s.fun, -lvl(t::DOSE_RELAX_FUN_PCT()));
+    if fun >= needs::fun_lo() && (s.fun as i32) < needs::fun_lo() {
+        s.causes.push(Cause::OverRelaxed);
+    }
     bump(&mut s.strain, -lvl(t::DOSE_RELAX_STRAIN_PCT()));
     bump(&mut s.energy, lvl(t::DOSE_RELAX_ENERGY_PCT()));
     bump(&mut s.fitness, -lvl(t::DOSE_RELAX_FIT_PCT()));
@@ -301,6 +329,7 @@ fn heal(s: &mut GameState) {
         bump(&mut s.booze, lvl(t::DOSE_MED_BOOZE_PCT()));
     } else if s.health as i32 > lvl(t::DOSE_HEAL_HEALTHY_PCT()) {
         bump(&mut s.booze, lvl(t::DOSE_MED_BOOZE_PCT()));
+        s.causes.push(Cause::OnlyNumbed);
     } else {
         bump(&mut s.health, lvl(t::DOSE_HEAL_HEALTH_PCT()));
     }
@@ -333,6 +362,7 @@ pub fn fall_asleep(s: &mut GameState) -> Result<(), Refusal> {
     s.is_sleeping = true;
     s.sleep_min = 0;
     s.good_sleep_min = 0;
+    s.bed_why = super::regime::unsettled_by(s);
     Ok(())
 }
 
@@ -407,6 +437,9 @@ fn eat(s: &mut GameState, food: FoodKind) {
     // level tops out at 100 %, is a food coma and goes to the waist.
     let after = s.fullness as i32 + lvl(m.full);
     let excess = (after.min(lvl(t::DOSE_FULL_CAP_PCT())) - needs::full_hi()).max(0);
+    if excess > 0 {
+        s.causes.push(Cause::FoodComa);
+    }
     bump(&mut s.fullness, lvl(m.full));
     bump(&mut s.dirt, lvl(m.dirt));
     bump(
@@ -430,9 +463,12 @@ fn eat(s: &mut GameState, food: FoodKind) {
             let pct = if s.junk_min == 0 {
                 m.mood
             } else {
+                s.causes.push(Cause::TreatTooSoon);
                 m.mood / t::DOSE_JUNK_REPEAT_DIV()
             };
             bump(&mut s.mood, lvl(pct));
+        } else {
+            s.causes.push(Cause::NoTreatBuzz);
         }
         s.junk_min = t::DOSE_JUNK_MIN();
     }
@@ -495,6 +531,17 @@ fn pour(drink: DrinkKind) -> Pour {
 }
 
 fn sip(s: &mut GameState, drink: DrinkKind) {
+    let (water, belly) = (s.hydration as i32, s.fullness as i32);
+    pour_drink(s, drink);
+    // Past the band on either side of the belly is sloshing.
+    if (water <= needs::water_hi() && s.hydration as i32 > needs::water_hi())
+        || (belly <= needs::full_hi() && s.fullness as i32 > needs::full_hi())
+    {
+        s.causes.push(Cause::Sloshing);
+    }
+}
+
+fn pour_drink(s: &mut GameState, drink: DrinkKind) {
     if drink == DrinkKind::Water {
         // A pet only drinks what it can hold: never past WATER_CAP_PCT.
         let room = (WATER_CAP_PCT * P - s.hydration as i32).max(0) / P;
@@ -515,6 +562,7 @@ fn sip(s: &mut GameState, drink: DrinkKind) {
         // Relapse.
         s.rehab_min = 0;
         bump(&mut s.mood, -lvl(t::DOSE_RELAPSE_MOOD_PCT()));
+        s.causes.push(Cause::Relapse);
     }
     // The state the pet was in when the glass came: tired hits harder, a
     // drunk pet gets less out of it, a dependent one half of that.
@@ -528,6 +576,7 @@ fn sip(s: &mut GameState, drink: DrinkKind) {
     } else {
         100
     };
+    let (water, booze) = (s.hydration as i32, s.booze as i32);
 
     bump(&mut s.hydration, lvl(p.water));
     bump(&mut s.fullness, lvl(p.belly));
@@ -537,6 +586,15 @@ fn sip(s: &mut GameState, drink: DrinkKind) {
         bump(&mut s.booze, lvl(p.booze) * amp / 100);
         bump(&mut s.mood, lvl(p.mood) * dim / 100);
         bump(&mut s.energy, lvl(p.energy) * dim / 100);
+        if dim < DULLED_DIM_PCT {
+            s.causes.push(Cause::DrinkDulled);
+        }
+        if water < needs::water_lo() {
+            s.causes.push(Cause::DryMouth);
+        }
+        if booze <= needs::booze_hi() && s.booze as i32 > needs::booze_hi() {
+            s.causes.push(Cause::OneTooMany);
+        }
     } else {
         bump(&mut s.mood, lvl(p.mood));
         bump(&mut s.energy, lvl(p.energy));

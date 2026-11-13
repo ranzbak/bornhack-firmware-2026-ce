@@ -12,6 +12,7 @@
 
 pub mod advance;
 pub mod anim_files;
+pub mod causes;
 pub mod debug;
 pub mod doses;
 pub mod drink;
@@ -365,6 +366,13 @@ pub struct GameState {
     /// Transient flag (not serialized): set when hatching completes,
     /// so lifecycle can prompt the player to name their pet.
     pub naming_pending: bool,
+
+    /// Transient (never saved): why the last doses and wakes went badly,
+    /// drained by the UI with `take_causes`.
+    pub causes: causes::CauseQueue,
+    /// Transient (never saved): what was wrong when the pet went to bed,
+    /// read at waking for the "bad night" cause.
+    pub bed_why: Option<causes::Unsettled>,
 }
 
 // ---------------------------------------------------------------------------
@@ -473,6 +481,8 @@ impl GameState {
             save_pending: true,
             realm_pending: false,
             naming_pending: false,
+            causes: causes::CauseQueue::default(),
+            bed_why: None,
         }
     }
 
@@ -796,6 +806,68 @@ impl GameState {
             Some(rehab_price(self.hard_mode)),
             REHAB_DURATION(),
         )
+    }
+
+    /// Hand the queued causes to the UI and start a new queue.
+    pub fn take_causes(&mut self) -> causes::CauseQueue {
+        core::mem::take(&mut self.causes)
+    }
+
+    /// First warning cause that starting `a` now would produce (a care action
+    /// on a sleeper includes the wake), or `None` when nothing goes wrong or
+    /// the starter would refuse. Runs the real starter and dose on a clone, so
+    /// the pet, its money and the real queue are untouched.
+    pub fn preview(
+        &self,
+        a: Action,
+        food: Option<FoodKind>,
+        drink: Option<DrinkKind>,
+    ) -> Option<causes::Cause> {
+        let mut c = self.clone();
+        c.causes = causes::CauseQueue::default();
+        let started = match a {
+            Action::Feed => c.feed(food?),
+            Action::Heal => c.heal(),
+            Action::Play => c.play(),
+            Action::Exercise => c.exercise(),
+            Action::Medicate => c.medicate(),
+            Action::Ozempic => c.ozempic(),
+            Action::Drink => c.drink(drink?),
+            Action::Rehab => c.rehab(),
+            Action::OnlyPets => c.only_pets(),
+            Action::Wash => c.wash(),
+            Action::Relax => c.relax(),
+        };
+        if !started {
+            return None;
+        }
+        // The dose lands exactly as `consume_action_ticks` lands it.
+        if let Some(done) = c.active_action.take() {
+            let _ = doses::apply(&mut c, done);
+        }
+        c.causes.iter().copied().find(|cause| cause.is_warning())
+    }
+
+    /// What lying down now would cost: a bad night when something unsettles
+    /// the pet, grogginess when it is already rested to the brim.
+    pub fn preview_sleep(&self) -> Option<causes::Cause> {
+        if self.sleep_refusal().is_some() {
+            return None;
+        }
+        if let Some(why) = regime::unsettled_by(self) {
+            return Some(causes::Cause::BadNight(why));
+        }
+        (self.energy as i32 >= needs::ENERGY_HI_EDGE_PCT as i32 * needs::P)
+            .then_some(causes::Cause::Groggy)
+    }
+
+    /// First warning cause that waking the pet now would produce; `None` when
+    /// it is awake or nothing goes wrong.
+    pub fn preview_wake(&self) -> Option<causes::Cause> {
+        let mut c = self.clone();
+        c.causes = causes::CauseQueue::default();
+        doses::wake_up(&mut c).ok()?;
+        c.causes.iter().copied().find(|cause| cause.is_warning())
     }
 
     /// Put the pet to sleep.

@@ -5,10 +5,11 @@
 //! solver) guarantees no threshold is crossed inside the step, so every rate
 //! stays valid. Every number is a [`thresholds`] field.
 
+use super::causes::{Cause, Unsettled};
 use super::needs::{self, MAX, Need, P};
 use super::regime::{
     energy_cap, health_ceiling, health_damage, health_recovery, mood_target, rates,
-    sleep_quality_pm,
+    sleep_quality_pm, unsettled_by,
 };
 use super::thresholds as t;
 use super::{GameState, Phase};
@@ -21,6 +22,12 @@ pub const SLOW_SCALE: u32 = 4;
 /// `leaving_min` counts half-minutes: +`LEAVING_SCALE` per minute at health 0,
 /// -1 per minute otherwise.
 pub const LEAVING_SCALE: u32 = 2;
+/// A night is a bad night when at least this many minutes of it were poor
+/// (display constant, not a balance value) ...
+const RESTLESS_MIN: u16 = 60;
+/// ... and the poor minutes are more than 1 in this many of the minutes
+/// slept short of oversleeping (more than half).
+const BAD_NIGHT_POOR_SHARE_DEN: u32 = 2;
 
 #[inline]
 fn lvl(pct: u8) -> i32 {
@@ -189,6 +196,7 @@ pub fn advance(s: &mut GameState, dt: u32) {
             s.is_sleeping = true;
             s.sleep_min = 0;
             s.good_sleep_min = 0;
+            s.bed_why = unsettled_by(s);
         }
     }
 
@@ -246,6 +254,7 @@ pub fn wake(s: &mut GameState, by_player: bool) {
     s.is_sleeping = false;
     if by_player && (s.energy as i32) < lvl(t::GRUMPY_ENERGY_PCT()) {
         s.mood = bump(s.mood, -(lvl(t::GRUMPY_PCT()) as i64));
+        s.causes.push(Cause::Grumpy);
     }
     // Sleep-deprived after enough short nights in a row; enough good nights clear it.
     // Naps (not `night`) never count.
@@ -254,6 +263,9 @@ pub fn wake(s: &mut GameState, by_player: bool) {
             s.short_nights = s.short_nights.saturating_add(1);
             s.good_nights = 0;
             if s.short_nights >= t::DEPRIVED_NIGHTS() {
+                if !s.deprived {
+                    s.causes.push(Cause::WornOut);
+                }
                 s.deprived = true;
             }
         } else {
@@ -274,8 +286,22 @@ pub fn wake(s: &mut GameState, by_player: bool) {
         s.groggy_min = t::GROGGY_MIN();
         s.energy = bump(s.energy, -(lvl(t::GROGGY_ENERGY_PCT()) as i64));
         s.fitness = bump(s.fitness, -(lvl(t::GROGGY_FIT_PCT()) as i64));
+        s.causes.push(Cause::Groggy);
+    }
+    // Minutes slept short of oversleeping, and how many of them were poor.
+    let span = s.sleep_min.saturating_sub(s.oversleep_min);
+    let poor = span.saturating_sub(s.good_sleep_min);
+    if poor >= RESTLESS_MIN && poor as u32 * BAD_NIGHT_POOR_SHARE_DEN > span as u32 {
+        let why = s.bed_why.or_else(|| unsettled_by(s));
+        s.causes
+            .push(Cause::BadNight(why.unwrap_or(Unsettled::Unknown)));
+    }
+    if s.hangover_min > 0 {
+        s.causes.push(Cause::StillHungOver);
     }
     if s.good_sleep_min >= t::GOOD_SLEEP_LINE_MIN() {
         s.rested_min = t::RESTED_MIN();
+        s.causes.push(Cause::WellRested);
     }
+    s.bed_why = None;
 }

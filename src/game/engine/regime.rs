@@ -7,6 +7,7 @@
 //! `x * pct / 100` that truncates toward zero.
 
 use super::GameState;
+use super::causes::Unsettled;
 use super::needs::{self, MAX, NEEDS, Need, P};
 use super::thresholds as t;
 
@@ -43,22 +44,38 @@ pub fn energy_cap(s: &GameState) -> i32 {
     }
 }
 
-/// Sleep recovery quality in per-mille: poor when the pet is unsettled.
-pub fn sleep_quality_pm(s: &GameState) -> i32 {
+/// What keeps a sleeper from resting, first reason first; `None` when the pet
+/// is settled. The one predicate: sleep quality is poor exactly when this
+/// is `Some`.
+pub fn unsettled_by(s: &GameState) -> Option<Unsettled> {
     let (b, f, h, fun) = (
         s.booze as i32,
         s.fullness as i32,
         s.hydration as i32,
         s.fun as i32,
     );
-    let unsettled = b > lvl(t::UNSETTLED_BOOZE_PCT())
-        || f > lvl(t::UNSETTLED_FULL_HI_PCT())
-        || f < lvl(t::UNSETTLED_FULL_LO_PCT())
-        || h < lvl(t::UNSETTLED_WATER_LO_PCT())
-        || h > lvl(t::UNSETTLED_WATER_HI_PCT())
-        || fun > needs::fun_hi()
-        || s.rehab_min > 0;
-    (if unsettled {
+    if b > lvl(t::UNSETTLED_BOOZE_PCT()) {
+        Some(Unsettled::Drinks)
+    } else if f < lvl(t::UNSETTLED_FULL_LO_PCT()) {
+        Some(Unsettled::Hungry)
+    } else if f > lvl(t::UNSETTLED_FULL_HI_PCT()) {
+        Some(Unsettled::Stuffed)
+    } else if h < lvl(t::UNSETTLED_WATER_LO_PCT()) {
+        Some(Unsettled::Thirsty)
+    } else if h > lvl(t::UNSETTLED_WATER_HI_PCT()) {
+        Some(Unsettled::Waterlogged)
+    } else if fun > needs::fun_hi() {
+        Some(Unsettled::Wired)
+    } else if s.rehab_min > 0 {
+        Some(Unsettled::Withdrawal)
+    } else {
+        None
+    }
+}
+
+/// Sleep recovery quality in per-mille: poor when the pet is unsettled.
+pub fn sleep_quality_pm(s: &GameState) -> i32 {
+    (if unsettled_by(s).is_some() {
         t::SLEEP_QUALITY_POOR_PM()
     } else {
         t::SLEEP_QUALITY_GOOD_PM()

@@ -4026,3 +4026,435 @@ mod status_line {
         assert!(c.has(Condition::InRehab) && !c.has(Condition::Dependent));
     }
 }
+
+mod causes {
+    use bornhack_aegg::game::engine::causes::{Cause, CauseQueue, StrainWhy, Unsettled};
+    use bornhack_aegg::game::engine::needs::P;
+    use bornhack_aegg::game::engine::regime::{sleep_quality_pm, unsettled_by};
+    use bornhack_aegg::game::engine::thresholds::{HATCHING_TICKS, SLEEP_QUALITY_POOR_PM};
+    use bornhack_aegg::game::engine::{Action, DrinkKind, FoodKind, GameState, PetKind, Phase};
+
+    fn pct(v: i32) -> u16 {
+        (v * P) as u16
+    }
+
+    fn pet() -> GameState {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        assert_eq!(s.phase, Phase::Active);
+        s.is_sleeping = false;
+        s.tick_rem = 0;
+        s.mood = pct(50);
+        s.energy = pct(90);
+        s.fullness = pct(50);
+        s.hydration = pct(50);
+        s.weight = pct(50);
+        s.dirt = pct(10);
+        s.fitness = pct(50);
+        s.fun = pct(50);
+        s
+    }
+
+    /// Start `a` with the real starter; false when the starter refuses.
+    fn start(s: &mut GameState, a: Action, f: Option<FoodKind>, d: Option<DrinkKind>) -> bool {
+        match a {
+            Action::Feed => s.feed(f.unwrap()),
+            Action::Heal => s.heal(),
+            Action::Play => s.play(),
+            Action::Exercise => s.exercise(),
+            Action::Medicate => s.medicate(),
+            Action::Ozempic => s.ozempic(),
+            Action::Drink => s.drink(d.unwrap()),
+            Action::Rehab => s.rehab(),
+            Action::OnlyPets => s.only_pets(),
+            Action::Wash => s.wash(),
+            Action::Relax => s.relax(),
+        }
+    }
+
+    /// Start and finish an action; true when it ran.
+    fn run(s: &mut GameState, a: Action, f: Option<FoodKind>, d: Option<DrinkKind>) -> bool {
+        if !start(s, a, f, d) {
+            return false;
+        }
+        let end = s.last_update_tick + s.action_ticks_remaining as u32;
+        s.update(end);
+        assert_eq!(s.active_action, None);
+        true
+    }
+
+    fn causes_of(s: &mut GameState) -> Vec<Cause> {
+        s.take_causes().iter().copied().collect()
+    }
+
+    fn first_warning(q: &CauseQueue) -> Option<Cause> {
+        q.iter().copied().find(|c| c.is_warning())
+    }
+
+    /// Put the pet to bed and let `minutes` pass.
+    fn sleep_through(s: &mut GameState, minutes: u32) {
+        assert!(s.sleep());
+        s.update(s.last_update_tick + minutes * 6);
+    }
+
+    #[test]
+    fn pizza_on_a_half_full_pet_is_a_food_coma() {
+        let mut s = pet();
+        assert!(run(&mut s, Action::Feed, Some(FoodKind::Pizza), None));
+        assert_eq!(causes_of(&mut s), vec![Cause::FoodComa]);
+    }
+
+    #[test]
+    fn a_treat_too_soon_or_on_ozempic() {
+        let mut s = pet();
+        s.junk_min = 10;
+        assert!(run(&mut s, Action::Feed, Some(FoodKind::Cake), None));
+        assert!(causes_of(&mut s).contains(&Cause::TreatTooSoon));
+        let mut s = pet();
+        s.ozempic_min = 10;
+        assert!(run(&mut s, Action::Feed, Some(FoodKind::Cake), None));
+        let got = causes_of(&mut s);
+        assert!(got.contains(&Cause::NoTreatBuzz));
+        assert!(!got.contains(&Cause::TreatTooSoon));
+        let mut s = pet();
+        assert!(run(&mut s, Action::Feed, Some(FoodKind::Cake), None));
+        assert!(causes_of(&mut s).is_empty(), "a first treat is fine");
+    }
+
+    #[test]
+    fn beer_on_a_thirsty_pet_dries_the_mouth() {
+        let mut s = pet();
+        s.hydration = pct(30);
+        assert!(run(&mut s, Action::Drink, None, Some(DrinkKind::Beer)));
+        assert!(causes_of(&mut s).contains(&Cause::DryMouth));
+    }
+
+    #[test]
+    fn beer_past_the_band_is_one_too_many() {
+        let mut s = pet();
+        s.booze = pct(30);
+        assert!(run(&mut s, Action::Drink, None, Some(DrinkKind::Beer)));
+        assert!(causes_of(&mut s).contains(&Cause::OneTooMany));
+    }
+
+    #[test]
+    fn a_drunk_pet_barely_feels_a_drink() {
+        let mut s = pet();
+        s.booze = pct(60);
+        assert!(run(&mut s, Action::Drink, None, Some(DrinkKind::Beer)));
+        assert!(causes_of(&mut s).contains(&Cause::DrinkDulled));
+    }
+
+    #[test]
+    fn beer_in_rehab_is_a_relapse() {
+        let mut s = pet();
+        s.rehab_min = 100;
+        assert!(run(&mut s, Action::Drink, None, Some(DrinkKind::Beer)));
+        assert!(causes_of(&mut s).contains(&Cause::Relapse));
+    }
+
+    #[test]
+    fn water_past_the_band_sloshes() {
+        let mut s = pet();
+        s.hydration = pct(70);
+        assert!(run(&mut s, Action::Drink, None, Some(DrinkKind::Water)));
+        assert_eq!(causes_of(&mut s), vec![Cause::Sloshing]);
+        let mut s = pet();
+        s.hydration = pct(40);
+        assert!(run(&mut s, Action::Drink, None, Some(DrinkKind::Water)));
+        assert!(causes_of(&mut s).is_empty());
+    }
+
+    #[test]
+    fn hungry_sport_strains_then_tears() {
+        let mut s = pet();
+        s.fullness = pct(30);
+        assert!(run(&mut s, Action::Exercise, None, None));
+        assert_eq!(causes_of(&mut s), vec![Cause::Strained(StrainWhy::Hungry)]);
+        s.fullness = pct(30);
+        s.energy = pct(90);
+        s.hydration = pct(50);
+        assert!(run(&mut s, Action::Exercise, None, None));
+        assert_eq!(causes_of(&mut s), vec![Cause::TornMuscle(StrainWhy::Hungry)]);
+    }
+
+    #[test]
+    fn medicine_on_a_healthy_pet_only_numbs() {
+        let mut s = pet();
+        s.health = pct(90);
+        assert_eq!(s.injured_min, 0);
+        assert!(run(&mut s, Action::Heal, None, None));
+        assert_eq!(causes_of(&mut s), vec![Cause::OnlyNumbed]);
+    }
+
+    #[test]
+    fn relaxing_a_low_fun_pet_bores_it() {
+        let mut s = pet();
+        s.fun = pct(50);
+        assert!(run(&mut s, Action::Relax, None, None));
+        assert_eq!(causes_of(&mut s), vec![Cause::OverRelaxed]);
+    }
+
+    #[test]
+    fn woken_tired_is_grumpy() {
+        let mut s = pet();
+        s.energy = pct(30);
+        assert!(s.sleep());
+        assert!(s.wake());
+        assert_eq!(causes_of(&mut s).first(), Some(&Cause::Grumpy));
+    }
+
+    #[test]
+    fn a_night_after_drinks_is_a_bad_night() {
+        let mut s = pet();
+        s.energy = pct(30);
+        s.booze = pct(50);
+        sleep_through(&mut s, 300);
+        assert!(s.wake());
+        assert!(causes_of(&mut s).contains(&Cause::BadNight(Unsettled::Drinks)));
+    }
+
+    #[test]
+    fn a_few_poor_minutes_are_not_a_bad_night() {
+        // 35 % booze clears below the unsettled line in about 90 of 300
+        // minutes: poor, but not more than half the night.
+        let mut s = pet();
+        s.energy = pct(30);
+        s.booze = pct(35);
+        sleep_through(&mut s, 300);
+        assert!(s.wake());
+        assert!(!causes_of(&mut s).iter().any(|c| matches!(c, Cause::BadNight(_))));
+    }
+
+    #[test]
+    fn a_good_night_is_well_rested() {
+        let mut s = pet();
+        s.energy = pct(30);
+        sleep_through(&mut s, 400);
+        assert!(s.wake());
+        let got = causes_of(&mut s);
+        assert!(got.contains(&Cause::WellRested));
+        assert!(!Cause::WellRested.is_warning());
+        assert!(!got.iter().any(|c| matches!(c, Cause::BadNight(_))));
+    }
+
+    #[test]
+    fn the_queue_keeps_the_newest_four() {
+        let mut q = CauseQueue::default();
+        assert!(q.is_empty());
+        for c in [
+            Cause::FoodComa,
+            Cause::Relapse,
+            Cause::Sloshing,
+            Cause::Grumpy,
+            Cause::Groggy,
+        ] {
+            q.push(c);
+        }
+        let got: Vec<Cause> = q.iter().copied().collect();
+        assert_eq!(
+            got,
+            vec![Cause::Relapse, Cause::Sloshing, Cause::Grumpy, Cause::Groggy]
+        );
+    }
+
+    #[test]
+    fn take_causes_empties_the_queue() {
+        let mut s = pet();
+        assert!(run(&mut s, Action::Feed, Some(FoodKind::Pizza), None));
+        assert!(!s.causes.is_empty());
+        assert!(!s.take_causes().is_empty());
+        assert!(s.causes.is_empty());
+    }
+
+    #[test]
+    fn causes_are_never_saved() {
+        let mut s = pet();
+        s.energy = pct(30);
+        s.booze = pct(35);
+        assert!(s.sleep());
+        assert!(s.bed_why.is_some());
+        let plain = s.to_bytes();
+        s.causes.push(Cause::FoodComa);
+        s.causes.push(Cause::BadNight(Unsettled::Drinks));
+        assert_eq!(s.to_bytes(), plain);
+        let back = GameState::from_bytes(&s.to_bytes()).unwrap();
+        assert!(back.causes.is_empty());
+        assert_eq!(back.bed_why, None);
+    }
+
+    #[test]
+    fn unsettled_is_exactly_poor_sleep() {
+        let mut s = pet();
+        for step in 0..4000u32 {
+            // A deterministic sweep over the levels the predicates read.
+            let r = step.wrapping_mul(2654435761);
+            s.booze = pct((r % 60) as i32);
+            s.fullness = pct((r / 7 % 101) as i32);
+            s.hydration = pct((r / 11 % 101) as i32);
+            s.fun = pct((r / 13 % 101) as i32);
+            s.rehab_min = if r / 17 % 5 == 0 { 3 } else { 0 };
+            let poor = sleep_quality_pm(&s) == SLEEP_QUALITY_POOR_PM() as i32;
+            assert_eq!(poor, unsettled_by(&s).is_some(), "step {step}");
+        }
+    }
+
+    #[test]
+    fn unsettled_names_the_first_reason() {
+        let mut s = pet();
+        assert_eq!(unsettled_by(&s), None);
+        s.rehab_min = 5;
+        assert_eq!(unsettled_by(&s), Some(Unsettled::Withdrawal));
+        s.fun = pct(100);
+        assert_eq!(unsettled_by(&s), Some(Unsettled::Wired));
+        s.hydration = pct(95);
+        assert_eq!(unsettled_by(&s), Some(Unsettled::Waterlogged));
+        s.hydration = pct(10);
+        assert_eq!(unsettled_by(&s), Some(Unsettled::Thirsty));
+        s.fullness = pct(95);
+        assert_eq!(unsettled_by(&s), Some(Unsettled::Stuffed));
+        s.fullness = pct(10);
+        assert_eq!(unsettled_by(&s), Some(Unsettled::Hungry));
+        s.booze = pct(50);
+        assert_eq!(unsettled_by(&s), Some(Unsettled::Drinks));
+    }
+
+    #[test]
+    fn preview_matches_what_the_dose_does() {
+        let mut states: Vec<GameState> = Vec::new();
+        states.push(pet());
+        let mut s = pet();
+        s.fullness = pct(50);
+        states.push(s);
+        let mut s = pet();
+        s.hydration = pct(30);
+        s.booze = pct(30);
+        states.push(s);
+        let mut s = pet();
+        s.strain = pct(40);
+        s.fullness = pct(30);
+        states.push(s);
+        let mut s = pet();
+        s.is_sleeping = true;
+        s.energy = pct(30);
+        states.push(s);
+        let mut s = pet();
+        s.health = pct(90);
+        states.push(s);
+        let mut s = pet();
+        s.fun = pct(50);
+        states.push(s);
+        let mut s = pet();
+        s.junk_min = 10;
+        states.push(s);
+        let mut s = pet();
+        s.rehab_min = 100;
+        s.dependent = true;
+        states.push(s);
+        let mut s = pet();
+        s.hydration = pct(70);
+        states.push(s);
+        let mut s = pet();
+        s.diabetic = true;
+        s.deprived = true;
+        s.weight = pct(90);
+        states.push(s);
+
+        let actions = [
+            Action::Feed,
+            Action::Heal,
+            Action::Play,
+            Action::Exercise,
+            Action::Medicate,
+            Action::Ozempic,
+            Action::Drink,
+            Action::Rehab,
+            Action::OnlyPets,
+            Action::Wash,
+            Action::Relax,
+        ];
+        let mut ran = 0;
+        let mut warned = 0;
+        for base in &states {
+            for a in actions {
+                let foods: Vec<Option<FoodKind>> = if a == Action::Feed {
+                    FoodKind::ALL.iter().map(|f| Some(*f)).collect()
+                } else {
+                    vec![None]
+                };
+                let drinks: Vec<Option<DrinkKind>> = if a == Action::Drink {
+                    DrinkKind::ALL.iter().map(|d| Some(*d)).collect()
+                } else {
+                    vec![None]
+                };
+                for f in &foods {
+                    for d in &drinks {
+                        let predicted = base.preview(a, *f, *d);
+                        let mut real = base.clone();
+                        real.take_causes();
+                        if run(&mut real, a, *f, *d) {
+                            ran += 1;
+                            let want = first_warning(&real.take_causes());
+                            warned += want.is_some() as u32;
+                            assert_eq!(predicted, want, "{a:?} {f:?} {d:?}");
+                        } else {
+                            assert_eq!(predicted, None, "refused {a:?} {f:?} {d:?}");
+                        }
+                    }
+                }
+            }
+        }
+        assert!(ran > 60, "only {ran} actions ran");
+        assert!(warned > 12, "only {warned} actions warned");
+    }
+
+    #[test]
+    fn preview_never_changes_the_pet() {
+        let mut s = pet();
+        s.is_sleeping = true;
+        s.energy = pct(30);
+        s.booze = pct(35);
+        s.causes.push(Cause::Relapse);
+        let before = s.clone();
+        let _ = s.preview(Action::Feed, Some(FoodKind::Pizza), None);
+        let _ = s.preview(Action::Drink, None, Some(DrinkKind::Beer));
+        let _ = s.preview_sleep();
+        let _ = s.preview_wake();
+        assert_eq!(s, before);
+        assert!(!s.causes.is_empty(), "the real queue is not drained");
+    }
+
+    #[test]
+    fn preview_sleep_and_wake_read_the_state() {
+        let mut s = pet();
+        s.energy = pct(30);
+        assert_eq!(s.preview_sleep(), None);
+        s.booze = pct(35);
+        assert_eq!(s.preview_sleep(), Some(Cause::BadNight(Unsettled::Drinks)));
+        let mut s = pet();
+        s.energy = pct(95);
+        assert_eq!(s.preview_sleep(), Some(Cause::Groggy));
+        assert_eq!(s.preview_wake(), None, "awake");
+        let mut s = pet();
+        s.energy = pct(30);
+        assert!(s.sleep());
+        assert_eq!(s.preview_wake(), Some(Cause::Grumpy));
+    }
+
+    #[test]
+    fn cause_text_fits_the_toast() {
+        let mut n = 0;
+        for c in Cause::all() {
+            n += 1;
+            assert!(c.what().len() <= 12, "{}", c.what());
+            assert!(c.why().len() <= 15, "{}", c.why());
+            assert!(!c.what().is_empty() && !c.why().is_empty());
+            assert_eq!(Cause::unpack(c.pack()), Some(c));
+        }
+        assert_eq!(n, 15 + 6 + 6 + 8, "every variant once");
+        assert_eq!(Cause::unpack(255), None);
+        assert_eq!(Cause::TornMuscle(StrainWhy::WornOut).why(), "sport: worn out");
+        assert_eq!(Cause::BadNight(Unsettled::Unknown).why(), "slept badly");
+        assert_eq!(Cause::WellRested.what(), "well rested");
+    }
+}

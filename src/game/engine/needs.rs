@@ -15,6 +15,8 @@ pub const MAX: i32 = 65535;
 pub const NEED_DANGER_LO_PCT: u8 = 15;
 /// Fullness and water above this are fixed edges; dirt above it is in danger.
 pub const NEED_HI_EDGE_PCT: u8 = 85;
+/// Energy at or above this is rested to the brim: a sleeper oversleeps.
+pub const ENERGY_HI_EDGE_PCT: u8 = 85;
 /// Dirt above this is in danger.
 pub const DIRT_DANGER_PCT: u8 = NEED_HI_EDGE_PCT;
 /// Health below this is in danger.
@@ -113,7 +115,7 @@ pub const fn build_edges(t: &Thresholds) -> EdgeTable {
             &[NEED_DANGER_LO_PCT, 25, NEED_HI_EDGE_PCT, 90, 95],
             &[t.WATER_LO_PCT, t.WATER_HI_PCT],
         ),
-        merge(&[EXHAUSTED_PCT, 50, 70, 85], &[t.ENERGY_LO_PCT]),
+        merge(&[EXHAUSTED_PCT, 50, 70, ENERGY_HI_EDGE_PCT], &[t.ENERGY_LO_PCT]),
         merge(&[40], &[t.FUN_LO_PCT, t.FUN_HI_PCT]),
         merge(&[25, DIRT_DANGER_PCT], &[t.DIRT_HI_PCT]),
         merge(&[TIPSY_PCT, 15, 30], &[t.BOOZE_HI_PCT, t.BOOZE_DANGER_PCT]),
