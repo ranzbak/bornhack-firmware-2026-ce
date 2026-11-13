@@ -823,7 +823,7 @@ impl GameState {
     /// mini-games stay available — encourages variety.  Also gives the
     /// mini-game's fun dose (and costs a little energy).
     pub fn award_inspiration(&mut self, game: MiniGame, grade: u8) {
-        if self.phase != Phase::Active {
+        if !self.is_alive() {
             return;
         }
         doses::minigame(self, grade);
@@ -1277,6 +1277,38 @@ impl GameState {
     /// immediately, rather than waiting for the next 15-minute interval.
     pub fn request_save(&mut self) {
         self.save_pending = true;
+    }
+
+    /// Old station phrase `more food` (design 19.3, `fix s=food full>60
+    /// water>60`): fullness and hydration are raised to 60 % and never
+    /// lowered, so the pet is fed but cannot be stuffed or waterlogged.
+    pub fn station_food(&mut self) {
+        let floor = (60 * P) as u16;
+        self.fullness = self.fullness.max(floor);
+        self.hydration = self.hydration.max(floor);
+    }
+
+    /// Old station phrase `more drugs` (19.3, `fix s=drugs health>100
+    /// booze<20 clear=hangover,injury,groggy`): health up to the pet's own
+    /// ceiling, booze down to 20 % at most, three ailments cleared.
+    /// Dependence and diabetes stay.
+    pub fn station_drugs(&mut self) {
+        self.health = self.health.max(regime::health_ceiling(self) as u16);
+        self.booze = self.booze.min((20 * P) as u16);
+        self.hangover_min = 0;
+        self.injured_min = 0;
+        self.groggy_min = 0;
+    }
+
+    /// Old station phrase `sleep like a bear` (19.3, `fix s=rest energy>100
+    /// clear=groggy,deprived`): energy full, groggy and deprived cleared.
+    /// It does not put the pet to sleep. 19.4: it also suppresses the groggy
+    /// check of the next sleep.
+    pub fn station_rest(&mut self) {
+        self.energy = MAX as u16;
+        self.groggy_min = 0;
+        self.deprived = false;
+        self.no_groggy = true;
     }
 
     /// Meeting (or spending time with) a mesh friend over the SHDW channel —

@@ -8,8 +8,9 @@
 //!     off by default, gated behind the `nfc-plaintext-station` feature
 //!     for physical event-station tags.
 //! Either way, if the phrase matches one of the three below the
-//! corresponding stat is restored to full and a station toast is
-//! shown.  Anything else is silently ignored.
+//! corresponding fix is applied (design 19.3: food and water lifted to
+//! 60 %, health to the pet's ceiling, energy filled; none of them can stuff
+//! or waterlog the pet) and a station toast is shown.  Anything else is silently ignored.
 //!
 //! # Gating
 //!
@@ -28,7 +29,7 @@
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use super::Toast;
-use super::lifecycle::{self, with_state};
+use super::lifecycle::{self, with_game_now};
 
 /// Cooldown between repeat applications of the *same* station effect.
 /// 30 ticks × 10 s/tick = 5 minutes.
@@ -74,9 +75,9 @@ pub fn apply(text: &[u8]) -> Option<Toast> {
     let key = normalize(text)?;
 
     match key.as_slice() {
-        b"more food" => station_step(&LAST_FOOD, Toast::StationFood, |s| s.fullness = u16::MAX),
-        b"more drugs" => station_step(&LAST_DRUGS, Toast::StationDrugs, |s| s.health = u16::MAX),
-        b"sleep like a bear" => station_step(&LAST_REST, Toast::StationRest, |s| s.energy = u16::MAX),
+        b"more food" => station_step(&LAST_FOOD, Toast::StationFood, |s| s.station_food()),
+        b"more drugs" => station_step(&LAST_DRUGS, Toast::StationDrugs, |s| s.station_drugs()),
+        b"sleep like a bear" => station_step(&LAST_REST, Toast::StationRest, |s| s.station_rest()),
         _ => None,
     }
 }
@@ -90,9 +91,9 @@ fn station_step(
 ) -> Option<Toast> {
     match try_consume(slot) {
         Ok(()) => {
-            with_state(|s| {
+            with_game_now(|s| {
                 mutate(s);
-                true
+                s.request_save();
             });
             Some(success_toast)
         }

@@ -662,7 +662,7 @@ pub fn drink(kind: super::engine::DrinkKind) -> bool {
 /// `big` = true for a brand-new friend, false for a cooldown-gated
 /// recurring reunion. No-op if no game is active.
 pub fn friend_boost(big: bool) {
-    with_game(|s| s.friend_boost(big));
+    with_game_now(|s| s.friend_boost(big));
 }
 
 pub fn rehab() -> bool {
@@ -743,7 +743,7 @@ pub fn is_hibernating() -> bool {
 /// Award the mini-game win (`GRADE_WIN`) or draw (`GRADE_DRAW`): fun dose, HAX and cooldown.
 /// Starts only the matching game's cooldown so other games stay playable.
 pub fn award_inspiration(game: super::engine::MiniGame, grade: u8) {
-    with_game(|s| {
+    with_game_now(|s| {
         s.award_inspiration(game, grade);
         // Celebratory jingle on a mini-game win — the main
         // active-engagement reward previously had no audio, only a toast.
@@ -845,9 +845,7 @@ pub fn combat_stats() -> Option<super::battle::CombatStats> {
 /// Apply the outcome of a mesh Battle to the current pet's lifetime
 /// win/loss tally and cooldown. No-op if no game is active.
 pub fn record_battle(won: bool) {
-    if let Some(state) = unsafe { (*GAME.get()).as_mut() } {
-        state.record_battle(won);
-    }
+    with_game_now(|s| s.record_battle(won));
 }
 
 /// Get the current generation (defaults to 0 if no game).
@@ -894,6 +892,20 @@ fn with_game(f: impl FnOnce(&mut GameState)) {
     if let Some(s) = unsafe { (*GAME.get()).as_mut() } {
         f(s);
     }
+}
+
+/// Bring `s` up to `now`, then apply the event `f`. An event is applied to
+/// the pet as it is, never at a stale tick base (design 19.4): the gap since
+/// the last frame is played first, so a cooldown or dose the event sets is
+/// not eaten by that gap.
+fn event_at(s: &mut GameState, now: u32, f: impl FnOnce(&mut GameState)) {
+    s.update(now);
+    f(s);
+}
+
+/// [`with_game`] for state-changing events: catches up to now first.
+pub(super) fn with_game_now(f: impl FnOnce(&mut GameState)) {
+    with_game(|s| event_at(s, now_tick(), f));
 }
 
 pub(super) fn with_state(f: impl FnOnce(&mut GameState) -> bool) -> bool {
@@ -1009,7 +1021,7 @@ pub async fn save_if_needed() -> bool {
 mod tests {
     use super::{
         Severity, apply_boot_catch_up, catch_up_minutes, current_severity, deferred_catch_up_minutes,
-        forget_boot_gap, saved_unix_to_write,
+        event_at, forget_boot_gap, saved_unix_to_write,
     };
     use crate::game::engine::needs::P;
     use crate::game::engine::{GameState, PetKind, Phase};
@@ -1041,6 +1053,24 @@ mod tests {
         let mut s = pet();
         s.dirt = (95 * P) as u16; // Grubby but in danger
         assert!(current_severity(&s) == Severity::Severe);
+    }
+
+    #[test]
+    fn an_event_sees_the_gap_applied_first() {
+        // The last frame was at tick 0; the event lands 18 ticks (3 min) later.
+        let mut s = pet();
+        s.last_update_tick = 0;
+        event_at(&mut s, 18, |s| s.record_battle(true));
+        assert_eq!(s.last_update_tick, 18);
+        // The battle cooldown the event set was not consumed by the gap.
+        assert_eq!(s.cooldown_battle, crate::game::engine::thresholds::BATTLE_COOLDOWN());
+
+        // Applied at the stale base instead, the next update eats it.
+        let mut stale = pet();
+        stale.last_update_tick = 0;
+        stale.record_battle(true);
+        stale.update(18);
+        assert!(stale.cooldown_battle < s.cooldown_battle);
     }
 
     #[test]

@@ -3408,3 +3408,142 @@ mod debug_menu {
         }
     }
 }
+
+mod station_aliases {
+    use bornhack_aegg::game::engine::needs::{MAX, P};
+    use bornhack_aegg::game::engine::regime::{health_ceiling, health_damage};
+    use bornhack_aegg::game::engine::status::{StatusWord, status};
+    use bornhack_aegg::game::engine::thresholds::HATCHING_TICKS;
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase};
+
+    fn pet() -> GameState {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        assert_eq!(s.phase, Phase::Active);
+        s.is_sleeping = false;
+        s.tick_rem = 0;
+        s
+    }
+
+    fn pct(p: i32) -> u16 {
+        (p * P) as u16
+    }
+
+    #[test]
+    fn more_food_lifts_to_sixty_and_never_lowers() {
+        for start in [0, 20, 59, 60, 61, 90, 100] {
+            let mut s = pet();
+            s.fullness = pct(start);
+            s.hydration = pct(start);
+            s.station_food();
+            let want = pct(start.max(60));
+            assert_eq!((s.fullness, s.hydration), (want, want), "start {start}");
+        }
+    }
+
+    #[test]
+    fn more_food_never_stuffs_waterlogs_or_hurts() {
+        for full in [0, 30, 60, 77, 100] {
+            for water in [0, 30, 60, 82, 100] {
+                for dirt in [0, 50, 100] {
+                    let mut s = pet();
+                    s.fullness = pct(full);
+                    s.hydration = pct(water);
+                    s.dirt = pct(dirt);
+                    let before = (status(&s).0, health_damage(&s));
+                    s.station_food();
+                    let after = (status(&s).0, health_damage(&s));
+                    // A word the alias could make comes only from a level the
+                    // pet already had above the 60 % the alias lifts to.
+                    if after.0 == StatusWord::Stuffed {
+                        assert!(full > 60, "{full}/{water}: alias stuffed the pet");
+                    }
+                    if after.0 == StatusWord::Waterlogged {
+                        assert!(water > 60, "{full}/{water}: alias waterlogged the pet");
+                    }
+                    assert!(after.1 <= before.1, "{full}/{water}/{dirt}: damage rose");
+                    assert!(s.fullness <= pct(full.max(60)));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn more_drugs_heals_to_the_ceiling_and_clears_the_ailments() {
+        for (fit, health, booze) in [(20, 10, 90), (60, 50, 20), (80, 100, 5), (0, 0, 0)] {
+            let mut s = pet();
+            s.fitness = pct(fit);
+            s.health = pct(health);
+            s.booze = pct(booze);
+            s.hangover_min = 100;
+            s.injured_min = 100;
+            s.groggy_min = 100;
+            s.diabetic = true;
+            s.dependent = true;
+            s.station_drugs();
+            let ceiling = health_ceiling(&s) as u16;
+            assert_eq!(s.health, pct(health).max(ceiling), "fit {fit}");
+            assert_eq!(s.booze, pct(booze).min(pct(20)));
+            assert_eq!((s.hangover_min, s.injured_min, s.groggy_min), (0, 0, 0));
+            // The aliases do not clear dependence or diabetes (19.3).
+            assert!(s.diabetic && s.dependent);
+        }
+    }
+
+    #[test]
+    fn sleep_like_a_bear_fills_energy_without_sleeping() {
+        let mut s = pet();
+        s.energy = pct(5);
+        s.groggy_min = 50;
+        s.deprived = true;
+        s.station_rest();
+        assert_eq!(s.energy as i32, MAX);
+        assert_eq!(s.groggy_min, 0);
+        assert!(!s.deprived);
+        assert!(!s.is_sleeping);
+        assert!(
+            s.no_groggy,
+            "19.4: an energy fix suppresses the next groggy check"
+        );
+    }
+
+    #[test]
+    fn no_alias_gives_damage_from_a_healthy_start() {
+        for which in 0..3 {
+            let mut s = pet();
+            s.fullness = pct(50);
+            s.hydration = pct(50);
+            s.energy = pct(60);
+            s.health = pct(60);
+            let before = health_damage(&s);
+            match which {
+                0 => s.station_food(),
+                1 => s.station_drugs(),
+                _ => s.station_rest(),
+            }
+            assert!(health_damage(&s) <= before, "alias {which}");
+        }
+    }
+}
+
+mod leaving_win {
+    use bornhack_aegg::game::engine::thresholds::{HATCHING_TICKS, MINIGAME_COOLDOWN};
+    use bornhack_aegg::game::engine::{GameState, MiniGame, PetKind, Phase};
+
+    #[test]
+    fn a_leaving_pet_still_gets_its_mini_game_win() {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        s.phase = Phase::Leaving;
+        s.fun = 0;
+        s.award_inspiration(MiniGame::Nim, 2);
+        assert!(s.fun > 0, "no fun dose");
+        assert_eq!(s.cooldown_nim, MINIGAME_COOLDOWN());
+
+        let mut gone = GameState::new_egg(7, PetKind(0));
+        gone.update(HATCHING_TICKS() as u32);
+        gone.phase = Phase::Gone;
+        gone.award_inspiration(MiniGame::Nim, 2);
+        assert_eq!(gone.cooldown_nim, 0);
+    }
+}
