@@ -124,6 +124,11 @@ async fn try_load() -> Option<GameState> {
     match pick_save(v3, v2) {
         Some((mut s, upgraded)) => {
             s.last_update_tick = 0;
+            // Catch up the time the badge was off, if both clocks are known.
+            // No late catch-up when the clock is only set after boot.
+            if let Some(now) = crate::unix_now() {
+                s.catch_up(catch_up_minutes(s.saved_unix, now));
+            }
             defmt::info!(
                 "game: restored from flash (gen={} age={} upgraded={})",
                 s.generation,
@@ -178,6 +183,18 @@ pub fn is_started() -> bool {
 pub fn can_use_station() -> bool {
     let state = unsafe { (*GAME.get()).as_ref() };
     matches!(state, Some(s) if s.phase != super::engine::Phase::Gone)
+}
+
+/// Longest boot catch-up, in minutes (12 h).
+const CATCH_UP_MAX_MIN: u32 = 720;
+
+/// Minutes the pet catches up on boot: the wall-clock gap since the save,
+/// capped at 12 h. 0 when either time is unknown (0) or the clock ran back.
+pub fn catch_up_minutes(saved_unix: u32, now_unix: u32) -> u32 {
+    if saved_unix == 0 || now_unix == 0 || now_unix < saved_unix {
+        return 0;
+    }
+    ((now_unix - saved_unix) / 60).min(CATCH_UP_MAX_MIN)
 }
 
 /// Create a new egg and begin the hatching countdown.
@@ -875,6 +892,7 @@ pub async fn save_if_needed() -> bool {
         return false;
     }
 
+    state.saved_unix = crate::unix_now().unwrap_or(0);
     let buf = state.to_bytes();
     let ns = crate::fw::kv::namespace("game");
     match ns.set(SAVE_KEY, &buf, true).await {
@@ -902,6 +920,7 @@ pub async fn save_if_needed() -> bool {
 mod tests {
     use super::{Severity, current_severity};
     use crate::game::engine::needs::P;
+    use super::catch_up_minutes;
     use crate::game::engine::{GameState, PetKind, Phase};
 
     fn pet() -> GameState {
@@ -930,5 +949,40 @@ mod tests {
         let mut s = pet();
         s.dirt = (95 * P) as u16; // Grubby but in danger
         assert!(current_severity(&s) == Severity::Severe);
+    }
+
+    #[test]
+    fn catch_up_is_capped_and_safe() {
+        assert_eq!(catch_up_minutes(0, 5000), 0);
+        assert_eq!(catch_up_minutes(5000, 0), 0);
+        assert_eq!(catch_up_minutes(1000, 900), 0);
+        assert_eq!(catch_up_minutes(1000, 1000 + 3600), 60);
+        assert_eq!(catch_up_minutes(1000, 1000 + 86400 * 3), 720);
+    }
+
+    #[test]
+    fn catch_up_keeps_the_tick_base() {
+        let mut s = pet();
+        s.last_update_tick = 0;
+        let age0 = s.age_ticks;
+        s.catch_up(60);
+        assert_eq!(s.last_update_tick, 0);
+        assert_eq!(s.age_ticks, age0 + 360);
+        // The next real tick is not counted as zero elapsed.
+        s.update(6);
+        assert_eq!(s.age_ticks, age0 + 366);
+        assert_eq!(s.last_update_tick, 6);
+    }
+
+    #[test]
+    fn catch_up_does_not_age_a_hibernating_pet() {
+        let mut s = pet();
+        s.hibernating = true;
+        let age0 = s.age_ticks;
+        let fullness = s.fullness;
+        s.catch_up(600);
+        assert_eq!(s.age_ticks, age0);
+        assert_eq!(s.fullness, fullness);
+        assert_eq!(s.last_update_tick, 0);
     }
 }

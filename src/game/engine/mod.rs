@@ -265,6 +265,8 @@ pub struct GameState {
     pub tick_rem: u8,
     pub care_good_min: u32,
     pub care_awake_min: u32,
+    /// Wall-clock unix time of the last save, 0 when unknown (clock unset).
+    pub saved_unix: u32,
 
     // Diabetes — permanent once triggered by sustained overweight.
     pub diabetic: bool,
@@ -425,6 +427,7 @@ impl GameState {
             tick_rem: 0,
             care_good_min: 0,
             care_awake_min: 0,
+            saved_unix: 0,
 
             diabetic: false,
             diabetes_min: 0,
@@ -495,6 +498,16 @@ impl GameState {
     /// remainder is carried in `tick_rem`.  A backwards clock counts as zero
     /// elapsed.  Each loop pass advances one solver segment, so a long gap
     /// costs a handful of closed-form steps, not one per minute.
+    /// Age the pet by `minutes` of time the badge was off (boot catch-up).
+    /// Runs the normal `update` path, then restores `last_update_tick`, so
+    /// the boot tick base is not moved past the real tick counter (else the
+    /// next `update` would see a backwards clock and freeze time).
+    pub fn catch_up(&mut self, minutes: u32) {
+        let base = self.last_update_tick;
+        self.update(base.saturating_add(minutes.saturating_mul(TICKS_PER_MINUTE)));
+        self.last_update_tick = base;
+    }
+
     pub fn update(&mut self, now_tick: u32) {
         let total_delta = now_tick.saturating_sub(self.last_update_tick);
         if total_delta == 0 {
@@ -1604,9 +1617,11 @@ impl GameState {
         w.u8(self.tick_rem);
         w.u32(self.care_good_min);
         w.u32(self.care_awake_min);
-        // The running action's food and drink (R23); the rest is reserved.
+        // The running action's food and drink (R23), then the wall-clock time of the
+        // save (0 = unknown); the rest is reserved.
         w.u8(self.active_food.map_or(NONE_BYTE, food_to_u8));
         w.u8(self.active_drink.map_or(NONE_BYTE, drink_to_u8));
+        w.u32(self.saved_unix);
         b
     }
 
@@ -1664,6 +1679,7 @@ impl GameState {
         s.care_awake_min = r.u32();
         s.active_food = food_from_u8(r.u8());
         s.active_drink = drink_from_u8(r.u8());
+        s.saved_unix = r.u32();
         Some(s)
     }
 
