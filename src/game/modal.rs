@@ -691,11 +691,13 @@ static HINT_VIEW: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBoo
 pub fn open(kind: ModalKind) {
     // Start on the first row that can be used, so a disabled first row
     // (e.g. Battle on cooldown) doesn't need to be stepped past.
+    // Mark the menu open first: a cause drained by this cycle is then logged
+    // but not toasted under the popover that opens on the same frame.
+    MODAL_KIND.store(kind as u8, Ordering::Relaxed);
     let stats = super::lifecycle::cycle();
     let items = kind.items();
     let pos = first_selectable(items.len(), |i| items[i].selectable(stats.as_ref()));
     MODAL_POS.store(pos as u8, Ordering::Relaxed);
-    MODAL_KIND.store(kind as u8, Ordering::Relaxed);
     // Menu open → redraw the whole frame next refresh (grey-out overlay
     // covers everything); avoids partial-delta artifacts at the overlay edge.
     crate::FULL_REFRESH_PENDING.store(true, Ordering::Relaxed);
@@ -897,7 +899,8 @@ fn shown_label(item: Item, hard: bool) -> &'static str {
     }
 }
 
-/// The title bar: the selected row's risk, else the selected food's whole
+/// The title bar: the reason a refused row just gave (its toast sits under the
+/// popover), else the selected row's risk, else the selected food's whole
 /// name on the Feed page, else the menu title.
 fn title_text(
     kind: ModalKind,
@@ -906,7 +909,9 @@ fn title_text(
     risk: Option<super::engine::causes::Cause>,
 ) -> heapless::String<24> {
     let mut t: heapless::String<24> = heapless::String::new();
-    if let Some(cause) = risk {
+    if let Some(why) = super::reason_toast() {
+        let _ = t.push_str(why.text().as_str());
+    } else if let Some(cause) = risk {
         let _ = t.push_str("risk: ");
         let _ = t.push_str(cause.what());
     } else if let Some(Item::FeedFood(food)) = selected {
@@ -1614,6 +1619,67 @@ mod tests {
             lifecycle::diary().newest_first().next().unwrap().cause,
             Cause::FoodComa
         );
+    }
+
+    #[test]
+    fn a_refused_row_says_why_in_the_title() {
+        use crate::game::engine::DrinkKind;
+        let _guard = crate::game::lock_test_state();
+        let _stats = menu_pet(false, false, |s| s.hydration = pct(95));
+        super::open(ModalKind::Drink);
+        let water = Item::DrinkChoice(DrinkKind::Water);
+        let row = ModalKind::Drink.items().iter().position(|i| *i == water).unwrap();
+        super::MODAL_POS.store(row as u8, core::sync::atomic::Ordering::Relaxed);
+        super::activate();
+        let stats = lifecycle::cycle().unwrap();
+        assert_eq!(
+            super::title_text(ModalKind::Drink, Some(water), Some(&stats), None).as_str(),
+            "not thirsty"
+        );
+        // The reason comes before a risk and the menu title.
+        let t = super::title_text(ModalKind::Drink, Some(water), Some(&stats), Some(Cause::FoodComa));
+        assert_eq!(t.as_str(), "not thirsty");
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn every_reason_fits_the_title() {
+        use crate::game::engine::doses::{Reason, Refusal};
+        let mut all = vec![
+            Reason::Wait(72 * 3600),
+            Reason::CantAfford,
+            Reason::Busy,
+            Reason::Hibernating,
+            Reason::Egg,
+            Reason::Gone,
+        ];
+        for r in [
+            Refusal::NotThirsty,
+            Refusal::AlreadyClean,
+            Refusal::Injured,
+            Refusal::Asleep,
+            Refusal::NoNeed,
+            Refusal::Tired,
+        ] {
+            all.push(Reason::Refused(r));
+        }
+        for r in all {
+            assert!(r.text().chars().count() <= 18, "{:?}", r.text());
+        }
+    }
+
+    #[test]
+    fn a_cause_drained_as_the_menu_opens_is_not_toasted_under_it() {
+        let _guard = crate::game::lock_test_state();
+        let _stats = menu_pet(false, false, |_| {});
+        lifecycle::with_state(|s| {
+            s.causes.push(Cause::FoodComa);
+            true
+        });
+        super::open(ModalKind::Stats);
+        assert_eq!(crate::game::lifecycle::diary().len(), 1);
+        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::None);
+        lifecycle::set_state_for_test(None);
     }
 
     #[test]

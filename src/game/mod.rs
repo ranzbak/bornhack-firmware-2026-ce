@@ -398,7 +398,6 @@ where
 /// cleared once `ALERT_MIN_VISIBLE_MS` has elapsed.
 fn draw_alert<D>(
     display: &mut D,
-    flag: &TimedFlag,
     lines: [&str; 2],
     hint: &str,
 ) -> Result<(), D::Error>
@@ -416,7 +415,6 @@ where
     Text::with_text_style(lines[0], Point::new(76, 56), font, centered).draw(display)?;
     Text::with_text_style(lines[1], Point::new(76, 74), font, centered).draw(display)?;
     Text::with_text_style(hint, Point::new(76, 100), font_red, centered).draw(display)?;
-    flag.clear_if_elapsed(DIABETES_ALERT_MIN_VISIBLE_MS);
     Ok(())
 }
 
@@ -427,16 +425,29 @@ where
 /// seats properly on the full-waveform path.  `partial_idle` upstream keeps
 /// this from re-flashing once the message is drawn.
 pub fn status_wants_full_refresh() -> bool {
-    // A modal covers the red message and the status line: its redraws are
-    // plain delta refreshes, and the closing redraw gets the full one.
-    !modal::is_open()
-        && (TOAST.is_active()
-        || DIABETES_ALERT.is_active()
+    // The onset takeovers replace the screen, modal or not. A modal covers the
+    // red message and the status line: its redraws are plain delta refreshes,
+    // and the closing redraw gets the full one.
+    DIABETES_ALERT.is_active()
         || ALCOHOLISM_ALERT.is_active()
-        || lifecycle::display_anim() == engine::DisplayAnim::Gone
-        || (!lifecycle::is_hibernating()
-            && lifecycle::status_line().is_some_and(|l| l.danger))
-        || battle_view::wants_full_refresh())
+        || (!modal::is_open()
+            && (TOAST.is_active()
+                || lifecycle::display_anim() == engine::DisplayAnim::Gone
+                || (!lifecycle::is_hibernating()
+                    && lifecycle::status_line().is_some_and(|l| l.danger))
+                || battle_view::wants_full_refresh()))
+}
+
+/// The reason of the reason toast while it is up. A menu shows it in its
+/// title, because the toast itself is hidden under the popover.
+pub(crate) fn reason_toast() -> Option<engine::doses::Reason> {
+    (TOAST.is_active() && Toast::from_u8(TOAST_MSG.load(Ordering::Relaxed)) == Toast::Reason)
+        .then(|| {
+            engine::doses::Reason::unpack(
+                REASON_KIND.load(Ordering::Relaxed),
+                REASON_SECS.load(Ordering::Relaxed),
+            )
+        })
 }
 
 /// Tell the player why an action was refused or a row is disabled.
@@ -535,13 +546,15 @@ pub fn next_ui_deadline_tick() -> u32 {
     let mut next = lifecycle::sleep_anim_deadline_tick();
     // Only the main screen clears a toast or alert, so none is counted while
     // a full-screen view hides it. It is handled normally once the view closes.
+    // A toast is also hidden under a modal's popover (the menu title shows a
+    // reason instead); the alerts take the whole screen, modal or not.
     if !full_screen_view_up() {
-        for (flag, min_ms) in [
-            (&TOAST, TOAST_MIN_VISIBLE_MS),
-            (&DIABETES_ALERT, DIABETES_ALERT_MIN_VISIBLE_MS),
-            (&ALCOHOLISM_ALERT, DIABETES_ALERT_MIN_VISIBLE_MS),
+        for (flag, min_ms, under_modal) in [
+            (&TOAST, TOAST_MIN_VISIBLE_MS, false),
+            (&DIABETES_ALERT, DIABETES_ALERT_MIN_VISIBLE_MS, true),
+            (&ALCOHOLISM_ALERT, DIABETES_ALERT_MIN_VISIBLE_MS, true),
         ] {
-            if flag.is_active() {
+            if flag.is_active() && (under_modal || !modal::is_open()) {
                 next = next.min(flag.clear_tick(min_ms, now));
             }
         }
@@ -741,10 +754,13 @@ where
     // Diabetes onset alert takes priority over everything else, including
     // mini-games and modals — a rare, one-shot event worth interrupting
     // whatever's on screen for.
+    // Clear first, like the toast: an expired alert is dropped on this wake
+    // and never redrawn.
+    DIABETES_ALERT.clear_if_elapsed(DIABETES_ALERT_MIN_VISIBLE_MS);
+    ALCOHOLISM_ALERT.clear_if_elapsed(DIABETES_ALERT_MIN_VISIBLE_MS);
     if DIABETES_ALERT.is_active() {
         return draw_alert(
             display,
-            &DIABETES_ALERT,
             ["TYPE 2", "DIABETES"],
             "Give medication soon",
         );
@@ -755,7 +771,6 @@ where
     if ALCOHOLISM_ALERT.is_active() {
         return draw_alert(
             display,
-            &ALCOHOLISM_ALERT,
             ["ALCOHOL", "DEPENDENCE"],
             "Give rehab soon",
         );
@@ -1271,6 +1286,46 @@ mod tests {
             let outer = if y == super::TOAST_POS.y { y - 1 } else { y + h };
             assert_eq!(c.get(x0 + 20, outer), BLACK, "{text}: no taller");
         }
+    }
+
+    #[test]
+    fn an_onset_alert_still_gets_the_full_refresh_under_a_modal() {
+        let _guard = super::lock_test_state();
+        let _clear = ClearPet;
+        crate::game::lifecycle::set_state_for_test(Some(active_test_pet()));
+        super::modal::open(super::modal::ModalKind::Stats);
+        assert!(!super::status_wants_full_refresh());
+        super::DIABETES_ALERT.start();
+        assert!(super::status_wants_full_refresh(), "diabetes takeover");
+        super::DIABETES_ALERT.clear();
+        super::ALCOHOLISM_ALERT.start();
+        assert!(super::status_wants_full_refresh(), "alcoholism takeover");
+    }
+
+    #[test]
+    fn an_expired_alert_is_cleared_before_the_screen_is_drawn() {
+        let _guard = super::lock_test_state();
+        let _clear = ClearPet;
+        crate::game::lifecycle::set_state_for_test(Some(active_test_pet()));
+        super::DIABETES_ALERT.start();
+        super::DIABETES_ALERT.backdate_for_test(super::DIABETES_ALERT_MIN_VISIBLE_MS);
+        let mut c = Canvas::new();
+        super::draw_screen_game(&mut c, crate::game::nav::get_nav()).unwrap();
+        assert!(!super::DIABETES_ALERT.is_active());
+        assert!(!c.any(rows(95, 105), RED), "the alert hint is not drawn");
+    }
+
+    #[test]
+    fn a_reason_toast_under_a_modal_pulls_no_deadline() {
+        let _guard = super::lock_test_state();
+        let _clear = ClearPet;
+        crate::game::lifecycle::set_state_for_test(Some(active_test_pet()));
+        super::modal::open(super::modal::ModalKind::Stats);
+        super::show_reason(crate::game::engine::doses::Reason::Busy);
+        let now = crate::game::lifecycle::now_tick();
+        assert!(super::next_ui_deadline_tick() > now + 1, "the popover hides it");
+        super::modal::close();
+        assert!(super::next_ui_deadline_tick() <= now + 2, "handled again after close");
     }
 
     #[test]

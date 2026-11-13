@@ -131,28 +131,28 @@ pet or a reboot starts it empty.
 
 | Icon         | Options          | What it does                                                    |
 | ------------ | ---------------- | ---------------------------------------------------------------- |
-| **Feed**     | Salad            | Healthiest — less filling, barely any weight gain               |
-|              | Apple             | Baseline hunger relief and weight gain                          |
-|              | Frikandel spec   | Deep-fried and greasy — very filling, a real weight hit         |
-|              | Pizza            | Very filling — but the biggest weight gain short of dessert      |
-|              | Cake             | Barely touches hunger, big mood boost, worst weight gain by far |
-| **Heal**     | Give medicine    | Reduces sick                                                     |
-|              | Insulin          | Only shown once diabetic — suppresses the diabetes sick-penalty for a while |
-|              | Ozempic          | Accelerated weight loss — not gated on being diabetic; appetite-suppressing (also relieves a little hunger), but the strongest cooldown of any action |
-|              | Rehab            | Only shown once alcoholic — suppresses the alcoholism sick-penalty for a while |
+| **Feed**     | Salad            | Healthiest: raises Full less, barely any Weight, a little Fit and Water |
+|              | Apple            | Baseline Full and Weight, a little Water                         |
+|              | Frikandel spec   | Deep-fried: raises Full a lot and Weight a real amount, makes you dirtier, mood boost |
+|              | Pizza            | Raises Full a lot, big Weight gain; mood boost                   |
+|              | Cake             | Barely raises Full, big Mood boost, worst Weight gain. Eat past the Full band and it is a food coma |
+| **Heal**     | Give medicine    | Halves an injury, or raises Health when the pet is poorly; on a healthy pet it only numbs (Booze up) |
+|              | Insulin          | Only shown once diabetic: lifts the health ceiling cut for a while |
+|              | Ozempic          | Lowers Weight (and a little Fit); no treat mood for a while. The strongest cooldown of any action |
+|              | Rehab            | Only shown once dependent: a rehab course that clears the dependence |
 | **Play**     | Battle           | Fight a friend over the mesh — see [Battles](#battles) below      |
-|              | Play now         | Zeroes miserable (costs some energy)                             |
-|              | Tic Tac Toe      | Mini-game: draw/win to boost inspiration                         |
-|              | Lights Out       | Mini-game: solve to boost inspiration                            |
+|              | Play now         | Raises Fun and Fit, costs Energy, Full and Water, gets dirtier, shortens groggy |
+|              | Tic Tac Toe      | Mini-game: raises Fun more for a better result                   |
+|              | Lights Out       | Mini-game: raises Fun more for a better result                   |
 |              | Play music       | Play a melody on the buzzer                                      |
-| **Rest**     | Sleep            | Pet sleeps until rested (reduces tired)                          |
-|              | Relax            | Reduces drained (costs some hunger)                              |
-| **Exercise** | Exercise now     | Reduces weight (costs some hunger and tired, small drained bonus) |
-| **Drink**    | Water            | No effect on drunk, refreshing (drained relief)                  |
-|              | Cola             | No effect on drunk; a little weight gain, good drained relief    |
-|              | Beer             | Baseline drunk gain and weight gain                              |
-|              | Wine             | More drunk than Beer, less weight gain                           |
-|              | Whiskey          | Most drunk by far, least weight gain, strongest drained relief   |
+| **Rest**     | Sleep            | Pet sleeps until rested (restores Energy)                        |
+|              | Relax            | Lowers Fun and strain, raises Energy, costs a little Fit         |
+| **Exercise** | Exercise now     | Lowers Weight and Booze, raises Fun; costs Energy, Full and Water, gets dirtier; adds strain |
+| **Drink**    | Water            | Raises Water, lowers Booze, eases hangover and groggy; never past 90% |
+|              | Cola             | Raises Water, a little Full, Energy and Weight; no Booze         |
+|              | Beer             | Raises Water, Booze and Weight a little, lifts Mood              |
+|              | Wine             | More Booze than Beer, less Weight                                |
+|              | Whiskey          | Most Booze by far, least Weight                                  |
 
 When an action ends badly the pet tells you why. A two-line toast
 appears at the top of the pet area: what happened ("food coma", "barely
@@ -403,6 +403,11 @@ gameplay:
 - **Resilience** — reserved for future use
 
 ## Detailed Stats & Timings
+
+> **Note:** this section describes the old v1 model (Hunger, Tired, Drained,
+> Sick, Miserable, interval-based decay and per-action cooldowns). It is
+> superseded by the v3 sections above (Stats, Actions, the status line) and
+> by the player's guide. It is kept for reference only.
 
 For those who want to min-max their pet care, here are the exact rates.
 One game tick = 10 seconds.
