@@ -13,7 +13,7 @@ use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Text};
+use embedded_graphics::text::Text;
 
 use super::battle::BattleOutcome;
 use super::engine::PET_NAME_MAX;
@@ -126,9 +126,6 @@ fn draw_anim_banner<D>(display: &mut D, viewer_won: bool) -> Result<(), D::Error
 where
     D: DrawTarget<Color = TriColor>,
 {
-    
-    
-
     let text = if viewer_won { "YOU WON!" } else { "YOU LOST" };
     let ts = crate::ui::CENTERED;
     // White strip behind the banner so it reads over either pet.
@@ -362,7 +359,8 @@ pub fn handle_input(btn: ButtonId) {
         // Any button dismisses the result — but not for a brief guard
         // window after it appears, so the Fire that resolved the battle
         // (or a joystick bounce) can't flick it away before it's seen.
-        let elapsed = crate::platform::uptime_ms_u32().wrapping_sub(RESULT_SHOWN_MS.load(Ordering::Relaxed));
+        let elapsed =
+            crate::platform::uptime_ms_u32().wrapping_sub(RESULT_SHOWN_MS.load(Ordering::Relaxed));
         if elapsed >= RESULT_DISMISS_GUARD_MS {
             close();
         }
@@ -504,7 +502,13 @@ where
         },
     )?;
 
-    crate::ui::draw_text(display, friend_label, Point::new(6, 66), TEXT_BOLD_BLACK, left)?;
+    crate::ui::draw_text(
+        display,
+        friend_label,
+        Point::new(6, 66),
+        TEXT_BOLD_BLACK,
+        left,
+    )?;
     super::stat_bar::draw_stat_bar(
         display,
         "HP",
@@ -539,8 +543,13 @@ where
             &mut reward,
             format_args!("+{} HAX", super::engine::BATTLE_HAX_REWARD),
         );
-        Text::with_text_style(reward.as_str(), Point::new(76, 130), TEXT_BOLD_BLACK, centered)
-            .draw(display)?;
+        Text::with_text_style(
+            reward.as_str(),
+            Point::new(76, 130),
+            TEXT_BOLD_BLACK,
+            centered,
+        )
+        .draw(display)?;
     }
 
     let hint = crate::ui::CENTERED_BOTTOM;
@@ -558,7 +567,10 @@ mod anim_tests {
     fn pose_selection() {
         // Stage 1: both standing regardless of outcome/side.
         assert_eq!(pose_aa(BattleStage::Standing, true, true), BATTLE_AA_STAND);
-        assert_eq!(pose_aa(BattleStage::Standing, false, false), BATTLE_AA_STAND);
+        assert_eq!(
+            pose_aa(BattleStage::Standing, false, false),
+            BATTLE_AA_STAND
+        );
         // Stage 2, viewer won: own pet WON, opponent LOST.
         assert_eq!(pose_aa(BattleStage::Result, true, true), BATTLE_AA_WON);
         assert_eq!(pose_aa(BattleStage::Result, true, false), BATTLE_AA_LOST);
@@ -573,10 +585,16 @@ mod anim_tests {
         assert_eq!(crate::truncate_str("Rex", ANIM_NAME_MAX), "Rex");
         // 12 chars is exactly the 72px column at 6px/char — the longest
         // species name ("Bartholomeus") must survive intact.
-        assert_eq!(crate::truncate_str("Bartholomeus", ANIM_NAME_MAX), "Bartholomeus");
+        assert_eq!(
+            crate::truncate_str("Bartholomeus", ANIM_NAME_MAX),
+            "Bartholomeus"
+        );
         assert_eq!(crate::truncate_str("Bartholomeus", ANIM_NAME_MAX).len(), 12);
         // Longer names are clipped rather than overflowing the panel.
-        assert_eq!(crate::truncate_str("AAAAAAAAAAAAAAAA", ANIM_NAME_MAX), "AAAAAAAAAAAA");
+        assert_eq!(
+            crate::truncate_str("AAAAAAAAAAAAAAAA", ANIM_NAME_MAX),
+            "AAAAAAAAAAAA"
+        );
         // Multi-byte codepoints are never split mid-sequence.
         let s = crate::truncate_str("ÆÆÆÆÆÆÆÆ", ANIM_NAME_MAX); // 8 x 2 bytes = 16
         assert!(s.len() <= 12);

@@ -26,7 +26,7 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Text};
+use embedded_graphics::text::Text;
 
 use crate::{BLACK, TriColor, WHITE, ui};
 
@@ -186,7 +186,10 @@ pub fn activate() {
     let r = RESULT.load(Ordering::Relaxed);
     if r != RESULT_IN_PROGRESS {
         if r == RESULT_HUMAN_WINS {
-            super::lifecycle::award_inspiration(super::engine::MiniGame::Nim, super::engine::GRADE_WIN);
+            super::lifecycle::award_inspiration(
+                super::engine::MiniGame::Nim,
+                super::engine::GRADE_WIN,
+            );
             super::show_toast(super::Toast::MinigameWin);
         }
         close();
@@ -363,7 +366,6 @@ fn read_rows() -> [u8; ROW_COUNT] {
 fn all_empty() -> bool {
     ROWS.iter().all(|a| a.load(Ordering::Relaxed) == 0)
 }
-
 
 // ── Drawing
 // ───────────────────────────────────────────────────────────────────

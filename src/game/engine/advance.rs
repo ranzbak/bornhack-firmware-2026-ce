@@ -6,7 +6,10 @@
 //! stays valid. Every number is a [`thresholds`] field.
 
 use super::needs::{self, MAX, Need, P};
-use super::regime::{energy_cap, health_ceiling, health_damage, health_recovery, mood_target, rates, sleep_quality_pm};
+use super::regime::{
+    energy_cap, health_ceiling, health_damage, health_recovery, mood_target, rates,
+    sleep_quality_pm,
+};
 use super::thresholds as t;
 use super::{GameState, Phase};
 
@@ -77,7 +80,10 @@ pub fn advance(s: &mut GameState, dt: u32) {
 
     // Slow counters, by the regime at the start.
     let (booze, weight, fit) = (s.booze as i32, s.weight as i32, s.fitness as i32);
-    let (heavy, lean) = (lvl(t::DIABETES_WEIGHT_HI_PCT()), lvl(t::DIABETES_WEIGHT_LO_PCT()));
+    let (heavy, lean) = (
+        lvl(t::DIABETES_WEIGHT_HI_PCT()),
+        lvl(t::DIABETES_WEIGHT_LO_PCT()),
+    );
     if booze > needs::booze_hi() {
         s.dependence_min = s.dependence_min.saturating_add(dt * SLOW_SCALE);
     } else if booze < lvl(t::BOOZE_CLEAR_PCT()) {
@@ -121,7 +127,11 @@ pub fn advance(s: &mut GameState, dt: u32) {
 
     // Flags.
     let relapse_window = s.recovering_min > 0;
-    let dependence_line = if relapse_window { t::DEPENDENCE_RELAPSE_MIN() } else { t::DEPENDENCE_ONSET_MIN() };
+    let dependence_line = if relapse_window {
+        t::DEPENDENCE_RELAPSE_MIN()
+    } else {
+        t::DEPENDENCE_ONSET_MIN()
+    };
     if !s.dependent && s.dependence_min >= dependence_line as u32 * SLOW_SCALE {
         s.dependent = true;
     }
@@ -135,7 +145,11 @@ pub fn advance(s: &mut GameState, dt: u32) {
     }
 
     // Timers.
-    let hangover_dt = if asleep { dt.saturating_mul(t::HANGOVER_ASLEEP_MULT() as u32) } else { dt };
+    let hangover_dt = if asleep {
+        dt.saturating_mul(t::HANGOVER_ASLEEP_MULT() as u32)
+    } else {
+        dt
+    };
     sub_min(&mut s.hangover_min, hangover_dt);
     let rehab_running = s.rehab_min > 0;
     sub_min(&mut s.rehab_min, dt);
@@ -192,7 +206,9 @@ pub fn advance(s: &mut GameState, dt: u32) {
 
     let reach = t::MOOD_STEP() as i64 * dt as i64;
     let mood = s.mood as i64;
-    s.mood = (mood_target(s) as i64).clamp(mood - reach, mood + reach).clamp(0, MAX as i64) as u16;
+    s.mood = (mood_target(s) as i64)
+        .clamp(mood - reach, mood + reach)
+        .clamp(0, MAX as i64) as u16;
 
     // Leaving.
     if s.health == 0 {

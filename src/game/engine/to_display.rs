@@ -19,7 +19,6 @@ use super::needs::{HAPPY_MOOD_PCT, P};
 use super::status::{StatusWord, status};
 use super::{Action, GameState, Phase};
 
-
 /// What the pet display area should show right now.
 ///
 /// The display layer matches on this and selects the appropriate
@@ -160,7 +159,9 @@ impl GameState {
             | StatusWord::Overweight
             | StatusWord::Underweight
             | StatusWord::Unfit => DisplayAnim::WarningMiserable,
-            StatusWord::Content if self.mood as i32 >= HAPPY_MOOD_PCT as i32 * P => DisplayAnim::Happy,
+            StatusWord::Content if self.mood as i32 >= HAPPY_MOOD_PCT as i32 * P => {
+                DisplayAnim::Happy
+            }
             StatusWord::Content => DisplayAnim::Idle,
         }
     }

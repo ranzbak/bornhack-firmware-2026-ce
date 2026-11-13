@@ -69,7 +69,11 @@ const fn merge(fixed: &[u8], tuned: &[u8]) -> ([u8; MAX_EDGES], u8) {
     let mut n = 0;
     let mut k = 0;
     while k < fixed.len() + tuned.len() {
-        let v = if k < fixed.len() { fixed[k] } else { tuned[k - fixed.len()] };
+        let v = if k < fixed.len() {
+            fixed[k]
+        } else {
+            tuned[k - fixed.len()]
+        };
         k += 1;
         // insertion into sorted position, skipping duplicates
         let mut i = 0;
@@ -93,8 +97,14 @@ const fn merge(fixed: &[u8], tuned: &[u8]) -> ([u8; MAX_EDGES], u8) {
 /// Fixed edges merged with `t`'s band edges.
 pub const fn build_edges(t: &Thresholds) -> EdgeTable {
     let rows = [
-        merge(&[NEED_DANGER_LO_PCT, 25, NEED_HI_EDGE_PCT, 95], &[t.FULL_LO_PCT, t.FULL_HI_PCT]),
-        merge(&[NEED_DANGER_LO_PCT, 25, NEED_HI_EDGE_PCT, 90, 95], &[t.WATER_LO_PCT, t.WATER_HI_PCT]),
+        merge(
+            &[NEED_DANGER_LO_PCT, 25, NEED_HI_EDGE_PCT, 95],
+            &[t.FULL_LO_PCT, t.FULL_HI_PCT],
+        ),
+        merge(
+            &[NEED_DANGER_LO_PCT, 25, NEED_HI_EDGE_PCT, 90, 95],
+            &[t.WATER_LO_PCT, t.WATER_HI_PCT],
+        ),
         merge(&[10, 50, 70, 85], &[t.ENERGY_LO_PCT]),
         merge(&[40], &[t.FUN_LO_PCT, t.FUN_HI_PCT]),
         merge(&[25, DIRT_DANGER_PCT], &[t.DIRT_HI_PCT]),
@@ -103,7 +113,10 @@ pub const fn build_edges(t: &Thresholds) -> EdgeTable {
         merge(&[25, 50, 60, 61, 70], &[t.FIT_LO_PCT]),
         merge(&[20, 65, 80], &[t.WEIGHT_LO_PCT, t.WEIGHT_HI_PCT]),
     ];
-    let mut out = EdgeTable { edges: [[0; MAX_EDGES]; NEEDS], len: [0; NEEDS] };
+    let mut out = EdgeTable {
+        edges: [[0; MAX_EDGES]; NEEDS],
+        len: [0; NEEDS],
+    };
     let mut i = 0;
     while i < NEEDS {
         out.edges[i] = rows[i].0;

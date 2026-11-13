@@ -12,7 +12,7 @@ use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Text};
+use embedded_graphics::text::Text;
 
 use crate::menu::ButtonId;
 use crate::{BLACK, TriColor, ui};

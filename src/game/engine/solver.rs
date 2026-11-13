@@ -185,7 +185,14 @@ fn timer_bound(s: &GameState) -> u32 {
             best = best.min(minutes);
         }
     };
-    for m in [s.rested_min, s.med_cd_min, s.junk_min, s.ozempic_min, s.ozempic_cd_min, s.recovering_min] {
+    for m in [
+        s.rested_min,
+        s.med_cd_min,
+        s.junk_min,
+        s.ozempic_min,
+        s.ozempic_cd_min,
+        s.recovering_min,
+    ] {
         plain(m as i64);
     }
     if s.health != 0 {
@@ -202,7 +209,11 @@ fn timer_bound(s: &GameState) -> u32 {
 
     // A running timer, or a counter heading for a line, that mood/health read.
     let mut feeds = |minutes: i64| best = best.min((minutes - 1).max(0));
-    let hangover_mult = if asleep { t::HANGOVER_ASLEEP_MULT() as i64 } else { 1 };
+    let hangover_mult = if asleep {
+        t::HANGOVER_ASLEEP_MULT() as i64
+    } else {
+        1
+    };
     for left in [
         ceil_div(s.hangover_min as i64, hangover_mult),
         s.injured_min as i64,
@@ -221,13 +232,24 @@ fn timer_bound(s: &GameState) -> u32 {
         }
     }
     if s.booze as i32 > needs::booze_hi() && !s.dependent {
-        let line = if s.recovering_min > 0 { t::DEPENDENCE_RELAPSE_MIN() } else { t::DEPENDENCE_ONSET_MIN() };
+        let line = if s.recovering_min > 0 {
+            t::DEPENDENCE_RELAPSE_MIN()
+        } else {
+            t::DEPENDENCE_ONSET_MIN()
+        };
         feeds(scaled_left(line, SLOW_SCALE, s.dependence_min));
     }
     if s.weight as i32 > lvl(t::DIABETES_WEIGHT_HI_PCT()) && !s.diabetic {
-        feeds(scaled_left(t::DIABETES_ONSET_MIN(), SLOW_SCALE, s.diabetes_min));
+        feeds(scaled_left(
+            t::DIABETES_ONSET_MIN(),
+            SLOW_SCALE,
+            s.diabetes_min,
+        ));
     }
-    if s.diabetic && (s.weight as i32) < lvl(t::DIABETES_WEIGHT_LO_PCT()) && s.fitness as i32 > lvl(t::REVERSAL_FIT_PCT()) {
+    if s.diabetic
+        && (s.weight as i32) < lvl(t::DIABETES_WEIGHT_LO_PCT())
+        && s.fitness as i32 > lvl(t::REVERSAL_FIT_PCT())
+    {
         feeds(t::DIABETES_REVERSAL_MIN() as i64 - s.reversal_min as i64);
     }
     best.min(u32::MAX as i64) as u32
@@ -236,7 +258,10 @@ fn timer_bound(s: &GameState) -> u32 {
 /// Whole minutes until a counter that rises by `scale` per minute reaches
 /// `line_min` minutes (0 when it already has).
 fn scaled_left(line_min: u16, scale: u32, counter: u32) -> i64 {
-    ceil_div(line_min as i64 * scale as i64 - counter as i64, scale as i64)
+    ceil_div(
+        line_min as i64 * scale as i64 - counter as i64,
+        scale as i64,
+    )
 }
 
 /// Longest segment (1..=`max` minutes) over which no threshold is crossed and

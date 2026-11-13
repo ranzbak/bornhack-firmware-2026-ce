@@ -209,7 +209,11 @@ fn activate() {
     if result != 0 {
         // Game over: any Fire closes.  Award inspiration on win or tie.
         if result == 1 || result == 3 {
-            let grade = if result == 1 { super::engine::GRADE_WIN } else { super::engine::GRADE_DRAW };
+            let grade = if result == 1 {
+                super::engine::GRADE_WIN
+            } else {
+                super::engine::GRADE_DRAW
+            };
             super::lifecycle::award_inspiration(super::engine::MiniGame::BlackHole, grade);
             super::show_toast(super::Toast::MinigameWin);
         }

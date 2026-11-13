@@ -11,7 +11,7 @@ use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Text};
+use embedded_graphics::text::Text;
 
 use super::minigame::DifficultyPicker;
 use crate::menu::ButtonId;
@@ -163,7 +163,11 @@ fn place() -> bool {
         // Award inspiration on win or draw.
         let r = RESULT.load(Ordering::Relaxed);
         if r == 1 || r == 3 {
-            let grade = if r == 1 { super::engine::GRADE_WIN } else { super::engine::GRADE_DRAW };
+            let grade = if r == 1 {
+                super::engine::GRADE_WIN
+            } else {
+                super::engine::GRADE_DRAW
+            };
             super::lifecycle::award_inspiration(super::engine::MiniGame::TicTacToe, grade);
             super::show_toast(super::Toast::MinigameWin);
         }
