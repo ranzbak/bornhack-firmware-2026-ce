@@ -502,15 +502,27 @@ fn check_severity_transition(state: &GameState) {
     }
 }
 
+/// Should the onset alert for a permanent condition fire now? The one place
+/// that decides it. `seen` starts false each boot, so a pet that still has
+/// the condition alerts again after every boot, in case the player forgot
+/// the pet is sick. While the pet hibernates nothing fires and `seen` is
+/// left alone, so the alert comes when the pet is defrosted and the
+/// condition is still there, as if it were a boot.
+fn onset_alert_due(seen: &AtomicBool, present: bool, hibernating: bool) -> bool {
+    if hibernating {
+        return false;
+    }
+    let prev = seen.swap(present, Ordering::Relaxed);
+    present && !prev
+}
+
 /// One-shot alert (buzzer + toast) the instant the pet becomes diabetic.
 /// Separate from `check_severity_transition` since diabetes is a
 /// permanent flag, not a point on the Neutral→Leaving ladder — it can
 /// become true at any severity level and should announce itself
 /// regardless of what else is going on.
 fn check_diabetes_onset(state: &super::engine::GameState) {
-    let now = state.diabetic;
-    let prev = WAS_DIABETIC.swap(now, Ordering::Relaxed);
-    if now && !prev {
+    if onset_alert_due(&WAS_DIABETIC, state.diabetic, state.hibernating) {
         let muted = crate::GAME_MUTE.load(Ordering::Relaxed);
         if !muted {
             #[cfg(feature = "embassy-core")]
@@ -527,9 +539,7 @@ fn check_diabetes_onset(state: &super::engine::GameState) {
 /// mirrors diabetes in the engine (permanent flag + coupled sick
 /// penalty) but previously landed with no announcement at all.
 fn check_alcoholism_onset(state: &super::engine::GameState) {
-    let now = state.dependent;
-    let prev = WAS_ALCOHOLIC.swap(now, Ordering::Relaxed);
-    if now && !prev {
+    if onset_alert_due(&WAS_ALCOHOLIC, state.dependent, state.hibernating) {
         let muted = crate::GAME_MUTE.load(Ordering::Relaxed);
         if !muted {
             #[cfg(feature = "embassy-core")]
@@ -1021,7 +1031,7 @@ pub async fn save_if_needed() -> bool {
 mod tests {
     use super::{
         Severity, apply_boot_catch_up, catch_up_minutes, current_severity, deferred_catch_up_minutes,
-        event_at, forget_boot_gap, saved_unix_to_write,
+        event_at, forget_boot_gap, onset_alert_due, saved_unix_to_write,
     };
     use crate::game::engine::needs::P;
     use crate::game::engine::{GameState, PetKind, Phase};
@@ -1053,6 +1063,27 @@ mod tests {
         let mut s = pet();
         s.dirt = (95 * P) as u16; // Grubby but in danger
         assert!(current_severity(&s) == Severity::Severe);
+    }
+
+    #[test]
+    fn onset_alert_rules() {
+        // Awake at boot with the condition: alerts once (re-fire on boot is intended).
+        let seen = AtomicBool::new(false);
+        assert!(onset_alert_due(&seen, true, false));
+        assert!(!onset_alert_due(&seen, true, false));
+
+        // Hibernating: never, however often it is asked.
+        let seen = AtomicBool::new(false);
+        assert!(!onset_alert_due(&seen, true, true));
+        assert!(!onset_alert_due(&seen, true, true));
+        // Defrost with the condition still present: once.
+        assert!(onset_alert_due(&seen, true, false));
+        assert!(!onset_alert_due(&seen, true, false));
+
+        // No condition: nothing.
+        let seen = AtomicBool::new(false);
+        assert!(!onset_alert_due(&seen, false, false));
+        assert!(!onset_alert_due(&seen, false, true));
     }
 
     #[test]
