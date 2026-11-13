@@ -153,9 +153,18 @@ felt", "groggy", "strained") and the reason under it ("ate too much",
 rested". The toasts are silent, and they teach the rules: read them
 before you repeat the mistake. They are also logged in the Diary.
 
-Each action has a **cooldown** — you'll see "(wait)" next to items that
-aren't ready yet. Actions are mutually exclusive: the pet can only do one
-thing at a time.
+A menu row that would end badly shows a small `!` at its right edge. The
+row still works: the mark is a warning, not a lock. Move the cursor onto
+it and the title bar reads "risk: " plus what would happen ("risk: food
+coma"), so you can think again before you press. The marker is the engine's
+own forecast of the dose, so it is exactly what the action would do. A row
+you cannot use shows no mark; selecting it says why it is refused. On the
+Feed page the title shows the selected food's full name, so the Frikandel
+row ("Frikandel spec") reads "Frikandel speciaal" there.
+
+A row that is not ready yet shows the time left, e.g. "(50s)", "(59m)" or
+"(2h05)". Actions are mutually exclusive: the pet can only do one thing at
+a time.
 
 ## HAX Economy & Hard Mode
 

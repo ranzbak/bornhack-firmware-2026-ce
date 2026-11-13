@@ -648,6 +648,28 @@ pub fn refusal_for(
     state.refusal_for(action, drink)
 }
 
+/// The first warning that `action` would cause now (see `GameState::preview`).
+pub fn preview(
+    action: super::engine::Action,
+    food: Option<super::engine::FoodKind>,
+    drink: Option<super::engine::DrinkKind>,
+) -> Option<super::engine::causes::Cause> {
+    let state = unsafe { (*GAME.get()).as_ref() }?;
+    state.preview(action, food, drink)
+}
+
+/// The first warning a night's sleep would cause now.
+pub fn preview_sleep() -> Option<super::engine::causes::Cause> {
+    let state = unsafe { (*GAME.get()).as_ref() }?;
+    state.preview_sleep()
+}
+
+/// The first warning waking the pet now would cause.
+pub fn preview_wake() -> Option<super::engine::causes::Cause> {
+    let state = unsafe { (*GAME.get()).as_ref() }?;
+    state.preview_wake()
+}
+
 /// Why the pet cannot be put to sleep now (`None` when it can).
 pub fn sleep_refusal() -> Option<super::engine::doses::Reason> {
     let state = unsafe { (*GAME.get()).as_ref() }?;

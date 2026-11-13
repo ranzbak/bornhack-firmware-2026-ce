@@ -30,6 +30,15 @@ impl FoodKind {
         }
     }
 
+    /// The food's whole name, for the menu title (`label` is the short form
+    /// that fits a row with its price).
+    pub fn full_name(self) -> &'static str {
+        match self {
+            FoodKind::Frikandel => "Frikandel speciaal",
+            other => other.label(),
+        }
+    }
+
     /// HAX price to feed this food. Healthy costs more than junk.
     /// In Hard (US) mode healthy food is pricier still (20 vs 15);
     /// unhealthy food is unaffected by `hard`.

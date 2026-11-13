@@ -24,7 +24,7 @@ use embedded_graphics::text::{Text};
 use super::engine::DebugPoke;
 use super::nav::Row;
 use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_BLACK, TEXT_BOLD_WHITE};
-use crate::{BLACK, TriColor};
+use crate::{BLACK, TriColor, WHITE};
 
 // ── Modal kind
 // ────────────────────────────────────────────────────────────────
@@ -428,6 +428,28 @@ impl Item {
         }
     }
 
+    /// The warning this row's dose would cause (the engine's pure preview), or
+    /// `None` for an unavailable row, a row that is no dose, or a clean dose.
+    /// Each call clones the state (a night's sleep for `Sleep`): call it once
+    /// per drawn row, never per glyph.
+    fn risk(self, stats: &super::engine::PetStats) -> Option<super::engine::causes::Cause> {
+        use super::lifecycle;
+        if !self.available(stats) {
+            return None;
+        }
+        let cause = match self {
+            Self::Sleep => lifecycle::preview_sleep(),
+            Self::WakeFromSleep => lifecycle::preview_wake(),
+            Self::FeedFood(food) => lifecycle::preview(super::engine::Action::Feed, Some(food), None),
+            Self::DrinkChoice(d) => lifecycle::preview(super::engine::Action::Drink, None, Some(d)),
+            _ => {
+                let (a, _) = self.action()?;
+                lifecycle::preview(a, None, None)
+            }
+        };
+        cause.filter(|c| c.is_warning())
+    }
+
     /// Can the cursor rest on this row?  Cancel always can (so every
     /// list has at least one selectable row); everything else needs an
     /// engine snapshot that says it's available.  Missing snapshot
@@ -818,6 +840,104 @@ const BORDER: u32 = 2;
 const TITLE_H: i32 = 18;
 const ITEM_H: i32 = 16;
 
+/// Most rows one popover shows at once (the window is under 120 px tall).
+const MAX_VISIBLE_ROWS: usize = 8;
+
+/// Where a row's text starts, relative to the popover's inner left edge.
+/// The Feed page starts at the edge: "Frikandel spec 10H" is 18 columns
+/// (126 px) and only fits the 128 px inner width without the usual indent.
+fn row_indent(kind: ModalKind) -> i32 {
+    if kind == ModalKind::Feed { 0 } else { 4 }
+}
+
+/// The row's text: label, price (money mode) and the wait while disabled.
+/// The risk mark is drawn, not typed, so it takes no columns.
+fn row_text(item: Item, stats: Option<&super::engine::PetStats>) -> heapless::String<40> {
+    // 40 covers the longest label (19 bytes), a price (" 15H"), and the
+    // longest wait (" (72h00)"); `push_str` silently no-ops past capacity.
+    let mut text: heapless::String<40> = heapless::String::new();
+    let _ = text.push_str(shown_label(item, stats.is_some_and(|s| s.hard_mode)));
+    if let Some(s) = stats {
+        if let Some(price) = item.hax_price(s)
+            && s.money_enabled
+        {
+            let _ = core::fmt::Write::write_fmt(&mut text, format_args!(" {price}H"));
+        }
+        if !item.available(s)
+            && let Some(wait) = cooldown_string(item.cooldown_ticks(s))
+        {
+            // Rows with no wait to show get no suffix: selecting one tells
+            // the player why (R24).
+            let _ = text.push_str(wait.as_str());
+        }
+    }
+    text
+}
+
+/// US "Hard mode" reskins the Frikandel speciaal as a Hamburger.
+fn shown_label(item: Item, hard: bool) -> &'static str {
+    match item {
+        Item::FeedFood(super::engine::FoodKind::Frikandel) if hard => "Hamburger",
+        _ => item.label(),
+    }
+}
+
+/// The title bar: the selected row's risk, else the selected food's whole
+/// name on the Feed page, else the menu title.
+fn title_text(
+    kind: ModalKind,
+    selected: Option<Item>,
+    stats: Option<&super::engine::PetStats>,
+    risk: Option<super::engine::causes::Cause>,
+) -> heapless::String<24> {
+    let mut t: heapless::String<24> = heapless::String::new();
+    if let Some(cause) = risk {
+        let _ = t.push_str("risk: ");
+        let _ = t.push_str(cause.what());
+    } else if let Some(Item::FeedFood(food)) = selected {
+        let hard = stats.is_some_and(|s| s.hard_mode);
+        let _ = t.push_str(match food {
+            super::engine::FoodKind::Frikandel if hard => "Hamburger",
+            f => f.full_name(),
+        });
+    } else {
+        let _ = t.push_str(kind.title());
+    }
+    t
+}
+
+/// The risk mark's box: a 2 px wide "!" flush with the popover's right inner
+/// edge, in the gutter past the row text (at most 126 px from the inner left
+/// edge, on the Frikandel row; the inner width is 128).
+fn risk_mark_rect(row_top: i32) -> Rectangle {
+    let inner_right = MARGIN + (MODAL_W - BORDER) as i32;
+    Rectangle::new(
+        Point::new(inner_right - RISK_MARK_W as i32, row_top + (ITEM_H - RISK_MARK_H as i32) / 2),
+        Size::new(RISK_MARK_W, RISK_MARK_H),
+    )
+}
+
+const RISK_MARK_W: u32 = 2;
+const RISK_MARK_H: u32 = 9;
+
+/// A bar and a dot.
+fn draw_risk_mark<D>(display: &mut D, row_top: i32, colour: TriColor) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    let r = risk_mark_rect(row_top);
+    let style = PrimitiveStyle::with_fill(colour);
+    Rectangle::new(r.top_left, Size::new(RISK_MARK_W, RISK_MARK_H - 3))
+        .into_styled(style)
+        .draw(display)?;
+    Rectangle::new(
+        Point::new(r.top_left.x, r.top_left.y + RISK_MARK_H as i32 - 2),
+        Size::new(RISK_MARK_W, 2),
+    )
+    .into_styled(style)
+    .draw(display)
+}
+
 /// Draw the modal overlay.  Call this after `draw_screen_game` so it renders
 /// on top.  Does nothing when no modal is open.
 pub fn draw_modal<D>(display: &mut D) -> Result<(), D::Error>
@@ -845,16 +965,13 @@ where
         BORDER,
     )?;
 
-    // Title bar — black fill, bold white text.
     let inner_x = MARGIN + BORDER as i32;
     let inner_y = MARGIN + BORDER as i32;
     let inner_w = MODAL_W - BORDER * 2;
-    ui::draw_title_bar(display, kind.title(), Point::new(inner_x, inner_y), inner_w)?;
 
     // Item list
     let left_style = crate::ui::MIDDLE_LEFT;
 
-    let list_x = inner_x;
     let list_y = inner_y + TITLE_H;
     let list_bottom = MARGIN + MODAL_H as i32 - BORDER as i32;
 
@@ -877,6 +994,22 @@ where
     // the start and end of the items list.
     let scroll_top = pos.saturating_sub(visible_rows / 2).min(max_top);
 
+    // Risks once per draw: each is a clone of the pet (a night for Sleep).
+    let mut risks = [None; MAX_VISIBLE_ROWS];
+    if let Some(s) = stats.as_ref() {
+        for (slot, item) in risks
+            .iter_mut()
+            .zip(items.iter().skip(scroll_top).take(visible_rows))
+        {
+            *slot = item.risk(s);
+        }
+    }
+    let selected_risk = pos
+        .checked_sub(scroll_top)
+        .and_then(|v| risks.get(v).copied().flatten());
+    let title = title_text(kind, items.get(pos).copied(), stats.as_ref(), selected_risk);
+    ui::draw_title_bar(display, title.as_str(), Point::new(inner_x, inner_y), inner_w)?;
+
     for (vis_i, item) in items
         .iter()
         .enumerate()
@@ -897,43 +1030,9 @@ where
         // out" rendering below covers that case.
         let available = item.selectable(stats.as_ref());
 
-        // Build display text: append " (Ns)" with the remaining wait when
-        // the engine reports one.
-        // 40 covers the longest label ("Reset battle record"/"Trigger
-        // alcoholism", 19 bytes) plus an optional price suffix (" 15H",
-        // 4 bytes) plus the longest cooldown suffix (" (72h00)", 8
-        // bytes) with room to spare — heapless::push_str
-        // silently no-ops past capacity instead of truncating, so this
-        // must comfortably exceed the worst case, not just the common one.
-        let mut display_label: heapless::String<40> = heapless::String::new();
-        // US "Hard mode" reskins the Frikandel speciaal as a Hamburger.
-        let label = match item {
-            Item::FeedFood(super::engine::FoodKind::Frikandel)
-                if stats.as_ref().is_some_and(|s| s.hard_mode) =>
-            {
-                "Hamburger"
-            }
-            _ => item.label(),
-        };
-        let _ = display_label.push_str(label);
-        // Price suffix (" NNH") for priced items, only in money mode.
-        if let Some(s) = stats.as_ref()
-            && let Some(price) = item.hax_price(s)
-            && s.money_enabled
-        {
-            let _ =
-                core::fmt::Write::write_fmt(&mut display_label, format_args!(" {price}H"));
-        }
-        if !available {
-            let suffix = stats
-                .as_ref()
-                .and_then(|s| cooldown_string(item.cooldown_ticks(s)));
-            // Rows with no wait to show get no suffix: selecting one tells
-            // the player why (R24).
-            if let Some(s) = suffix {
-                let _ = display_label.push_str(s.as_str());
-            }
-        }
+        let display_label = row_text(*item, stats.as_ref());
+        let text_x = inner_x + row_indent(kind);
+        let risk = risks.get(vis_i).copied().flatten().is_some();
 
         if i == pos && available {
             // Selected and available: inverted row.
@@ -945,7 +1044,7 @@ where
             .draw(display)?;
             Text::with_text_style(
                 display_label.as_str(),
-                Point::new(list_x + 4, row_mid),
+                Point::new(text_x, row_mid),
                 TEXT_BOLD_WHITE,
                 left_style,
             )
@@ -962,7 +1061,7 @@ where
             .draw(display)?;
             Text::with_text_style(
                 display_label.as_str(),
-                Point::new(list_x + 4, row_mid),
+                Point::new(text_x, row_mid),
                 TEXT_BOLD_BLACK,
                 left_style,
             )
@@ -971,11 +1070,16 @@ where
             // Not selected.
             Text::with_text_style(
                 display_label.as_str(),
-                Point::new(list_x + 4, row_mid),
+                Point::new(text_x, row_mid),
                 TEXT_BOLD_BLACK,
                 left_style,
             )
             .draw(display)?;
+        }
+
+        if risk {
+            let colour = if i == pos { WHITE } else { BLACK };
+            draw_risk_mark(display, row_top, colour)?;
         }
 
         // Apply the grey-out overlay last so it covers everything we
@@ -1497,6 +1601,201 @@ mod tests {
         super::draw_modal(&mut c).unwrap();
         assert!(c.any(row, crate::BLACK), "page 2 names the injury");
         super::close();
+        lifecycle::set_state_for_test(None);
+    }
+
+    // ── Task 8: risk markers ─────────────────────────────────────────────
+
+    use crate::game::engine::causes::{Cause, StrainWhy, Unsettled};
+    use crate::game::engine::needs::P;
+    use crate::game::engine::FoodKind;
+
+    fn pct(p: i32) -> u16 {
+        (p * P) as u16
+    }
+
+    /// A fresh active pet in the global slot, shaped by `f`; its stats.
+    fn menu_pet(
+        money: bool,
+        hard: bool,
+        f: impl FnOnce(&mut GameState),
+    ) -> crate::game::engine::PetStats {
+        lifecycle::start_new_game(PetKind(0), money, hard);
+        lifecycle::with_state(|s| {
+            s.phase = Phase::Active;
+            s.is_sleeping = false;
+            s.money = 1000;
+            s.fullness = pct(50);
+            s.hydration = pct(50);
+            s.energy = pct(90);
+            f(s);
+            true
+        });
+        lifecycle::cycle().unwrap()
+    }
+
+    #[test]
+    fn a_half_full_pet_marks_pizza_with_the_food_coma() {
+        let _guard = crate::game::lock_test_state();
+        let stats = menu_pet(false, false, |_| {});
+        let pizza = Item::FeedFood(FoodKind::Pizza);
+        assert_eq!(pizza.risk(&stats), Some(Cause::FoodComa));
+        assert_eq!(Item::FeedFood(FoodKind::Salad).risk(&stats), None);
+        assert_eq!(Item::FeedFood(FoodKind::Cake).risk(&stats), None);
+        assert_eq!(
+            super::title_text(ModalKind::Feed, Some(pizza), Some(&stats), pizza.risk(&stats))
+                .as_str(),
+            "risk: food coma"
+        );
+        // Draw it: a mark on the Pizza row's gutter, none on Salad's.
+        super::open(ModalKind::Feed);
+        super::MODAL_POS.store(5, core::sync::atomic::Ordering::Relaxed); // Cancel
+        let mut c = crate::game::test_canvas::Canvas::new();
+        super::draw_modal(&mut c).unwrap();
+        let row = |i: i32| super::risk_mark_rect(30 + 16 * i);
+        assert!(c.any(row(3), crate::BLACK), "Pizza row has the mark");
+        assert!(!c.any(row(0), crate::BLACK), "Salad row has none");
+        assert!(!c.any(row(4), crate::BLACK), "Cake row has none");
+        super::close();
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn exercise_row_warns_before_the_tear() {
+        let _guard = crate::game::lock_test_state();
+        let stats = menu_pet(false, false, |s| {
+            s.strain = pct(40);
+            s.fullness = pct(30);
+        });
+        assert_eq!(
+            Item::ExerciseNow.risk(&stats),
+            Some(Cause::TornMuscle(StrainWhy::Hungry))
+        );
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn wake_row_warns_grumpy_under_fifty() {
+        let _guard = crate::game::lock_test_state();
+        let stats = menu_pet(false, false, |s| {
+            s.energy = pct(30);
+            assert!(s.sleep());
+        });
+        assert!(stats.is_sleeping);
+        assert_eq!(Item::WakeFromSleep.risk(&stats), Some(Cause::Grumpy));
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn sleep_row_warns_after_drinks() {
+        let _guard = crate::game::lock_test_state();
+        // Booze 50, not 35: a booze-35 night is fine in the real engine.
+        let stats = menu_pet(false, false, |s| {
+            s.energy = pct(30);
+            s.booze = pct(50);
+        });
+        assert_eq!(
+            Item::Sleep.risk(&stats),
+            Some(Cause::BadNight(Unsettled::Drinks))
+        );
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn marked_rows_still_work() {
+        let _guard = crate::game::lock_test_state();
+        let stats = menu_pet(false, false, |_| {});
+        let pizza = Item::FeedFood(FoodKind::Pizza);
+        assert!(pizza.risk(&stats).is_some());
+        assert!(pizza.available(&stats));
+        assert!(pizza.selectable(Some(&stats)));
+        pizza.activate();
+        assert_eq!(
+            lifecycle::cycle().unwrap().active_action,
+            Some(crate::game::engine::Action::Feed)
+        );
+        super::close();
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn unavailable_rows_carry_no_risk() {
+        let _guard = crate::game::lock_test_state();
+        let stats = menu_pet(true, false, |s| s.money = 0);
+        let pizza = Item::FeedFood(FoodKind::Pizza);
+        assert!(!pizza.available(&stats));
+        assert_eq!(pizza.risk(&stats), None);
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn frikandel_has_a_full_name_in_the_title_only() {
+        let _guard = crate::game::lock_test_state();
+        let stats = menu_pet(false, false, |_| {});
+        let frik = Item::FeedFood(FoodKind::Frikandel);
+        assert_eq!(frik.label(), "Frikandel spec");
+        let t = super::title_text(ModalKind::Feed, Some(frik), Some(&stats), None);
+        assert_eq!(t.as_str(), "Frikandel speciaal");
+        assert!(t.len() <= 18, "fits the 18-column title");
+        let salad = Item::FeedFood(FoodKind::Salad);
+        assert_eq!(
+            super::title_text(ModalKind::Feed, Some(salad), Some(&stats), None).as_str(),
+            "Salad"
+        );
+        assert_eq!(
+            super::title_text(ModalKind::Feed, Some(Item::Cancel), Some(&stats), None).as_str(),
+            "Feed"
+        );
+        assert_eq!(
+            super::title_text(ModalKind::Heal, Some(Item::Rehab), Some(&stats), None).as_str(),
+            ModalKind::Heal.title()
+        );
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn rows_and_risk_titles_fit() {
+        let _guard = crate::game::lock_test_state();
+        let (ink_w, inner_x, indent_gap) = (
+            super::TEXT_BOLD_BLACK.font.character_size.width as i32,
+            super::MARGIN + super::BORDER as i32,
+            4,
+        );
+        for hard in [false, true] {
+            let stats = menu_pet(true, hard, |_| {});
+            for kind in [
+                ModalKind::Feed,
+                ModalKind::Drink,
+                ModalKind::Heal,
+                ModalKind::Play,
+                ModalKind::Rest,
+                ModalKind::Exercise,
+            ] {
+                for item in kind.items() {
+                    let text = super::row_text(*item, Some(&stats));
+                    let cols = text.chars().count();
+                    let frik = matches!(item, Item::FeedFood(FoodKind::Frikandel));
+                    let budget = if frik && !hard { 18 } else { 17 };
+                    assert!(cols <= budget, "{:?} {text:?} is {cols} cols", kind.title());
+                    if frik && !hard {
+                        assert_eq!(text.as_str(), "Frikandel spec 10H");
+                    }
+                    // The gutter mark must not touch the row text.
+                    let indent = if kind == ModalKind::Feed { 0 } else { indent_gap };
+                    let text_end = inner_x + indent + cols as i32 * ink_w;
+                    let mark = super::risk_mark_rect(0);
+                    assert!(text_end <= mark.top_left.x, "{text:?} runs into the mark");
+                    assert!(
+                        mark.top_left.x + mark.size.width as i32 <= inner_x + 128,
+                        "the mark stays inside the popover"
+                    );
+                }
+            }
+        }
+        for cause in Cause::all().filter(|c| c.is_warning()) {
+            let t = super::title_text(ModalKind::Feed, None, None, Some(cause));
+            assert!(t.chars().count() <= 18, "{t:?}");
+        }
         lifecycle::set_state_for_test(None);
     }
 }
