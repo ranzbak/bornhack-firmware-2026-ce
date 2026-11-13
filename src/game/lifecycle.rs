@@ -342,17 +342,7 @@ static REALM_DIRTY: AtomicBool = AtomicBool::new(false);
 
 fn current_severity(state: &GameState) -> Severity {
     use super::engine::Phase;
-    use super::engine::thresholds::{
-        SICK_TRIGGER_HUNGER, SICK_TRIGGER_TIRED, STAT_MAX, WARNING_HUNGER, WARNING_MISERABLE,
-        WARNING_SICK, WARNING_TIRED,
-    };
-    // v1 thresholds are bad-high; the v3 levels are good-high, so invert.
-    let (hunger, tired, sick, miserable) = (
-        STAT_MAX() - state.fullness,
-        STAT_MAX() - state.energy,
-        STAT_MAX() - state.health,
-        STAT_MAX() - state.mood,
-    );
+    use super::engine::status::{StatusWord, status};
 
     if state.phase == Phase::Gone {
         return Severity::Gone;
@@ -360,24 +350,14 @@ fn current_severity(state: &GameState) -> Severity {
     if state.phase == Phase::Leaving {
         return Severity::Leaving;
     }
-    // Severity is derived from the underlying stats (not the display
-    // animation) so that active-action animations — Feeding/Healing/etc
-    // — don't "mask" an existing warning and suppress the alert when
-    // the action ends.
-    let severe = sick > SICK_TRIGGER_TIRED()
-        || tired > SICK_TRIGGER_TIRED()
-        || hunger > SICK_TRIGGER_HUNGER();
-    if severe {
-        return Severity::Severe;
+    // Severity is derived from the status word (not the display animation)
+    // so that active-action animations — Feeding/Healing/etc — don't
+    // "mask" an existing warning and suppress the alert when the action ends.
+    match status(state) {
+        (_, true) => Severity::Severe,
+        (StatusWord::Content, false) => Severity::Neutral,
+        (_, false) => Severity::Warning,
     }
-    let warning = sick > WARNING_SICK()
-        || tired > WARNING_TIRED()
-        || hunger > WARNING_HUNGER()
-        || miserable > WARNING_MISERABLE();
-    if warning {
-        return Severity::Warning;
-    }
-    Severity::Neutral
 }
 
 fn check_severity_transition(state: &GameState) {
@@ -615,11 +595,11 @@ pub fn is_hibernating() -> bool {
     state.is_some_and(|s| s.hibernating)
 }
 
-/// Award the mini-game win reward (HAX + cooldown + hunger cost).
+/// Award the mini-game win (`GRADE_WIN`) or draw (`GRADE_DRAW`): fun dose, HAX and cooldown.
 /// Starts only the matching game's cooldown so other games stay playable.
-pub fn award_inspiration(game: super::engine::MiniGame) {
+pub fn award_inspiration(game: super::engine::MiniGame, grade: u8) {
     with_game(|s| {
-        s.award_inspiration(game);
+        s.award_inspiration(game, grade);
         // Celebratory jingle on a mini-game win — the main
         // active-engagement reward previously had no audio, only a toast.
         #[cfg(feature = "embassy-core")]

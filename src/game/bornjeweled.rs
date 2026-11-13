@@ -120,7 +120,10 @@ pub fn close() {
         // game that scored at least one cleared row.
         let score = SCORE.load(Ordering::Relaxed);
         if score > 0 {
-            super::lifecycle::award_inspiration(super::engine::MiniGame::BornJeweled);
+            super::lifecycle::award_inspiration(
+                super::engine::MiniGame::BornJeweled,
+                super::engine::GRADE_WIN,
+            );
             super::show_toast(super::Toast::MinigameWin);
         }
     }

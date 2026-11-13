@@ -155,7 +155,10 @@ fn cursor_right() {
 fn activate() {
     if SOLVED.load(Ordering::Relaxed) {
         // Puzzle already solved — Fire closes and awards reward.
-        super::lifecycle::award_inspiration(super::engine::MiniGame::LightsOut);
+        super::lifecycle::award_inspiration(
+            super::engine::MiniGame::LightsOut,
+            super::engine::GRADE_WIN,
+        );
         super::show_toast(super::Toast::MinigameWin);
         close();
         return;

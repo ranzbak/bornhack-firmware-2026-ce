@@ -52,19 +52,6 @@ thresholds_table! {
     // Scale
     STAT_MAX: u16,
     UNIT: u16,
-    // Sick
-    SICK_TRIGGER_HUNGER: u16,
-    SICK_TRIGGER_TIRED: u16,
-    // Warnings
-    WARNING_HUNGER: u16,
-    WARNING_TIRED: u16,
-    WARNING_SICK: u16,
-    WARNING_MISERABLE: u16,
-    // Miserable
-    MISERABLE_AMOUNT: u16,
-    MISERABLE_STAT_THRESHOLD: u16,
-    MISERABLE_BOOST_THRESHOLD: u16,
-    MISERABLE_DRAIN_THRESHOLD: u16,
     // Actions
     FEED_DURATION: u8,
     HEAL_DURATION: u8,
@@ -349,19 +336,6 @@ impl Thresholds {
         STAT_MAX: 65535,
         UNIT: 655,
 
-        SICK_TRIGGER_HUNGER: 39321,
-        SICK_TRIGGER_TIRED: 49151,
-
-        WARNING_HUNGER: 19660,
-        WARNING_TIRED: 26214,
-        WARNING_SICK: 26214,
-        WARNING_MISERABLE: 32768,
-
-        MISERABLE_AMOUNT: 655,
-        MISERABLE_STAT_THRESHOLD: 39321,
-        MISERABLE_BOOST_THRESHOLD: 45874,
-        MISERABLE_DRAIN_THRESHOLD: 52428,
-
         FEED_DURATION: 2,
         HEAL_DURATION: 3,
         PLAY_DURATION: 4,
@@ -371,7 +345,7 @@ impl Thresholds {
         HATCHING_TICKS: 6,
         #[cfg(feature = "simulator")]
         HATCHING_TICKS: 1,
-        MAX_SLEEP_TICKS: 180,
+        MAX_SLEEP_TICKS: 720,
         SAVE_INTERVAL_TICKS: 90,
 
         MIN_TRAIT: 16384,
@@ -646,19 +620,6 @@ impl Thresholds {
         STAT_MAX: 65535,
         UNIT: 655,
 
-        SICK_TRIGGER_HUNGER: 39321,
-        SICK_TRIGGER_TIRED: 49151,
-
-        WARNING_HUNGER: 19660,
-        WARNING_TIRED: 26214,
-        WARNING_SICK: 26214,
-        WARNING_MISERABLE: 32768,
-
-        MISERABLE_AMOUNT: 655,
-        MISERABLE_STAT_THRESHOLD: 39321,
-        MISERABLE_BOOST_THRESHOLD: 45874,
-        MISERABLE_DRAIN_THRESHOLD: 52428,
-
         FEED_DURATION: 2,
         HEAL_DURATION: 3,
         PLAY_DURATION: 4,
@@ -668,7 +629,7 @@ impl Thresholds {
         HATCHING_TICKS: 6,
         #[cfg(feature = "simulator")]
         HATCHING_TICKS: 1,
-        MAX_SLEEP_TICKS: 180,
+        MAX_SLEEP_TICKS: 720,
         SAVE_INTERVAL_TICKS: 90,
 
         MIN_TRAIT: 16384,

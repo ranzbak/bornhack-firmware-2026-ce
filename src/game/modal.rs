@@ -324,7 +324,9 @@ impl Item {
             | Self::CheatClearAlcoholism
             | Self::CheatResetBattleRecord => true,
             Self::DrinkChoice(drink) => {
-                stats.can_drink && (!stats.money_enabled || stats.money >= drink.hax_price())
+                stats.can_drink
+                    && (drink != super::engine::DrinkKind::Water || stats.can_drink_water)
+                    && (!stats.money_enabled || stats.money >= drink.hax_price())
             }
             Self::Rehab => {
                 stats.can_rehab
@@ -378,8 +380,9 @@ impl Item {
 
     /// Time-until-ready in 10-second ticks for a disabled item.
     /// During the in-progress action this is `action_ticks_remaining`;
-    /// after the action ends, the post-action cooldown takes over and
-    /// is reported instead.  0 = ready / not gated by a cooldown.
+    /// Heal, Medicate (insulin window), Ozempic and Rehab otherwise show their
+    /// real remaining wait, mini-games and Battle their cooldown.
+    /// 0 = ready / not gated by a cooldown.
     fn cooldown_ticks(self, stats: &super::engine::PetStats) -> u16 {
         use super::engine::Action;
         let action_remaining = |a: Action| -> u16 {
@@ -389,13 +392,19 @@ impl Item {
                 0
             }
         };
+        // Minutes of a timer as ticks (1 minute = 6 ticks), saturating.
+        let ticks = |minutes: u16| minutes.saturating_mul(6);
         match self {
             Self::FeedFood(_) => action_remaining(Action::Feed),
-            Self::GiveMedicine => action_remaining(Action::Heal),
-            Self::GiveMedication => action_remaining(Action::Medicate),
-            Self::Ozempic => action_remaining(Action::Ozempic),
+            Self::GiveMedicine => action_remaining(Action::Heal).max(ticks(stats.med_cd_min)),
+            Self::GiveMedication => action_remaining(Action::Medicate).max(ticks(
+                stats
+                    .insulin_min
+                    .saturating_sub(super::engine::thresholds::DOSE_INSULIN_WINDOW_MIN()),
+            )),
+            Self::Ozempic => action_remaining(Action::Ozempic).max(ticks(stats.ozempic_cd_min)),
             Self::DrinkChoice(_) => action_remaining(Action::Drink),
-            Self::Rehab => action_remaining(Action::Rehab),
+            Self::Rehab => action_remaining(Action::Rehab).max(ticks(stats.rehab_min)),
             Self::ExerciseNow => action_remaining(Action::Exercise),
             Self::Battle => stats.cooldown_battle,
             Self::PlayNow => action_remaining(Action::Play),

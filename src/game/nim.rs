@@ -186,7 +186,7 @@ pub fn activate() {
     let r = RESULT.load(Ordering::Relaxed);
     if r != RESULT_IN_PROGRESS {
         if r == RESULT_HUMAN_WINS {
-            super::lifecycle::award_inspiration(super::engine::MiniGame::Nim);
+            super::lifecycle::award_inspiration(super::engine::MiniGame::Nim, super::engine::GRADE_WIN);
             super::show_toast(super::Toast::MinigameWin);
         }
         close();

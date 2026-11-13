@@ -11,12 +11,16 @@
 //!   3. Hatching (egg animation)
 //!   4. Active action (feeding, healing, relaxing, playing, sleeping)
 //!   5. Leaving (countdown warning, with urgency level)
-//!   6. Critical stat (urgent distress — needs immediate action)
-//!   7. Warning stat (attention needed soon — not yet critical)
-//!   8. Idle / Happy (pet is content)
+//!   6. Status word in danger (urgent distress — needs immediate action)
+//!   7. Status word (attention needed soon — not yet in danger)
+//!   8. Idle / Happy (content; happy from 80 % mood)
 
-use super::thresholds::*;
+use super::needs::P;
+use super::status::{StatusWord, status};
 use super::{Action, GameState, Phase};
+
+/// Mood (percent) from which a content pet shows as happy; also a fixed line of the solver's `sig`.
+const HAPPY_MOOD_PCT: i32 = 80;
 
 /// What the pet display area should show right now.
 ///
@@ -76,7 +80,7 @@ pub enum DisplayAnim {
     Idle,
 }
 
-/// Count of maxed stats (= STAT_MAX()).
+/// Count of needs at level 0.
 fn count_maxed(state: &GameState) -> u8 {
     (state.fullness == 0) as u8 + (state.energy == 0) as u8 + (state.health == 0) as u8
 }
@@ -136,49 +140,30 @@ impl GameState {
         // alongside whatever the pet's normal animation is — see
         // `lifecycle::is_diabetic_unmedicated()` / `game::mod` render.
 
-        // v1 thresholds are bad-high; v3 levels are good-high, so invert.
-        let hunger = STAT_MAX() - self.fullness;
-        let tired = STAT_MAX() - self.energy;
-        let sick = STAT_MAX() - self.health;
-        let miserable = STAT_MAX() - self.mood;
-
-        // ── Group 4: critical stats ─────────────────────────────────
-        // Ranked by recovery difficulty: sick > tired > hungry.
-        if sick > SICK_TRIGGER_TIRED() {
-            return DisplayAnim::CriticalSick;
+        // ── Groups 4 to 6: the status word ──────────────────────────
+        let (word, danger) = status(self);
+        let pick = |warning, critical| if danger { critical } else { warning };
+        match word {
+            StatusWord::Hungry | StatusWord::Thirsty => {
+                pick(DisplayAnim::WarningHungry, DisplayAnim::CriticalHungry)
+            }
+            StatusWord::Tired | StatusWord::Groggy | StatusWord::HungOver => {
+                pick(DisplayAnim::WarningTired, DisplayAnim::CriticalTired)
+            }
+            StatusWord::Poorly | StatusWord::Injured => {
+                pick(DisplayAnim::WarningSick, DisplayAnim::CriticalSick)
+            }
+            StatusWord::Bored
+            | StatusWord::Wired
+            | StatusWord::Sloppy
+            | StatusWord::Grubby
+            | StatusWord::Stuffed
+            | StatusWord::Waterlogged
+            | StatusWord::Overweight
+            | StatusWord::Underweight
+            | StatusWord::Unfit => DisplayAnim::WarningMiserable,
+            StatusWord::Content if self.mood as i32 >= HAPPY_MOOD_PCT * P => DisplayAnim::Happy,
+            StatusWord::Content => DisplayAnim::Idle,
         }
-        if tired > SICK_TRIGGER_TIRED() {
-            return DisplayAnim::CriticalTired;
-        }
-        if hunger > SICK_TRIGGER_HUNGER() {
-            return DisplayAnim::CriticalHungry;
-        }
-
-        // ── Group 5: warning stats ──────────────────────────────────
-        // Same priority ranking, lower thresholds.
-        if sick > WARNING_SICK() {
-            return DisplayAnim::WarningSick;
-        }
-        if tired > WARNING_TIRED() {
-            return DisplayAnim::WarningTired;
-        }
-        if hunger > WARNING_HUNGER() {
-            return DisplayAnim::WarningHungry;
-        }
-        if miserable > WARNING_MISERABLE() {
-            return DisplayAnim::WarningMiserable;
-        }
-
-        // ── Group 6: content ────────────────────────────────────────
-        // Happy when all stats are well below warning thresholds.
-        if hunger < WARNING_HUNGER() / 2
-            && tired < WARNING_TIRED() / 2
-            && sick < WARNING_SICK() / 2
-            && miserable < WARNING_MISERABLE() / 2
-        {
-            return DisplayAnim::Happy;
-        }
-
-        DisplayAnim::Idle
     }
 }

@@ -5,7 +5,7 @@
 //! 1. Computes elapsed ticks since the last update.
 //! 2. Applies all stat changes for that delta in one step.
 //! 3. Computes the next boundary crossing time across all stats.
-//! 4. Schedules a wake-up at the earliest boundary (or MAX_SLEEP_TICKS()).
+//! 4. Schedules a wake-up at the next visible change (or MAX_SLEEP_TICKS()).
 //!
 //! This lets the CPU sleep for minutes or hours when nothing interesting
 //! is about to happen, saving significant battery on the badge.
@@ -20,6 +20,7 @@ pub mod regime;
 #[cfg(feature = "simulator")]
 pub mod sim;
 pub mod solver;
+pub mod status;
 pub mod thresholds;
 pub mod to_display;
 
@@ -105,10 +106,11 @@ pub enum Phase {
 
 /// HAX earned by the "Only pets" hobby (non-broke) branch.
 pub const ONLYPETS_HOBBY_REWARD: u32 = 20;
-/// Grade (0..=2) the mini-game dose is given for a win or draw: the best one.
-/// The games report no finer result yet.
-// TODO(plan-1 task 10): pass the real grade; draws currently get grade 2 too.
-pub const MINIGAME_WIN_GRADE: u8 = 2;
+/// Mini-game grades (0..=2) handed to `award_inspiration`: an interface of the
+/// games, not a tunable. A loss gives no call at all. Games without a draw
+/// pass `GRADE_WIN`.
+pub const GRADE_DRAW: u8 = 1;
+pub const GRADE_WIN: u8 = 2;
 /// HAX earned for winning a mini-game.
 pub const MINIGAME_HAX_REWARD: u32 = 15;
 /// HAX earned for winning a mesh Battle.
@@ -545,60 +547,69 @@ impl GameState {
         // Minutes still to step singly after a runaway target was seen.
         let mut steep = 0u32;
         while minutes > 0 {
-            let mut dt = solver::seg_len(self, minutes).clamp(1, minutes);
-            // Mood and health crossing a line of their own is not bounded by
-            // the solver: shrink the segment until a trial advance on a copy
-            // keeps the signature AND mood cannot have met its target midway
-            // (it started on it, or moved the full step all the way), since
-            // meeting a falling target turns mood round and can cross a line
-            // and return with equal end signatures (R22a). At most log2(dt)
-            // trials, each a closed-form step, so a long gap on the badge
-            // still costs a handful of steps, not one per minute.
-            let before = solver::sig(self);
-            let (m0, t0) = (self.mood as i32, regime::mood_target(self));
-            if steep > 0 {
-                steep -= 1;
-                dt = 1;
-            }
-            while dt > 1 {
-                let mut trial = self.clone();
-                advance::advance(&mut trial, dt);
-                #[cfg(feature = "simulator")]
-                ADVANCE_CALLS.with(|c| c.set(c.get() + 1));
-                let (m1, t1) = (trial.mood as i32, regime::mood_target(&trial));
-                // Mood and target are linear inside a segment only up to
-                // integer truncation: each truncating term of `mood_target`
-                // (seven: four `* 3 / 2`, three `/ 2`) wobbles the target by
-                // under 1 per minute, so R = 7 + 1 (R22c). Mood on its target
-                // is safe if the target moves at most MOOD_STEP - R per
-                // minute; a full step is safe if the target led mood by R at
-                // both ends, so it was never met midway.
-                const R: i32 = 8;
-                let step = thresholds::MOOD_STEP() as i32;
-                let on_target = m0 == t0 && (t1 - t0).abs() + R <= (step - R) * dt as i32;
-                let full_step = (m1 - m0).abs() == step * dt as i32
-                    && if m1 > m0 { t0 >= m0 + R && t1 >= m1 + R } else { t0 <= m0 - R && t1 <= m1 - R };
-                let sig_same = solver::sig(&trial) == before;
-                if sig_same && (on_target || full_step) {
-                    break;
-                }
-                // On its target but the target runs away faster than mood can
-                // follow: shorter segments see the same slope, go straight to
-                // one minute, and skip the trials for the next few minutes
-                // (single minutes are always exact), instead of paying
-                // log2(dt) trials every minute.
-                if sig_same && m0 == t0 && (t1 - t0).abs() > (step - R) * dt as i32 {
-                    dt = 1;
-                    steep = 4;
-                    break;
-                }
-                dt = dt.div_ceil(2);
-            }
+            let dt = self.segment(minutes, &mut steep);
             #[cfg(feature = "simulator")]
             ADVANCE_CALLS.with(|c| c.set(c.get() + 1));
             advance::advance(self, dt);
             minutes -= dt;
         }
+    }
+
+    /// Length in minutes of the next closed-form step, at most `minutes`
+    /// (`steep` is the caller's single-minute budget after a runaway target).
+    /// `advance(self, segment)` is exact: the solver's bound, shrunk further
+    /// by trial advances on a copy.
+    fn segment(&self, minutes: u32, steep: &mut u32) -> u32 {
+        let mut dt = solver::seg_len(self, minutes).clamp(1, minutes);
+        // Mood and health crossing a line of their own is not bounded by
+        // the solver: shrink the segment until a trial advance on a copy
+        // keeps the signature AND mood cannot have met its target midway
+        // (it started on it, or moved the full step all the way), since
+        // meeting a falling target turns mood round and can cross a line
+        // and return with equal end signatures (R22a). At most log2(dt)
+        // trials, each a closed-form step, so a long gap on the badge
+        // still costs a handful of steps, not one per minute.
+        let before = solver::sig(self);
+        let (m0, t0) = (self.mood as i32, regime::mood_target(self));
+        if *steep > 0 {
+            *steep -= 1;
+            dt = 1;
+        }
+        while dt > 1 {
+            let mut trial = self.clone();
+            advance::advance(&mut trial, dt);
+            #[cfg(feature = "simulator")]
+            ADVANCE_CALLS.with(|c| c.set(c.get() + 1));
+            let (m1, t1) = (trial.mood as i32, regime::mood_target(&trial));
+            // Mood and target are linear inside a segment only up to
+            // integer truncation: each truncating term of `mood_target`
+            // (seven: four `* 3 / 2`, three `/ 2`) wobbles the target by
+            // under 1 per minute, so R = 7 + 1 (R22c). Mood on its target
+            // is safe if the target moves at most MOOD_STEP - R per
+            // minute; a full step is safe if the target led mood by R at
+            // both ends, so it was never met midway.
+            const R: i32 = 8;
+            let step = thresholds::MOOD_STEP() as i32;
+            let on_target = m0 == t0 && (t1 - t0).abs() + R <= (step - R) * dt as i32;
+            let full_step = (m1 - m0).abs() == step * dt as i32
+                && if m1 > m0 { t0 >= m0 + R && t1 >= m1 + R } else { t0 <= m0 - R && t1 <= m1 - R };
+            let sig_same = solver::sig(&trial) == before;
+            if sig_same && (on_target || full_step) {
+                break;
+            }
+            // On its target but the target runs away faster than mood can
+            // follow: shorter segments see the same slope, go straight to
+            // one minute, and skip the trials for the next few minutes
+            // (single minutes are always exact), instead of paying
+            // log2(dt) trials every minute.
+            if sig_same && m0 == t0 && (t1 - t0).abs() > (step - R) * dt as i32 {
+                dt = 1;
+                *steep = 4;
+                break;
+            }
+            dt = dt.div_ceil(2);
+        }
+        dt
     }
 
     /// Consume action ticks from delta, applying action effects.
@@ -786,15 +797,16 @@ impl GameState {
         true
     }
 
-    /// Award the mini-game win reward: HAX (when `money_enabled`) plus the
+    /// Award the mini-game win (or draw) reward, `grade` being `GRADE_WIN` or
+    /// `GRADE_DRAW`: HAX (when `money_enabled`) plus the
     /// per-game cooldown.  Starts only that game's cooldown so other
     /// mini-games stay available — encourages variety.  Also gives the
     /// mini-game's fun dose (and costs a little energy).
-    pub fn award_inspiration(&mut self, game: MiniGame) {
+    pub fn award_inspiration(&mut self, game: MiniGame, grade: u8) {
         if self.phase != Phase::Active {
             return;
         }
-        doses::minigame(self, MINIGAME_WIN_GRADE);
+        doses::minigame(self, grade);
         match game {
             MiniGame::TicTacToe => self.cooldown_tictactoe = MINIGAME_COOLDOWN(),
             MiniGame::LightsOut => self.cooldown_lightsout = MINIGAME_COOLDOWN(),
@@ -876,23 +888,76 @@ impl GameState {
 }
 
 // ---------------------------------------------------------------------------
-// Next wake time — boundary-based scheduling
+// Next wake time — exact, from the closed-form steps
 // ---------------------------------------------------------------------------
 
+/// How far ahead (engine minutes) the wake search looks: the 2 h cap.
+const WAKE_HORIZON_MIN: u32 = 120;
+
+/// Everything on screen the engine can change by itself.
+type Visible = (
+    status::StatusWord,
+    bool,
+    DisplayAnim,
+    bool,
+    Phase,
+    Option<Action>,
+);
+
 impl GameState {
-    /// Compute the number of ticks until the next interesting event.
+    fn visible(&self) -> Visible {
+        let (word, danger) = status::status(self);
+        (word, danger, self.display_anim(), self.is_sleeping, self.phase, self.active_action)
+    }
+
+    /// The tick at which the engine must run next: when something the
+    /// player can see (status word and danger, animation, sleep, phase,
+    /// action) first changes, but never later than `MAX_SLEEP_TICKS`.
     ///
-    /// Returns the absolute tick time to wake up at.  The caller should
-    /// set a timer for `next_wake_tick - last_update_tick` ticks.
+    /// The caller sleeps for `next_wake_tick - last_update_tick` ticks. Not
+    /// polling: a copy of the pet is stepped by whole solver segments, and
+    /// the segment that holds the change is bisected, a handful of
+    /// closed-form steps for the whole look-ahead.
     pub fn next_wake_tick(&self) -> u32 {
         if self.phase == Phase::Gone || self.hibernating {
             return u32::MAX;
         }
-        // Hatching countdown.
         if self.phase == Phase::Hatching {
             return self.last_update_tick + self.hatching_countdown as u32;
         }
-        todo!("BornPets v2 plan 1: v2 wake scheduler (later task)")
+        let cap = self.last_update_tick.saturating_add(MAX_SLEEP_TICKS());
+        // A running action ages nothing; it is its own bound.
+        if self.active_action.is_some() {
+            let end = self.last_update_tick + (self.action_ticks_remaining as u32).max(1);
+            return end.min(cap);
+        }
+        let start = self.visible();
+        let mut c = self.clone();
+        let (mut used, mut steep) = (0u32, 0u32);
+        while used < WAKE_HORIZON_MIN {
+            let dt = c.segment(WAKE_HORIZON_MIN - used, &mut steep);
+            let before = c.clone();
+            advance::advance(&mut c, dt);
+            if c.visible() != start {
+                // Inside a segment every term is linear, so once the view
+                // differs it stays different: find the first such minute.
+                let (mut lo, mut hi) = (1, dt);
+                while lo < hi {
+                    let mid = (lo + hi) / 2;
+                    let mut t = before.clone();
+                    advance::advance(&mut t, mid);
+                    if t.visible() != start {
+                        hi = mid;
+                    } else {
+                        lo = mid + 1;
+                    }
+                }
+                used += lo;
+                break;
+            }
+            used += dt;
+        }
+        (self.last_update_tick + used * TICKS_PER_MINUTE - self.tick_rem as u32).min(cap)
     }
 }
 
@@ -902,12 +967,10 @@ impl GameState {
 
 /// Display-friendly snapshot of the pet's state.
 ///
-/// All stats are scaled 0–100 with **positive semantics**: 100 = perfect,
-/// 0 = critical.  This is the inverse of the internal u16 representation
-/// where 0 = best.
+/// All stats are whole percent of the internal u16 level; for the needs
+/// 100 = best (`drunk` = 100 - booze).
 ///
 /// Obtain via [`GameState::stats()`] which triggers a state update first.
-/// The result is cached — calling `stats()` again at the same tick is free.
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "embassy-core", derive(defmt::Format))]
 pub struct PetStats {
@@ -919,7 +982,7 @@ pub struct PetStats {
     pub healthy: u8,
     /// How happy the pet is (100 = happy, 0 = miserable).
     pub happy: u8,
-    /// How lean/fit the pet is (100 = lean, 0 = obese).
+    /// How fit the pet is (100 = athletic).
     pub weight: u8,
     /// How sober the pet is (100 = stone sober, 0 = maximally drunk).
     pub drunk: u8,
@@ -1010,6 +1073,31 @@ pub struct PetStats {
     pub hibernating: bool,
     /// Total hours spent in hibernation during this pet's life.
     pub hibernate_hours: u32,
+
+    /// Hydration, fun and cleanliness (100 = best) and the raw booze, body
+    /// weight (50 = ideal) and fitness levels, in percent.
+    pub water: u8,
+    pub fun: u8,
+    pub clean: u8,
+    pub booze: u8,
+    pub weight_pct: u8,
+    pub fit: u8,
+    /// The pet's worst problem and whether it is in danger, see [`status`].
+    pub status: status::StatusWord,
+    pub danger: bool,
+    /// Minutes slept in the current sleep.
+    pub asleep_min: u16,
+    /// Remaining minutes of the timers behind the menu's disabled rows:
+    /// Heal's cooldown, Ozempic's cooldown, the insulin window, rehab and
+    /// the injury.
+    pub med_cd_min: u16,
+    pub ozempic_cd_min: u16,
+    pub insulin_min: u16,
+    pub rehab_min: u16,
+    pub injured_min: u16,
+    /// A water drink would be accepted (it is refused when not thirsty,
+    /// unlike every other drink).
+    pub can_drink_water: bool,
 }
 
 /// A stored pet name (`buf`, `len` bytes used) as a str. `len` may come from
@@ -1030,27 +1118,106 @@ pub fn fmt_days_hours(ticks: u32) -> heapless::String<12> {
 }
 
 /// A trait value (0..=65535, higher = stronger) as a 0..=100 percentage.
-/// Not the inverted [`to_display_pct`], which maps "bad" stats.
 pub fn trait_pct(v: u16) -> u8 {
     (v as u32 * 100 / 65535) as u8
 }
 
-/// Convert internal stat (0=good, 65535=bad) to display (0=bad, 100=good).
-#[allow(dead_code)] // used again by the v3 `stats()` (task 10)
-fn to_display_pct(val: u16) -> u8 {
-    100 - (val as u32 * 100 / STAT_MAX() as u32) as u8
+/// A level as whole percent (the same lines the band edges use).
+fn level_pct(v: u16) -> u8 {
+    needs::pct(v as i32).min(100) as u8
 }
 
 impl GameState {
     /// Update the game state to `now_tick` and return a display snapshot.
     ///
-    /// This is the primary API for the UI layer.  It triggers a state
-    /// update, then returns the snapshot.  The result is cached internally —
-    /// calling `stats()` again at the same tick skips the update and
-    /// returns the cached snapshot.
+    /// This is the primary API for the UI layer: it triggers a state update
+    /// (free when the tick has not moved), then builds the snapshot. A menu
+    /// row is enabled exactly when its starter would accept the action
+    /// (`doses::refusal`), affordability aside.
     pub fn stats(&mut self, now_tick: u32) -> PetStats {
-        let _ = now_tick;
-        todo!("BornPets v2 plan 1 task 10: PetStats from v3 fields")
+        // Only update if time has advanced since last call.
+        if now_tick != self.last_update_tick {
+            self.update(now_tick);
+        }
+
+        let alive = self.is_alive();
+        let can = |a: Action| alive && self.active_action.is_none() && doses::refusal(self, a, None).is_none();
+        let awake_active = alive && !self.is_sleeping && self.active_action.is_none();
+        let (status, danger) = status::status(self);
+
+        PetStats {
+            hunger: level_pct(self.fullness),
+            tired: level_pct(self.energy),
+            healthy: level_pct(self.health),
+            happy: level_pct(self.mood),
+            weight: level_pct(self.fitness),
+            drunk: 100 - level_pct(self.booze),
+
+            water: level_pct(self.hydration),
+            fun: level_pct(self.fun),
+            clean: 100 - level_pct(self.dirt),
+            booze: level_pct(self.booze),
+            weight_pct: level_pct(self.weight),
+            fit: level_pct(self.fitness),
+            status,
+            danger,
+            asleep_min: self.sleep_min,
+            med_cd_min: self.med_cd_min,
+            ozempic_cd_min: self.ozempic_cd_min,
+            insulin_min: self.insulin_min,
+            rehab_min: self.rehab_min,
+            injured_min: self.injured_min,
+
+            diabetic: self.diabetic,
+            overweight: self.weight as i32 > needs::weight_hi(),
+            alcoholic: self.dependent,
+
+            phase: self.phase,
+            is_sleeping: self.is_sleeping,
+            age_ticks: self.age_ticks,
+            generation: self.generation,
+
+            wins: self.wins,
+            losses: self.losses,
+
+            money: self.money,
+            money_enabled: self.money_enabled,
+            hard_mode: self.hard_mode,
+
+            active_action: self.active_action,
+            action_ticks_remaining: self.action_ticks_remaining,
+
+            can_feed: can(Action::Feed),
+            can_heal: can(Action::Heal),
+            can_play: can(Action::Play),
+            can_only_pets: can(Action::OnlyPets),
+            can_exercise: can(Action::Exercise),
+            can_medicate: can(Action::Medicate),
+            can_ozempic: can(Action::Ozempic),
+            can_drink: can(Action::Drink),
+            can_drink_water: alive
+                && self.active_action.is_none()
+                && doses::refusal(self, Action::Drink, Some(DrinkKind::Water)).is_none(),
+            can_rehab: can(Action::Rehab),
+            can_sleep: alive && !self.is_sleeping,
+            can_wake: self.is_sleeping,
+            can_play_tictactoe: awake_active && self.cooldown_tictactoe == 0,
+            can_play_lightsout: awake_active && self.cooldown_lightsout == 0,
+            can_play_blackhole: awake_active && self.cooldown_blackhole == 0,
+            can_play_nim: awake_active && self.cooldown_nim == 0,
+            can_play_bornjeweled: awake_active && self.cooldown_bornjeweled == 0,
+            can_battle: awake_active && self.cooldown_battle == 0,
+
+            cooldown_tictactoe: self.cooldown_tictactoe,
+            cooldown_lightsout: self.cooldown_lightsout,
+            cooldown_blackhole: self.cooldown_blackhole,
+            cooldown_nim: self.cooldown_nim,
+            cooldown_bornjeweled: self.cooldown_bornjeweled,
+            cooldown_battle: self.cooldown_battle,
+
+            hibernating: self.hibernating,
+            hibernate_hours: self.hibernate_hours(),
+        }
     }
 }
 
@@ -1557,13 +1724,13 @@ mod overweight_diabetes_tests {
         state.money = 0;
         state.money_enabled = true;
 
-        state.award_inspiration(MiniGame::Nim);
+        state.award_inspiration(MiniGame::Nim, GRADE_WIN);
         assert_eq!(state.money, MINIGAME_HAX_REWARD);
 
         state.money = 0;
         state.money_enabled = false;
         state.cooldown_nim = 0;
-        state.award_inspiration(MiniGame::Nim);
+        state.award_inspiration(MiniGame::Nim, GRADE_WIN);
         assert_eq!(state.money, 0, "money off should grant no HAX");
     }
 

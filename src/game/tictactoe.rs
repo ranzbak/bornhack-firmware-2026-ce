@@ -163,7 +163,8 @@ fn place() -> bool {
         // Award inspiration on win or draw.
         let r = RESULT.load(Ordering::Relaxed);
         if r == 1 || r == 3 {
-            super::lifecycle::award_inspiration(super::engine::MiniGame::TicTacToe);
+            let grade = if r == 1 { super::engine::GRADE_WIN } else { super::engine::GRADE_DRAW };
+            super::lifecycle::award_inspiration(super::engine::MiniGame::TicTacToe, grade);
             super::show_toast(super::Toast::MinigameWin);
         }
         close();

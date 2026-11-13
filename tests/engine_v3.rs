@@ -1822,7 +1822,7 @@ mod doses_care {
         assert_eq!(s.fun as i32, pct(50 + 34));
         assert_eq!(s.energy as i32, pct(27));
         let mut s = pet();
-        s.award_inspiration(MiniGame::Nim);
+        s.award_inspiration(MiniGame::Nim, 2);
         assert!(s.fun as i32 > pct(50));
     }
 
@@ -2106,5 +2106,447 @@ mod cooldown_countdown {
         assert_eq!(s.cooldown_nim, 0);
         assert_eq!(s.cooldown_battle, 0);
         assert_eq!(s.cooldown_tictactoe, 0);
+    }
+}
+
+mod status_wake {
+    use bornhack_aegg::game::engine::needs::P;
+    use bornhack_aegg::game::engine::status::{StatusWord, status};
+    use bornhack_aegg::game::engine::thresholds::{HATCHING_TICKS, MAX_SLEEP_TICKS};
+    use bornhack_aegg::game::engine::{
+        Action, DisplayAnim, GameState, MiniGame, PetKind, Phase, doses,
+    };
+
+    fn pct(v: i32) -> u16 {
+        (v * P) as u16
+    }
+
+    fn pet() -> GameState {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        assert_eq!(s.phase, Phase::Active);
+        s.is_sleeping = false;
+        s.tick_rem = 0;
+        s.money_enabled = false;
+        s
+    }
+
+    /// What a wake-up would have to show: any change here is a visible event.
+    fn obs(s: &GameState) -> (StatusWord, bool, DisplayAnim, bool, Phase, Option<Action>) {
+        let (w, d) = status(s);
+        (
+            w,
+            d,
+            s.display_anim(),
+            s.is_sleeping,
+            s.phase,
+            s.active_action,
+        )
+    }
+
+    /// First minute (1..=120) at which `obs` differs, stepping a clone minute by minute.
+    fn first_change_min(s: &GameState) -> Option<u32> {
+        let mut c = s.clone();
+        let o = obs(&c);
+        let t0 = c.last_update_tick;
+        (1..=120u32).find(|m| {
+            c.update(t0 + m * 6);
+            obs(&c) != o
+        })
+    }
+
+    fn cases() -> Vec<(&'static str, GameState)> {
+        let mut v = vec![("fresh", pet())];
+        let mut s = pet();
+        s.fullness = pct(40);
+        v.push(("fullness 40", s));
+        let mut s = pet();
+        s.mood = pct(79);
+        v.push(("mood 79 rising", s));
+        let mut s = pet();
+        s.mood = pct(81);
+        s.fullness = pct(20);
+        v.push(("mood 81 falling, hungry", s));
+        let mut s = pet();
+        s.mood = pct(100);
+        s.dirt = pct(80);
+        s.fullness = pct(36);
+        v.push(("two terms crossing", s));
+        let mut s = pet();
+        s.is_sleeping = true;
+        s.energy = pct(20);
+        s.night = true;
+        v.push(("sleeping tired", s));
+        let mut s = pet();
+        s.health = pct(33);
+        s.dirt = pct(70);
+        v.push(("health near danger", s));
+        let mut s = pet();
+        s.injured_min = 30;
+        s.groggy_min = 10;
+        v.push(("injured then groggy", s));
+        v
+    }
+
+    #[test]
+    fn wake_is_never_later_than_first_status_change() {
+        for (name, s) in cases() {
+            let o = status(&s);
+            let mut c = s.clone();
+            let t0 = c.last_update_tick;
+            let m = (1..=120u32).find(|m| {
+                c.update(t0 + m * 6);
+                status(&c) != o
+            });
+            let wake = s.next_wake_tick();
+            match m {
+                Some(m) => assert!(
+                    wake <= t0 + m * 6,
+                    "{name}: wake {wake} after status change at +{m} min"
+                ),
+                None => assert!(wake <= t0 + 720, "{name}: wake {wake}"),
+            }
+            assert!(wake > t0, "{name}: wake must be in the future");
+        }
+    }
+
+    #[test]
+    fn wake_is_never_later_than_first_display_change() {
+        for (name, s) in cases() {
+            let wake = s.next_wake_tick();
+            let t0 = s.last_update_tick;
+            match first_change_min(&s) {
+                Some(m) => assert!(
+                    wake <= t0 + m * 6,
+                    "{name}: wake {wake} after change at +{m} min"
+                ),
+                None => assert!(wake <= t0 + 720, "{name}: wake {wake}"),
+            }
+        }
+    }
+
+    #[test]
+    fn wake_is_exact_when_the_first_change_is_a_status_flip() {
+        // Not just early: waking early costs battery.
+        let mut s = pet();
+        s.fullness = pct(40);
+        let t0 = s.last_update_tick;
+        let m = first_change_min(&s).expect("fullness 40 turns hungry within 2 h");
+        assert_eq!(s.next_wake_tick(), t0 + m * 6);
+    }
+
+    #[test]
+    fn wake_lands_on_the_first_visible_change() {
+        // Waking early costs battery: the wake is the minute of the change,
+        // including a change caused by two terms crossing inside a segment.
+        for (name, s) in cases() {
+            let t0 = s.last_update_tick;
+            let want = first_change_min(&s).map_or(t0 + 720, |m| t0 + m * 6);
+            assert_eq!(s.next_wake_tick(), want, "{name}");
+        }
+    }
+
+    #[test]
+    fn wake_counts_the_sub_minute_remainder() {
+        let mut s = pet();
+        s.fullness = pct(40);
+        let a = s.next_wake_tick();
+        s.tick_rem = 4;
+        assert_eq!(s.next_wake_tick(), a - 4);
+    }
+
+    #[test]
+    fn wake_is_capped_at_720_ticks() {
+        assert_eq!(MAX_SLEEP_TICKS(), 720);
+        for (name, s) in cases() {
+            assert!(s.next_wake_tick() <= s.last_update_tick + 720, "{name}");
+        }
+        // A sleeper at rest with every need mid-band has nothing to show for 2 h.
+        let mut s = pet();
+        s.is_sleeping = true;
+        s.night = true;
+        s.energy = pct(20);
+        s.fullness = pct(60);
+        s.hydration = pct(60);
+        s.fun = pct(55);
+        s.mood = pct(100);
+        s.dirt = pct(10);
+        assert_eq!(first_change_min(&s), None);
+        assert_eq!(s.next_wake_tick(), s.last_update_tick + 720);
+    }
+
+    #[test]
+    fn wake_of_gone_hibernating_hatching_and_action() {
+        let mut s = pet();
+        s.hibernating = true;
+        assert_eq!(s.next_wake_tick(), u32::MAX);
+        s.hibernating = false;
+        s.phase = Phase::Gone;
+        assert_eq!(s.next_wake_tick(), u32::MAX);
+
+        let egg = GameState::new_egg(7, PetKind(0));
+        assert_eq!(egg.next_wake_tick(), egg.hatching_countdown as u32);
+
+        let mut s = pet();
+        assert!(s.play());
+        assert_eq!(
+            s.next_wake_tick(),
+            s.last_update_tick + s.action_ticks_remaining as u32
+        );
+    }
+
+    #[test]
+    fn status_picks_the_largest_penalty() {
+        assert_eq!(status(&pet()), (StatusWord::Content, false));
+
+        // Hungry (gap 8 * 3/2 = 12) beats Grubby (95 - 58 = 37)? No: dirt is larger.
+        let mut s = pet();
+        s.fullness = pct(30);
+        assert_eq!(status(&s), (StatusWord::Hungry, false));
+        s.dirt = pct(95);
+        assert_eq!(status(&s), (StatusWord::Grubby, true));
+
+        let mut s = pet();
+        s.fullness = pct(10);
+        assert_eq!(status(&s), (StatusWord::Hungry, true));
+
+        let mut s = pet();
+        s.fullness = pct(97);
+        assert_eq!(status(&s).0, StatusWord::Stuffed);
+
+        let mut s = pet();
+        s.hydration = pct(20);
+        assert_eq!(status(&s).0, StatusWord::Thirsty);
+        s.hydration = pct(99);
+        assert_eq!(status(&s).0, StatusWord::Waterlogged);
+
+        let mut s = pet();
+        s.energy = pct(15);
+        assert_eq!(status(&s).0, StatusWord::Tired);
+        s.is_sleeping = true; // the tired term only counts while awake
+        assert_eq!(status(&s).0, StatusWord::Content);
+
+        let mut s = pet();
+        s.fun = pct(5);
+        assert_eq!(status(&s).0, StatusWord::Bored);
+        s.fun = pct(100);
+        assert_eq!(status(&s).0, StatusWord::Wired);
+
+        let mut s = pet();
+        s.booze = pct(50);
+        assert_eq!(status(&s), (StatusWord::Sloppy, false));
+        s.booze = pct(80);
+        assert_eq!(status(&s), (StatusWord::Sloppy, true));
+
+        let mut s = pet();
+        s.weight = pct(95);
+        assert_eq!(status(&s).0, StatusWord::Overweight);
+        s.weight = pct(5);
+        assert_eq!(status(&s).0, StatusWord::Underweight);
+
+        let mut s = pet();
+        s.fitness = pct(5);
+        assert_eq!(status(&s).0, StatusWord::Unfit);
+
+        let mut s = pet();
+        s.hangover_min = 30;
+        assert_eq!(status(&s).0, StatusWord::HungOver);
+        s.groggy_min = 30;
+        assert_eq!(status(&s).0, StatusWord::HungOver); // 15 beats 10
+        s.hangover_min = 0;
+        assert_eq!(status(&s).0, StatusWord::Groggy);
+        s.injured_min = 30;
+        assert_eq!(status(&s).0, StatusWord::Injured); // 20 beats 10
+
+        let mut s = pet();
+        s.health = pct(20);
+        assert_eq!(status(&s), (StatusWord::Poorly, true));
+        s.health = pct(45);
+        assert_eq!(status(&s), (StatusWord::Poorly, false));
+    }
+
+    #[test]
+    fn content_needs_three_points_of_penalty_to_give_way() {
+        let mut s = pet();
+        // gap 2 * 3/2 = exactly 3 points: still content
+        s.fullness = pct(36);
+        assert_eq!(status(&s).0, StatusWord::Content);
+        s.fullness = pct(35);
+        assert_eq!(status(&s).0, StatusWord::Hungry);
+    }
+
+    #[test]
+    fn display_anim_follows_the_status() {
+        let mut s = pet();
+        s.mood = pct(90);
+        assert_eq!(s.display_anim(), DisplayAnim::Happy);
+        s.mood = pct(70);
+        assert_eq!(s.display_anim(), DisplayAnim::Idle);
+
+        let mut s = pet();
+        s.fullness = pct(30);
+        assert_eq!(s.display_anim(), DisplayAnim::WarningHungry);
+        s.fullness = pct(10);
+        assert_eq!(s.display_anim(), DisplayAnim::CriticalHungry);
+        let mut s = pet();
+        s.hydration = pct(20);
+        assert_eq!(s.display_anim(), DisplayAnim::WarningHungry);
+
+        let mut s = pet();
+        s.energy = pct(15);
+        assert_eq!(s.display_anim(), DisplayAnim::WarningTired);
+        s.hangover_min = 30;
+        s.energy = pct(90);
+        assert_eq!(s.display_anim(), DisplayAnim::WarningTired);
+        s.hangover_min = 0;
+        s.groggy_min = 30;
+        assert_eq!(s.display_anim(), DisplayAnim::WarningTired);
+
+        let mut s = pet();
+        s.health = pct(45);
+        assert_eq!(s.display_anim(), DisplayAnim::WarningSick);
+        s.health = pct(20);
+        assert_eq!(s.display_anim(), DisplayAnim::CriticalSick);
+        let mut s = pet();
+        s.injured_min = 30;
+        assert_eq!(s.display_anim(), DisplayAnim::WarningSick);
+
+        for set in [
+            (|s: &mut GameState| s.fun = pct(5)) as fn(&mut GameState),
+            |s| s.fun = pct(100),
+            |s| s.booze = pct(50),
+            |s| s.dirt = pct(70),
+            |s| s.fullness = pct(97),
+            |s| s.hydration = pct(99),
+            |s| s.weight = pct(95),
+            |s| s.weight = pct(5),
+            |s| s.fitness = pct(5),
+        ] {
+            let mut s = pet();
+            set(&mut s);
+            assert_eq!(
+                s.display_anim(),
+                DisplayAnim::WarningMiserable,
+                "{:?}",
+                status(&s)
+            );
+        }
+
+        // Actions and sleep still outrank any status.
+        let mut s = pet();
+        s.fullness = pct(10);
+        s.is_sleeping = true;
+        assert_eq!(s.display_anim(), DisplayAnim::Sleeping);
+    }
+
+    #[test]
+    fn stats_report_percentages_and_flags() {
+        let mut s = pet();
+        s.fullness = pct(50);
+        s.energy = pct(40);
+        s.health = pct(90);
+        s.mood = pct(70);
+        s.fitness = pct(45);
+        s.booze = pct(20);
+        s.hydration = pct(60);
+        s.fun = pct(55);
+        s.dirt = pct(10);
+        s.weight = pct(52);
+        let now = s.last_update_tick;
+        let st = s.stats(now);
+        assert_eq!(
+            (
+                st.hunger, st.tired, st.healthy, st.happy, st.weight, st.drunk
+            ),
+            (50, 40, 90, 70, 45, 80)
+        );
+        assert_eq!(
+            (st.water, st.fun, st.clean, st.booze, st.weight_pct, st.fit),
+            (60, 55, 90, 20, 52, 45)
+        );
+        assert_eq!((st.status, st.danger), (StatusWord::Content, false));
+        assert!(st.can_feed && st.can_play && st.can_sleep && !st.can_wake);
+        assert!(!st.can_heal || st.med_cd_min == 0);
+    }
+
+    #[test]
+    fn stats_can_flags_follow_the_refusal_rule() {
+        let mut s = pet();
+        s.injured_min = 30;
+        s.med_cd_min = 100;
+        s.ozempic_cd_min = 200;
+        s.insulin_min = 300;
+        s.rehab_min = 400;
+        s.dirt = pct(10);
+        let now = s.last_update_tick;
+        let st = s.stats(now);
+        assert!(!st.can_play && !st.can_exercise && !st.can_only_pets);
+        assert!(!st.can_heal && !st.can_ozempic && !st.can_medicate && !st.can_rehab);
+        assert!(st.can_feed);
+        assert_eq!(
+            (
+                st.med_cd_min,
+                st.ozempic_cd_min,
+                st.insulin_min,
+                st.rehab_min,
+                st.injured_min
+            ),
+            (100, 200, 300, 400, 30)
+        );
+
+        // every menu row is enabled iff the starter accepts it
+        let mut s = pet();
+        s.diabetic = true;
+        s.insulin_min = 60;
+        s.dependent = true;
+        s.dirt = pct(50);
+        let now = s.last_update_tick;
+        let st = s.stats(now);
+        assert_eq!(st.can_medicate, s.clone().medicate());
+        assert_eq!(st.can_rehab, s.clone().rehab());
+        assert_eq!(st.can_heal, s.clone().heal());
+        assert_eq!(st.can_ozempic, s.clone().ozempic());
+        assert_eq!(st.can_exercise, s.clone().exercise());
+        assert_eq!(st.can_only_pets, s.clone().only_pets());
+        assert_eq!(
+            st.can_feed,
+            s.clone().feed(bornhack_aegg::game::engine::FoodKind::Apple)
+        );
+        let mut tired = pet();
+        tired.energy = pct(10);
+        let now = tired.last_update_tick;
+        assert!(!tired.stats(now).can_only_pets);
+        assert!(!tired.clone().only_pets());
+    }
+
+    #[test]
+    fn stats_of_a_sleeper_allow_waking_and_care() {
+        let mut s = pet();
+        s.is_sleeping = true;
+        let now = s.last_update_tick;
+        let st = s.stats(now);
+        assert!(st.can_wake && !st.can_sleep && st.is_sleeping);
+        assert_eq!(
+            st.can_feed,
+            s.clone().feed(bornhack_aegg::game::engine::FoodKind::Apple)
+        );
+    }
+
+    #[test]
+    fn minigame_grade_scales_the_fun_dose() {
+        let fun_after = |grade: u8| {
+            let mut s = pet();
+            s.fun = pct(30);
+            s.award_inspiration(MiniGame::Nim, grade);
+            s.fun
+        };
+        assert!(fun_after(1) > fun_after(0));
+        assert!(fun_after(2) > fun_after(1));
+        let mut a = pet();
+        a.fun = pct(30);
+        let mut b = a.clone();
+        a.award_inspiration(MiniGame::Nim, 2);
+        doses::minigame(&mut b, 2);
+        assert_eq!(a.fun, b.fun);
     }
 }
