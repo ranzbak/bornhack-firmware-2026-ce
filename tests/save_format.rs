@@ -2,14 +2,17 @@
 //!
 //! These pin the exact byte layout of everything the firmware writes to flash
 //! (game state, Unicorn Realm, friends list) or sends over the mesh (pet
-//! beacon, battle result). The literals were captured from the encoders at
-//! main 978eabf; they must never change, or saves written by an older
-//! firmware stop loading.
+//! beacon, battle result). The literals were captured from the encoders; they
+//! must never change, or saves written by an older firmware stop loading.
+//! `GAME_GOLDEN` is the format-2 save (97 bytes, kv key `state`); the v3
+//! save (177 bytes, key `state_v3`) is pinned by `V3_GOLDEN`.
 
 use bornhack_aegg::game::battle::{BattleResultMsg, KIND_UNKNOWN};
+use bornhack_aegg::game::engine::advance::SLOW_SCALE;
+use bornhack_aegg::game::engine::thresholds;
 use bornhack_aegg::game::engine::{
-    Action, GameState, PET_RECORD_SIZE, PetKind, PetRealm, PetRecord, Phase, REALM_MAX_PETS,
-    REALM_SAVE_SIZE, SAVE_FORMAT_VERSION, SAVE_SIZE,
+    Action, DrinkKind, FoodKind, GameState, PET_RECORD_SIZE, PetKind, PetRealm, PetRecord, Phase,
+    REALM_MAX_PETS, REALM_SAVE_SIZE, SAVE_FORMAT_VERSION, SAVE_SIZE, SAVE_SIZE_V2, pick_save,
 };
 use bornhack_aegg::game::friends::{
     FRIENDS_MAX, FRIENDS_SAVE_SIZE, FriendRecord, FriendsList, PetBeacon,
@@ -19,119 +22,333 @@ use bornhack_aegg::game::friends::{
 // GameState
 // ---------------------------------------------------------------------------
 
+/// Format-2 save, read only by the upgrade path.
 const GAME_GOLDEN: [u8; 97] = [
-    0x02, 0x70, 0x11, 0x73, 0x12, 0x76, 0x13, 0x79, 0x14, 0x7C, 0x15, 0x7F,
-    0x16, 0x82, 0x17, 0x85, 0x18, 0x88, 0x19, 0x8C, 0x6A, 0x49, 0x2A, 0x8D,
-    0x6B, 0x4A, 0x2B, 0x01, 0x94, 0x1D, 0x90, 0x6E, 0x4D, 0x2E, 0x9A, 0x1F,
-    0x07, 0x41, 0xA3, 0x22, 0xA6, 0x23, 0xA9, 0x24, 0xAC, 0x25, 0xAF, 0x26,
-    0xB2, 0x27, 0xB5, 0x28, 0xB8, 0x29, 0xBB, 0x2A, 0x9D, 0x7B, 0x5A, 0x3B,
-    0x9E, 0x7C, 0x5B, 0x3C, 0x9F, 0x7D, 0x5C, 0x3D, 0xA0, 0x7E, 0x5D, 0x3E,
-    0x01, 0x00, 0x01, 0x00, 0xA5, 0x83, 0x62, 0x43, 0xA6, 0x84, 0x63, 0x44,
-    0x05, 0xDF, 0x36, 0xE2, 0x37, 0xE5, 0x38, 0xAB, 0x89, 0x68, 0x49, 0x01,
+    0x02, 0x70, 0x11, 0x73, 0x12, 0x76, 0x13, 0x79, 0x14, 0x7C, 0x15, 0x7F, 0x16, 0x82, 0x17, 0x85,
+    0x18, 0x88, 0x19, 0x8C, 0x6A, 0x49, 0x2A, 0x8D, 0x6B, 0x4A, 0x2B, 0x01, 0x94, 0x1D, 0x90, 0x6E,
+    0x4D, 0x2E, 0x9A, 0x1F, 0x07, 0x41, 0xA3, 0x22, 0xA6, 0x23, 0xA9, 0x24, 0xAC, 0x25, 0xAF, 0x26,
+    0xB2, 0x27, 0xB5, 0x28, 0xB8, 0x29, 0xBB, 0x2A, 0x9D, 0x7B, 0x5A, 0x3B, 0x9E, 0x7C, 0x5B, 0x3C,
+    0x9F, 0x7D, 0x5C, 0x3D, 0xA0, 0x7E, 0x5D, 0x3E, 0x01, 0x00, 0x01, 0x00, 0xA5, 0x83, 0x62, 0x43,
+    0xA6, 0x84, 0x63, 0x44, 0x05, 0xDF, 0x36, 0xE2, 0x37, 0xE5, 0x38, 0xAB, 0x89, 0x68, 0x49, 0x01,
     0x01,
 ];
 
-// Offsets into the save used by the normalisation test below.
+/// Format-3 save of `v3_state()`, captured from the encoder once the
+/// offsets in `v3_golden_bytes_round_trip` were checked by hand.
+const V3_GOLDEN: [u8; 177] = [
+    0x03, 0x92, 0xC7, 0x8C, 0xED, 0x89, 0xEC, 0x86, 0xEB, 0xAC, 0x8A, 0x7F, 0x16, 0x82, 0x17, 0x85,
+    0x18, 0x88, 0x19, 0x8C, 0x6A, 0x49, 0x2A, 0x8D, 0x6B, 0x4A, 0x2B, 0x01, 0x94, 0x1D, 0x15, 0x14,
+    0x13, 0x12, 0x9A, 0x1F, 0x0A, 0x09, 0x00, 0x00, 0x01, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x02, 0x42, 0x03, 0x43, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x0D, 0x0C, 0x0B, 0x0A, 0x11, 0x10, 0x0F, 0x0E, 0x01, 0x00, 0x01, 0x01, 0xA5, 0x83, 0x62, 0x43,
+    0xA6, 0x84, 0x63, 0x44, 0x05, 0xDF, 0x36, 0xE2, 0x37, 0xE5, 0x38, 0xAB, 0x89, 0x68, 0x49, 0x01,
+    0x01, 0x01, 0x21, 0x02, 0x22, 0x03, 0x23, 0x04, 0x24, 0x05, 0x25, 0x01, 0x30, 0x02, 0x31, 0x03,
+    0x32, 0x04, 0x33, 0x05, 0x34, 0x06, 0x35, 0x07, 0x36, 0x08, 0x37, 0x09, 0x38, 0x0A, 0x39, 0x0B,
+    0x3A, 0x0C, 0x3B, 0x0D, 0x03, 0x04, 0x05, 0x04, 0x03, 0x02, 0x01, 0x08, 0x07, 0x06, 0x05, 0x03,
+    0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00,
+];
+
+// Offsets into the 97-byte head shared by formats 2 and 3.
 const PHASE_OFS: usize = 1 + 18 + 8;
 const ACTION_OFS: usize = PHASE_OFS + 1 + 2 + 4 + 2;
+const OVERWEIGHT_TICKS_OFS: usize = 64;
+const DRUNK_TICKS_OFS: usize = 68;
+const FLAGS_OFS: usize = 72;
+// Offsets of the format-3 extension.
+const V3_FLAGS_OFS: usize = 131;
+const V3_FOOD_OFS: usize = 143;
+const V3_DRINK_OFS: usize = 144;
 
-#[test]
-#[ignore = "v1 rules; replaced by BornPets v3 plan 1 task 11"]
-fn game_state_golden_bytes_round_trip() {
-    assert_eq!(SAVE_SIZE, 97);
-    assert_eq!(SAVE_FORMAT_VERSION, 2);
-    let s = GameState::from_bytes(&GAME_GOLDEN).expect("golden save must decode");
+fn v2_decoded() -> GameState {
+    GameState::from_bytes_v2(&GAME_GOLDEN).expect("golden v2 save must upgrade")
+}
 
-    assert_eq!(s.fullness, 0x1170);
-    assert_eq!(s.energy, 0x1273);
-    assert_eq!(s.health, 0x1376);
-    assert_eq!(s.mood, 0x1479);
-    assert_eq!(s.weight, 0x157C);
-    assert_eq!(s.booze, 0x167F);
-    assert_eq!(s.vitality, 0x1782);
-    assert_eq!(s.curiosity, 0x1885);
-    assert_eq!(s.resilience, 0x1988);
-    assert_eq!(s.last_update_tick, 0x2A49_6A8C);
-    assert_eq!(s.age_ticks, 0x2B4A_6B8D);
-    assert_eq!(s.phase, Phase::Active);
-    assert_eq!(s.hatching_countdown, 0x1D94);
-    assert_eq!(s.leaving_min, 0x2E4D_6E90);
-    assert_eq!(s.generation, 0x1F9A);
-    assert_eq!(s.active_action, Some(Action::Drink));
-    assert_eq!(s.action_ticks_remaining, 0x41);
-    // v1 field removed in v3: cooldown_feed
-    // v1 field removed in v3: cooldown_heal
-    // v1 field removed in v3: cooldown_relax
-    // v1 field removed in v3: cooldown_play
-    // v1 field removed in v3: cooldown_exercise
-    // v1 field removed in v3: cooldown_medicate
-    // v1 field removed in v3: cooldown_ozempic
-    // v1 field removed in v3: cooldown_drink
-    // v1 field removed in v3: cooldown_rehab
-    assert!(s.is_sleeping);
-    assert!(!s.hibernating);
-    assert!(s.diabetic);
-    assert!(!s.dependent);
-    assert_eq!(s.hibernate_ticks, 0x4362_83A5);
-    assert_eq!(s.pet_kind, PetKind::from_u8(5));
-    assert_eq!(s.wins, 0x36DF);
-    assert_eq!(s.losses, 0x37E2);
-    assert_eq!(s.cooldown_battle, 0x38E5);
-    assert_eq!(s.money, 0x4968_89AB);
-    assert!(s.money_enabled);
-    assert!(s.hard_mode);
-
-    // Re-encoding reproduces every byte, including the private counters
-    // (miserable_interval/tired_passive/overweight/drunk ticks, last_save_tick).
-    assert_eq!(s.to_bytes(), GAME_GOLDEN);
+/// A state with a distinct value in every persisted field, built from
+/// the upgraded golden save so private counters are covered too.
+fn v3_state() -> GameState {
+    let mut s = v2_decoded();
+    s.hydration = 0x2101;
+    s.fun = 0x2202;
+    s.strain = 0x2303;
+    s.dirt = 0x2404;
+    s.fitness = 0x2505;
+    s.sleep_min = 0x3001;
+    s.oversleep_min = 0x3102;
+    s.good_sleep_min = 0x3203;
+    s.rested_min = 0x3304;
+    s.injured_min = 0x3405;
+    s.groggy_min = 0x3506;
+    s.hangover_min = 0x3607;
+    s.rehab_min = 0x3708;
+    s.recovering_min = 0x3809;
+    s.junk_min = 0x390A;
+    s.ozempic_min = 0x3A0B;
+    s.reversal_min = 0x3B0C;
+    s.med_cd_min = 0x4101;
+    s.insulin_min = 0x4202;
+    s.ozempic_cd_min = 0x4303;
+    s.booze_peak = true;
+    s.deprived = false;
+    s.night = true;
+    s.no_groggy = true;
+    s.short_nights = 3;
+    s.good_nights = 4;
+    s.tick_rem = 5;
+    s.care_good_min = 0x0102_0304;
+    s.care_awake_min = 0x0506_0708;
+    s.diabetes_min = 0x0A0B_0C0D;
+    s.dependence_min = 0x0E0F_1011;
+    s.leaving_min = 0x1213_1415;
+    s.dependent = true;
+    s.active_action = Some(Action::Wash);
+    s.action_ticks_remaining = 9;
+    s.active_food = Some(FoodKind::Pizza);
+    s.active_drink = Some(DrinkKind::Whiskey);
+    s
 }
 
 #[test]
-#[ignore = "v1 rules; replaced by BornPets v3 plan 1 task 11"]
+fn v3_golden_bytes_round_trip() {
+    assert_eq!(SAVE_SIZE, 177);
+    assert_eq!(SAVE_FORMAT_VERSION, 3);
+    let s = v3_state();
+    let bytes = s.to_bytes();
+    assert_eq!(bytes.len(), 177);
+    assert_eq!(bytes[0], 3);
+
+    // The head keeps the v2 offsets; spot-check the renamed slots.
+    assert_eq!(&bytes[1..3], &s.fullness.to_le_bytes());
+    assert_eq!(&bytes[3..5], &s.energy.to_le_bytes());
+    assert_eq!(&bytes[5..7], &s.health.to_le_bytes());
+    assert_eq!(&bytes[7..9], &s.mood.to_le_bytes());
+    assert_eq!(&bytes[9..11], &s.weight.to_le_bytes());
+    assert_eq!(&bytes[11..13], &s.booze.to_le_bytes());
+    assert_eq!(&bytes[30..34], &s.leaving_min.to_le_bytes());
+    assert_eq!(bytes[ACTION_OFS], 10); // Wash
+    assert_eq!(bytes[ACTION_OFS + 1], 9);
+    assert_eq!(&bytes[40..42], &s.med_cd_min.to_le_bytes()); // old cooldown_heal
+    assert_eq!(&bytes[48..50], &s.insulin_min.to_le_bytes()); // old cooldown_medicate
+    assert_eq!(&bytes[50..52], &s.ozempic_cd_min.to_le_bytes()); // old cooldown_ozempic
+    for ofs in [38usize, 42, 44, 46, 52, 54] {
+        assert_eq!(&bytes[ofs..ofs + 2], &[0, 0], "removed cooldown slot {ofs}");
+    }
+    assert_eq!(&bytes[56..64], &[0u8; 8]); // removed interval counters
+    assert_eq!(
+        &bytes[OVERWEIGHT_TICKS_OFS..OVERWEIGHT_TICKS_OFS + 4],
+        &s.diabetes_min.to_le_bytes()
+    );
+    assert_eq!(
+        &bytes[DRUNK_TICKS_OFS..DRUNK_TICKS_OFS + 4],
+        &s.dependence_min.to_le_bytes()
+    );
+    assert_eq!(bytes[FLAGS_OFS], 1);
+    assert_eq!(bytes[FLAGS_OFS + 3], 1); // dependent
+
+    // The extension.
+    assert_eq!(&bytes[97..99], &0x2101u16.to_le_bytes()); // hydration
+    assert_eq!(&bytes[107..109], &0x3001u16.to_le_bytes()); // sleep_min
+    assert_eq!(&bytes[129..131], &0x3B0Cu16.to_le_bytes()); // reversal_min
+    assert_eq!(bytes[V3_FLAGS_OFS], 0b1101); // booze_peak, night, no_groggy
+    assert_eq!(&bytes[132..135], &[3, 4, 5]);
+    assert_eq!(&bytes[135..139], &0x0102_0304u32.to_le_bytes());
+    assert_eq!(&bytes[139..143], &0x0506_0708u32.to_le_bytes());
+    assert_eq!(bytes[V3_FOOD_OFS], 3); // Pizza
+    assert_eq!(bytes[V3_DRINK_OFS], 4); // Whiskey
+    assert_eq!(&bytes[145..177], &[0u8; 32]);
+
+    // Every field comes back, including the private counters.
+    let back = GameState::from_bytes(&bytes).expect("v3 save must decode");
+    assert_eq!(back, s);
+    assert_eq!(back.to_bytes(), bytes);
+
+    // The captured literal pins the layout forever.
+    assert_eq!(bytes, V3_GOLDEN);
+}
+
+#[test]
+fn v3_keeps_running_action_food_and_drink() {
+    let mut s = v3_state();
+    for (a, f, d) in [
+        (Some(Action::Feed), Some(FoodKind::Salad), None),
+        (Some(Action::Drink), None, Some(DrinkKind::Water)),
+        (None, None, None),
+    ] {
+        s.active_action = a;
+        s.active_food = f;
+        s.active_drink = d;
+        let back = GameState::from_bytes(&s.to_bytes()).unwrap();
+        assert_eq!(back.active_action, a);
+        assert_eq!(back.active_food, f);
+        assert_eq!(back.active_drink, d);
+        assert_eq!(back.action_ticks_remaining, 9);
+    }
+}
+
+#[test]
+fn action_bytes_round_trip_and_2_is_unused() {
+    let all = [
+        (Action::Feed, 0u8),
+        (Action::Heal, 1),
+        (Action::Play, 3),
+        (Action::Exercise, 4),
+        (Action::Medicate, 5),
+        (Action::Ozempic, 6),
+        (Action::Drink, 7),
+        (Action::Rehab, 8),
+        (Action::OnlyPets, 9),
+        (Action::Wash, 10),
+        (Action::Relax, 11),
+    ];
+    for (a, byte) in all {
+        assert_eq!(a.to_u8(), byte, "{a:?}");
+        assert_eq!(Action::from_u8(byte), Some(a));
+    }
+    assert_eq!(Action::from_u8(2), None);
+    assert_eq!(Action::from_u8(12), None);
+    assert_eq!(Action::from_u8(0xFF), None);
+}
+
+#[test]
+fn v2_golden_upgrades_to_expected_v3_levels() {
+    let s = v2_decoded();
+    let max = 65535u32;
+    assert_eq!(s.phase, Phase::Active);
+    assert_eq!(s.health as u32, max - 0x1376);
+    assert_eq!(s.energy as u32, max - 0x1273);
+    assert_eq!(s.mood as u32, max - 0x1479);
+    assert_eq!(s.booze, 0x167F);
+    // fullness = clamp(MAX - 0x1170, 25 %, 78 %)
+    assert!(
+        s.fullness >= 25 * 655 && s.fullness <= 78 * 655,
+        "{}",
+        s.fullness
+    );
+    assert_eq!(s.fullness, 78 * 655);
+    assert_eq!(s.weight, 50 * 655 + 0x157C / 2);
+    assert!(s.weight >= 50 * 655);
+    assert_eq!(s.fitness, 60 * 655);
+    assert_eq!(s.hydration, 60 * 655);
+    assert_eq!(s.fun, 50 * 655);
+    assert_eq!(s.dirt, 20 * 655);
+    assert_eq!(s.strain, 0);
+    // Copied over.
+    assert_eq!(s.money, 0x4968_89AB);
+    assert_eq!(s.generation, 0x1F9A);
+    assert_eq!(s.wins, 0x36DF);
+    assert_eq!(s.losses, 0x37E2);
+    assert!(s.diabetic);
+    assert!(!s.dependent);
+    assert_eq!(s.pet_kind, PetKind::from_u8(5));
+    assert_eq!(s.age_ticks, 0x2B4A_6B8D);
+    assert_eq!(s.vitality, 0x1782);
+    assert_eq!(s.hibernate_ticks, 0x4362_83A5);
+    assert!(s.money_enabled);
+    assert!(s.hard_mode);
+    // cooldown_medicate (0x27B2 ticks = 1693 min) is capped at 480 min.
+    assert_eq!(s.insulin_min, 480);
+    let mut b = GAME_GOLDEN;
+    b[48..50].copy_from_slice(&60u16.to_le_bytes());
+    assert_eq!(GameState::from_bytes_v2(&b).unwrap().insulin_min, 10);
+    // A running action is dropped; sleep is kept and marked night.
+    assert_eq!(s.active_action, None);
+    assert_eq!(s.action_ticks_remaining, 0);
+    assert!(s.is_sleeping);
+    assert!(s.night);
+}
+
+#[test]
+fn v2_upgrade_scales_slow_counters() {
+    let onset_dep = thresholds::DEPENDENCE_ONSET_MIN() as u32 * SLOW_SCALE - 1;
+    let onset_dia = thresholds::DIABETES_ONSET_MIN() as u32 * SLOW_SCALE - 1;
+
+    // Huge counters cap one quarter-minute under onset and do not flip a flag.
+    let mut b = GAME_GOLDEN;
+    b[DRUNK_TICKS_OFS..DRUNK_TICKS_OFS + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    b[OVERWEIGHT_TICKS_OFS..OVERWEIGHT_TICKS_OFS + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    let s = GameState::from_bytes_v2(&b).unwrap();
+    assert_eq!(s.dependence_min, onset_dep);
+    assert_eq!(s.diabetes_min, onset_dia);
+    assert!(!s.dependent);
+
+    // Small counters: ticks / 6 minutes, 4 quarter-minutes each.
+    let mut b = GAME_GOLDEN;
+    b[DRUNK_TICKS_OFS..DRUNK_TICKS_OFS + 4].copy_from_slice(&600u32.to_le_bytes());
+    b[OVERWEIGHT_TICKS_OFS..OVERWEIGHT_TICKS_OFS + 4].copy_from_slice(&66u32.to_le_bytes());
+    let s = GameState::from_bytes_v2(&b).unwrap();
+    assert_eq!(s.dependence_min, 100 * 4);
+    assert_eq!(s.diabetes_min, 11 * 4);
+}
+
+#[test]
+fn v2_upgrade_maps_alcoholic_to_dependent() {
+    let mut b = GAME_GOLDEN;
+    b[FLAGS_OFS + 3] = 1;
+    assert!(GameState::from_bytes_v2(&b).unwrap().dependent);
+}
+
+#[test]
+fn v3_rejects_v2_length_and_v2_decoder_rejects_v3() {
+    assert!(GameState::from_bytes(&GAME_GOLDEN).is_none());
+    let v3 = v3_state().to_bytes();
+    let mut as_v2 = [0u8; SAVE_SIZE_V2];
+    as_v2.copy_from_slice(&v3[..SAVE_SIZE_V2]);
+    assert!(GameState::from_bytes_v2(&as_v2).is_none()); // version byte 3
+    let mut v2_with_v3_version = GAME_GOLDEN;
+    v2_with_v3_version[0] = 3;
+    assert!(GameState::from_bytes_v2(&v2_with_v3_version).is_none());
+}
+
+#[test]
 fn game_state_rejects_wrong_version_and_length() {
-    let mut bad = GAME_GOLDEN;
+    let good = v3_state().to_bytes();
+    let mut bad = good;
     bad[0] = SAVE_FORMAT_VERSION + 1;
     assert!(GameState::from_bytes(&bad).is_none());
-    bad[0] = 1;
+    bad[0] = 2;
     assert!(GameState::from_bytes(&bad).is_none());
     bad[0] = 0;
     assert!(GameState::from_bytes(&bad).is_none());
 
     assert!(GameState::from_bytes(&[]).is_none());
-    assert!(GameState::from_bytes(&GAME_GOLDEN[..SAVE_SIZE - 1]).is_none());
-    let mut long = GAME_GOLDEN.to_vec();
+    assert!(GameState::from_bytes(&good[..SAVE_SIZE - 1]).is_none());
+    let mut long = good.to_vec();
     long.push(0);
     assert!(GameState::from_bytes(&long).is_none());
 }
 
 #[test]
-#[ignore = "v1 rules; replaced by BornPets v3 plan 1 task 11"]
 fn game_state_decode_normalises_out_of_range_bytes() {
-    assert_eq!(GAME_GOLDEN[PHASE_OFS], 1);
-    assert_eq!(GAME_GOLDEN[ACTION_OFS], 7);
-    let flags_ofs = ACTION_OFS + 2 + 18 + 16;
-
-    let mut b = GAME_GOLDEN;
+    let good = v3_state().to_bytes();
+    let mut b = good;
     b[PHASE_OFS] = 0x77; // unknown phase -> Gone
-    b[ACTION_OFS] = 2; // formerly Relax -> no action
-    b[flags_ofs] = 0x7F; // is_sleeping: any non-zero is true
-    b[flags_ofs + 1] = 0x02; // hibernating
+    b[ACTION_OFS] = 2; // unused byte -> no action
+    b[FLAGS_OFS] = 0x7F; // is_sleeping: any non-zero is true
+    b[FLAGS_OFS + 1] = 0x02; // hibernating
+    b[V3_FOOD_OFS] = 0x55; // unknown food -> None
+    b[V3_DRINK_OFS] = 0x55;
     let s = GameState::from_bytes(&b).unwrap();
     assert_eq!(s.phase, Phase::Gone);
     assert_eq!(s.active_action, None);
     assert!(s.is_sleeping);
     assert!(s.hibernating);
+    assert_eq!(s.active_food, None);
+    assert_eq!(s.active_drink, None);
 
     // None is written back as 0xFF.
-    let mut b = GAME_GOLDEN;
-    b[ACTION_OFS] = 0xFF;
-    let s = GameState::from_bytes(&b).unwrap();
-    assert_eq!(s.active_action, None);
-    assert_eq!(s.to_bytes()[ACTION_OFS], 0xFF);
+    let mut s = v3_state();
+    s.active_action = None;
+    s.active_food = None;
+    s.active_drink = None;
+    let out = s.to_bytes();
+    assert_eq!(out[ACTION_OFS], 0xFF);
+    assert_eq!(out[V3_FOOD_OFS], 0xFF);
+    assert_eq!(out[V3_DRINK_OFS], 0xFF);
 
     // Phases 0 and 2 decode to Hatching / Leaving and re-encode identically.
     for (byte, phase) in [(0u8, Phase::Hatching), (2, Phase::Leaving)] {
-        let mut b = GAME_GOLDEN;
+        let mut b = good;
         b[PHASE_OFS] = byte;
         let s = GameState::from_bytes(&b).unwrap();
         assert_eq!(s.phase, phase);
@@ -139,8 +356,43 @@ fn game_state_decode_normalises_out_of_range_bytes() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Shared helpers
+#[test]
+fn pick_save_prefers_v3() {
+    let v3 = v3_state().to_bytes();
+    let (s, upgraded) = pick_save(Some(&v3), Some(&GAME_GOLDEN)).expect("v3 present");
+    assert!(!upgraded);
+    assert_eq!(s, v3_state());
+}
+
+#[test]
+fn pick_save_upgrades_v2_when_no_v3() {
+    let (s, upgraded) = pick_save(None, Some(&GAME_GOLDEN)).expect("v2 present");
+    assert!(upgraded);
+    assert_eq!(s.phase, Phase::Active);
+    assert_eq!(s.money, 0x4968_89AB);
+    assert!(s.needs_save(), "an upgraded state is written at once");
+}
+
+#[test]
+fn pick_save_falls_through_corrupt_v3() {
+    let mut bad = v3_state().to_bytes();
+    bad[0] = 9;
+    let (_, upgraded) = pick_save(Some(&bad), Some(&GAME_GOLDEN)).expect("falls to v2");
+    assert!(upgraded);
+}
+
+#[test]
+fn pick_save_none_when_both_bad() {
+    assert!(pick_save(None, None).is_none());
+    let short = [3u8; 10];
+    assert!(pick_save(Some(&short), Some(&short)).is_none());
+    let mut v3 = v3_state().to_bytes();
+    v3[0] = 2;
+    let mut v2 = GAME_GOLDEN;
+    v2[0] = 3;
+    assert!(pick_save(Some(&v3), Some(&v2)).is_none());
+}
+
 // ---------------------------------------------------------------------------
 
 fn padded<const N: usize>(prefix: &[u8]) -> [u8; N] {
@@ -161,13 +413,11 @@ fn name12(s: &str) -> [u8; 12] {
 
 // Three records; the remaining seven slots are all-zero.
 const REALM_PREFIX: [u8; 79] = [
-    0x03, 0x02, 0x01, 0x0D, 0x0C, 0x0B, 0x0A, 0x12, 0x11, 0x22, 0x21, 0x32, 0x31,
-    0x07, 0x5A, 0x6F, 0x72, 0x70, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x04, 0x04, 0x03, 0x1D, 0x1C, 0x1B, 0x1A, 0x42, 0x41, 0x52, 0x51, 0x62, 0x61,
-    0x09, 0x42, 0x6F, 0x62, 0x20, 0x74, 0x68, 0x65, 0x20, 0x50, 0x65, 0x74, 0x00,
-    0x0B, 0x06, 0x05, 0x2D, 0x2C, 0x2B, 0x2A, 0x72, 0x71, 0x82, 0x81, 0x92, 0x91,
-    0x03, 0x51, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x01,
+    0x03, 0x02, 0x01, 0x0D, 0x0C, 0x0B, 0x0A, 0x12, 0x11, 0x22, 0x21, 0x32, 0x31, 0x07, 0x5A, 0x6F,
+    0x72, 0x70, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x04, 0x03, 0x1D, 0x1C, 0x1B,
+    0x1A, 0x42, 0x41, 0x52, 0x51, 0x62, 0x61, 0x09, 0x42, 0x6F, 0x62, 0x20, 0x74, 0x68, 0x65, 0x20,
+    0x50, 0x65, 0x74, 0x00, 0x0B, 0x06, 0x05, 0x2D, 0x2C, 0x2B, 0x2A, 0x72, 0x71, 0x82, 0x81, 0x92,
+    0x91, 0x03, 0x51, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 ];
 
 fn pet_record(
@@ -192,7 +442,13 @@ fn pet_record(
 fn realm_value() -> PetRealm {
     let mut r = PetRealm::new();
     r.pets[0] = pet_record(0x0102, 0x0A0B_0C0D, (0x1112, 0x2122, 0x3132), 7, "Zorp");
-    r.pets[1] = pet_record(0x0304, 0x1A1B_1C1D, (0x4142, 0x5152, 0x6162), 9, "Bob the Pet");
+    r.pets[1] = pet_record(
+        0x0304,
+        0x1A1B_1C1D,
+        (0x4142, 0x5152, 0x6162),
+        9,
+        "Bob the Pet",
+    );
     r.pets[2] = pet_record(0x0506, 0x2A2B_2C2D, (0x7172, 0x8182, 0x9192), 3, "Q");
     r.count = 3;
     r
@@ -246,13 +502,11 @@ fn realm_short_and_oversized_input() {
 
 // Two records; the remaining eighteen slots are all-zero.
 const FRIENDS_PREFIX: [u8; 73] = [
-    0x02, 0xA1, 0xB2, 0x04, 0x52, 0x65, 0x78, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x03, 0x04, 0x03, 0x02, 0x01, 0x08, 0x07, 0x06,
-    0x05, 0x0C, 0x0B, 0x0A, 0x09, 0x29, 0x20, 0x17, 0x72, 0x02, 0x01, 0x04,
-    0x03, 0xC3, 0xD4, 0x08, 0x46, 0x6C, 0x75, 0x66, 0x66, 0x79, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x06, 0x14, 0x13, 0x12, 0x11, 0x18, 0x17, 0x16,
-    0x15, 0x1C, 0x1B, 0x1A, 0x19, 0x37, 0x42, 0x4D, 0x58, 0x12, 0x11, 0x14,
-    0x13,
+    0x02, 0xA1, 0xB2, 0x04, 0x52, 0x65, 0x78, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x03, 0x04, 0x03, 0x02, 0x01, 0x08, 0x07, 0x06, 0x05, 0x0C, 0x0B, 0x0A, 0x09, 0x29, 0x20, 0x17,
+    0x72, 0x02, 0x01, 0x04, 0x03, 0xC3, 0xD4, 0x08, 0x46, 0x6C, 0x75, 0x66, 0x66, 0x79, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x06, 0x14, 0x13, 0x12, 0x11, 0x18, 0x17, 0x16, 0x15, 0x1C, 0x1B, 0x1A,
+    0x19, 0x37, 0x42, 0x4D, 0x58, 0x12, 0x11, 0x14, 0x13,
 ];
 
 fn friend(
@@ -345,8 +599,8 @@ fn friends_short_and_oversized_input() {
 }
 
 const BEACON_GOLDEN: [u8; 22] = [
-    0xE5, 0xF6, 0x06, 0x0B, 0x0A, 0x50, 0x69, 0x78, 0x65, 0x6C, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x31, 0x42, 0x53, 0x64,
+    0xE5, 0xF6, 0x06, 0x0B, 0x0A, 0x50, 0x69, 0x78, 0x65, 0x6C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x05, 0x31, 0x42, 0x53, 0x64,
 ];
 
 #[test]
@@ -370,7 +624,10 @@ fn pet_beacon_golden_bytes_round_trip() {
     assert_eq!(b.generation, 0x0A0B);
     assert_eq!(b.name, name12("Pixel"));
     assert_eq!(b.name_len, 5);
-    assert_eq!((b.attack, b.defense, b.speed, b.max_hp), (0x31, 0x42, 0x53, 0x64));
+    assert_eq!(
+        (b.attack, b.defense, b.speed, b.max_hp),
+        (0x31, 0x42, 0x53, 0x64)
+    );
     assert_eq!(b.to_bytes(), BEACON_GOLDEN);
 
     // Too short -> rejected; longer is tolerated (trailing bytes ignored).
@@ -378,7 +635,10 @@ fn pet_beacon_golden_bytes_round_trip() {
     assert!(PetBeacon::from_bytes(&[]).is_none());
     let mut long = BEACON_GOLDEN.to_vec();
     long.extend_from_slice(&[0xEE, 0xEE]);
-    assert_eq!(PetBeacon::from_bytes(&long).unwrap().to_bytes(), BEACON_GOLDEN);
+    assert_eq!(
+        PetBeacon::from_bytes(&long).unwrap().to_bytes(),
+        BEACON_GOLDEN
+    );
 }
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
 use super::engine::{DisplayAnim, GameState, PET_NAME_MAX, PetRealm, PetRecord, PetStats};
 #[cfg(feature = "embassy-core")]
-use super::engine::{REALM_SAVE_SIZE, SAVE_SIZE};
+use super::engine::{REALM_SAVE_SIZE, SAVE_KEY, SAVE_KEY_V2, SAVE_SIZE, SAVE_SIZE_V2, pick_save};
 
 // ---------------------------------------------------------------------------
 // Static game state
@@ -109,26 +109,36 @@ pub async fn init() {
     super::friends::init().await;
 }
 
+/// Read the saved game. The v3 save lives under `state_v3`; the old key
+/// `state` is read only for the format-2 upgrade and never written or
+/// deleted, so the previous firmware can still find its pet. `pick_save`
+/// chooses between them (and flags an upgrade for an immediate save).
 #[cfg(feature = "embassy-core")]
 async fn try_load() -> Option<GameState> {
     use crate::fw::kv;
     let ns = kv::namespace("game");
-    let mut buf = [0u8; SAVE_SIZE];
-    if let Ok(n) = ns.get("state", &mut buf).await
-        && n == SAVE_SIZE
-    {
-        if let Some(mut s) = GameState::from_bytes(&buf) {
+    let mut v3_buf = [0u8; SAVE_SIZE];
+    let mut v2_buf = [0u8; SAVE_SIZE_V2];
+    let v3 = ns.get(SAVE_KEY, &mut v3_buf).await.ok().map(|n| &v3_buf[..n]);
+    let v2 = ns.get(SAVE_KEY_V2, &mut v2_buf).await.ok().map(|n| &v2_buf[..n]);
+    match pick_save(v3, v2) {
+        Some((mut s, upgraded)) => {
             s.last_update_tick = 0;
             defmt::info!(
-                "game: restored from flash (gen={} age={})",
+                "game: restored from flash (gen={} age={} upgraded={})",
                 s.generation,
-                s.age_ticks
+                s.age_ticks,
+                upgraded
             );
-            return Some(s);
+            Some(s)
         }
-        defmt::warn!("game: corrupt save data");
+        None => {
+            if v3.is_some() || v2.is_some() {
+                defmt::warn!("game: corrupt save data");
+            }
+            None
+        }
     }
-    None
 }
 
 #[cfg(feature = "embassy-core")]
@@ -854,7 +864,7 @@ pub async fn save_if_needed() -> bool {
 
     let buf = state.to_bytes();
     let ns = crate::fw::kv::namespace("game");
-    match ns.set("state", &buf, true).await {
+    match ns.set(SAVE_KEY, &buf, true).await {
         Ok(()) => {
             state.mark_saved();
             // Also persist pet name alongside state.

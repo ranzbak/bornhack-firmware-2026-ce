@@ -24,6 +24,7 @@ pub mod status;
 pub mod thresholds;
 pub mod to_display;
 
+use advance::SLOW_SCALE;
 use needs::{MAX, P};
 use thresholds::*;
 pub use drink::DrinkKind;
@@ -162,19 +163,14 @@ pub enum Action {
 }
 
 impl Action {
-    /// Persisted discriminant. Explicit (not a bare `as u8` cast) and
-    /// paired 1:1 with `from_u8` right below so adding a new variant is
-    /// a visible two-place edit — `to_bytes`/`from_bytes` previously
-    /// used an `as u8` cast on the write side but a hand-written match
-    /// on the read side that only covered the first 4 variants,
-    /// silently discarding an in-progress Exercise/Medicate/Ozempic/
-    /// Drink/Rehab action on every reboot that landed mid-action.
+    /// Persisted discriminant (format 3). Explicit rather than a bare
+    /// `as u8` cast, and paired 1:1 with `from_u8`, so a new variant is a
+    /// visible two-place edit.
     ///
-    /// `2` is `Relax` again: the byte it had before it was removed with the
-    /// `drained` stat, so old persisted bytes keep meaning. `Wash` is new
-    /// and takes the next free byte, `10`.
-    #[allow(dead_code)] // used again by the v3 save format (task 11)
-    fn to_u8(self) -> u8 {
+    /// Byte `2` is unused: it was `Relax` before the `drained` stat was
+    /// removed, and a format-2 save never carries a running action into
+    /// format 3 (the upgrade drops it). `Wash` and `Relax` take `10` and `11`.
+    pub fn to_u8(self) -> u8 {
         match self {
             Action::Feed => 0,
             Action::Heal => 1,
@@ -186,16 +182,15 @@ impl Action {
             Action::Rehab => 8,
             Action::OnlyPets => 9,
             Action::Wash => 10,
-            Action::Relax => 2,
+            Action::Relax => 11,
         }
     }
 
-    #[allow(dead_code)] // used again by the v3 save format (task 11)
-    fn from_u8(v: u8) -> Option<Self> {
+    /// Inverse of `to_u8`; byte `2` and anything unknown decode as `None`.
+    pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0 => Some(Action::Feed),
             1 => Some(Action::Heal),
-            2 => Some(Action::Relax),
             3 => Some(Action::Play),
             4 => Some(Action::Exercise),
             5 => Some(Action::Medicate),
@@ -204,6 +199,7 @@ impl Action {
             8 => Some(Action::Rehab),
             9 => Some(Action::OnlyPets),
             10 => Some(Action::Wash),
+            11 => Some(Action::Relax),
             _ => None,
         }
     }
@@ -321,11 +317,10 @@ pub struct GameState {
     // Action state.
     pub active_action: Option<Action>,
     /// Which food is being eaten during an in-progress `Action::Feed`.
-    /// Transient (not persisted) — only meaningful mid-action; if `None`
-    /// when the action ends (a reboot mid-feed) the meal is lost.
+    /// Only meaningful mid-action; saved with the action (format 3).
     pub active_food: Option<FoodKind>,
     /// Which drink is being drunk during an in-progress `Action::Drink`.
-    /// Same transient/not-persisted treatment as `active_food`.
+    /// Saved with the action, like `active_food`.
     pub active_drink: Option<DrinkKind>,
     pub action_ticks_remaining: u8,
     /// Cooldown between mesh Battles — resolves instantly (no in-progress
@@ -1375,30 +1370,481 @@ impl GameState {
 // Serialization — manual, no serde, fixed-size
 // ---------------------------------------------------------------------------
 
-/// Format version stamped into byte 0 of every save. Bump this whenever
-/// the field layout below changes so an old-layout blob from a prior
-/// firmware fails the guard in `from_bytes` (→ clean fresh egg) instead
-/// of being silently reinterpreted with the new offsets. v1 was the
-/// original unversioned 96-byte layout; v2 adds this byte + HAX money.
-pub const SAVE_FORMAT_VERSION: u8 = 2;
+/// Format version stamped into byte 0 of every save. Bump it whenever the
+/// layout below changes so a blob from another firmware fails the guard in
+/// `from_bytes` instead of being reinterpreted with the wrong offsets.
+/// Format 2 was the BornPets v2 layout (97 bytes, kv key `state`); format 3
+/// is the BornPets v3 layout (kv key `state_v3`).
+pub const SAVE_FORMAT_VERSION: u8 = 3;
 
-/// Serialized size of GameState in bytes (1 version byte + 96 fields).
-pub const SAVE_SIZE: usize = 97;
+/// Serialized size of a format-3 GameState in bytes.
+pub const SAVE_SIZE: usize = 177;
+
+/// Size of a format-2 save, read only by the upgrade path.
+pub const SAVE_SIZE_V2: usize = 97;
+
+/// kv key (namespace "game") of the format-3 save.
+pub const SAVE_KEY: &str = "state_v3";
+
+/// kv key of the format-2 save. Read for the upgrade, never written or
+/// deleted, so the previous firmware still finds its pet.
+pub const SAVE_KEY_V2: &str = "state";
+
+/// Version byte of a format-2 save.
+const SAVE_FORMAT_VERSION_V2: u8 = 2;
+
+/// Size of the head format 3 shares with format 2.
+const HEAD_SIZE: usize = SAVE_SIZE_V2;
+
+/// Byte value for "none" in the optional-enum slots.
+const NONE_BYTE: u8 = 0xFF;
+
+// How a format-2 save is read. These describe the old save, not game
+// balance, so they are not `Thresholds` fields.
+/// Weight of an upgraded pet: this much plus half the old weight (percent).
+const MIGRATE_WEIGHT_BASE_PCT: i32 = 50;
+/// Lower and upper clamp of an upgraded fullness (percent).
+const MIGRATE_FULLNESS_MIN_PCT: i32 = 25;
+const MIGRATE_FULLNESS_MAX_PCT: i32 = 78;
+/// Levels a format-2 save never had, given to an upgraded pet (percent).
+const MIGRATE_FITNESS_PCT: i32 = 60;
+const MIGRATE_HYDRATION_PCT: i32 = 60;
+const MIGRATE_FUN_PCT: i32 = 50;
+const MIGRATE_DIRT_PCT: i32 = 20;
+/// Cap of an upgraded `insulin_min` (minutes).
+const MIGRATE_INSULIN_CAP_MIN: u32 = 480;
+/// Ticks per engine minute, for the format-2 tick counters.
+const TICKS_PER_MIN: u32 = 6;
+
+/// Sequential little-endian reader over a save buffer. The caller checked
+/// the length, so reads stay in range.
+struct Reader<'a> {
+    b: &'a [u8],
+    i: usize,
+}
+
+impl<'a> Reader<'a> {
+    fn u8(&mut self) -> u8 {
+        let v = self.b[self.i];
+        self.i += 1;
+        v
+    }
+    fn u16(&mut self) -> u16 {
+        let v = u16::from_le_bytes([self.b[self.i], self.b[self.i + 1]]);
+        self.i += 2;
+        v
+    }
+    fn u32(&mut self) -> u32 {
+        let v = u32::from_le_bytes([
+            self.b[self.i],
+            self.b[self.i + 1],
+            self.b[self.i + 2],
+            self.b[self.i + 3],
+        ]);
+        self.i += 4;
+        v
+    }
+    fn skip(&mut self, n: usize) {
+        self.i += n;
+    }
+}
+
+/// Sequential little-endian writer into a fixed buffer.
+struct Writer<'a> {
+    b: &'a mut [u8],
+    i: usize,
+}
+
+impl Writer<'_> {
+    fn u8(&mut self, v: u8) {
+        self.b[self.i] = v;
+        self.i += 1;
+    }
+    fn u16(&mut self, v: u16) {
+        self.b[self.i..self.i + 2].copy_from_slice(&v.to_le_bytes());
+        self.i += 2;
+    }
+    fn u32(&mut self, v: u32) {
+        self.b[self.i..self.i + 4].copy_from_slice(&v.to_le_bytes());
+        self.i += 4;
+    }
+}
+
+fn phase_from_u8(v: u8) -> Phase {
+    match v {
+        0 => Phase::Hatching,
+        1 => Phase::Active,
+        2 => Phase::Leaving,
+        _ => Phase::Gone,
+    }
+}
+
+fn food_from_u8(v: u8) -> Option<FoodKind> {
+    FoodKind::ALL.get(v as usize).copied()
+}
+
+fn food_to_u8(f: FoodKind) -> u8 {
+    FoodKind::ALL.iter().position(|&k| k == f).unwrap_or(0) as u8
+}
+
+fn drink_from_u8(v: u8) -> Option<DrinkKind> {
+    DrinkKind::ALL.get(v as usize).copied()
+}
+
+fn drink_to_u8(d: DrinkKind) -> u8 {
+    DrinkKind::ALL.iter().position(|&k| k == d).unwrap_or(0) as u8
+}
 
 impl GameState {
-    /// Serialize the game state to a fixed-size byte buffer for ekv.
-    #[allow(unused_assignments)]
+    /// Serialize the game state (format 3) to a fixed-size buffer for ekv.
+    ///
+    /// Bytes 0..97 keep the format-2 offsets so the head reads the same
+    /// way; the `cooldown_*` slots that no longer exist are written as 0,
+    /// and three slots are reused (`cooldown_heal` = `med_cd_min`,
+    /// `cooldown_medicate` = `insulin_min`, `cooldown_ozempic` =
+    /// `ozempic_cd_min`). Bytes 97..177 hold the format-3 additions.
     pub fn to_bytes(&self) -> [u8; SAVE_SIZE] {
-        todo!("BornPets v3 plan 1 task 11: v3 save format")
+        let mut b = [0u8; SAVE_SIZE];
+        let mut w = Writer { b: &mut b, i: 0 };
+        w.u8(SAVE_FORMAT_VERSION);
+
+        // Needs (needs are good-high; the old hunger/tired/sick/miserable/
+        // drunk slots).
+        w.u16(self.fullness);
+        w.u16(self.energy);
+        w.u16(self.health);
+        w.u16(self.mood);
+        w.u16(self.weight);
+        w.u16(self.booze);
+        // Traits.
+        w.u16(self.vitality);
+        w.u16(self.curiosity);
+        w.u16(self.resilience);
+        // Timing.
+        w.u32(self.last_update_tick);
+        w.u32(self.age_ticks);
+        // Lifecycle.
+        w.u8(self.phase as u8);
+        w.u16(self.hatching_countdown);
+        w.u32(self.leaving_min);
+        w.u16(self.generation);
+        // Action state.
+        w.u8(self.active_action.map_or(NONE_BYTE, Action::to_u8));
+        w.u8(self.action_ticks_remaining);
+        w.u16(0); // cooldown_feed (removed)
+        w.u16(self.med_cd_min); // cooldown_heal
+        w.u16(0); // cooldown_relax (removed)
+        w.u16(0); // cooldown_play (removed)
+        w.u16(0); // cooldown_exercise (removed)
+        w.u16(self.insulin_min); // cooldown_medicate
+        w.u16(self.ozempic_cd_min); // cooldown_ozempic
+        w.u16(0); // cooldown_drink (removed)
+        w.u16(0); // cooldown_rehab (removed)
+        // miserable_interval_counter, tired_passive_counter (removed).
+        w.u32(0);
+        w.u32(0);
+        // Slow counters, in quarter-minutes (`advance::SLOW_SCALE`).
+        w.u32(self.diabetes_min); // overweight_ticks
+        w.u32(self.dependence_min); // drunk_ticks
+        // Flags.
+        w.u8(self.is_sleeping as u8);
+        w.u8(self.hibernating as u8);
+        w.u8(self.diabetic as u8);
+        w.u8(self.dependent as u8);
+        w.u32(self.hibernate_ticks);
+        w.u32(self.last_save_tick);
+        w.u8(self.pet_kind.0);
+        w.u16(self.wins);
+        w.u16(self.losses);
+        w.u16(self.cooldown_battle);
+        w.u32(self.money);
+        w.u8(self.money_enabled as u8);
+        w.u8(self.hard_mode as u8);
+        debug_assert_eq!(w.i, HEAD_SIZE);
+
+        // Format-3 additions.
+        w.u16(self.hydration);
+        w.u16(self.fun);
+        w.u16(self.strain);
+        w.u16(self.dirt);
+        w.u16(self.fitness);
+        w.u16(self.sleep_min);
+        w.u16(self.oversleep_min);
+        w.u16(self.good_sleep_min);
+        w.u16(self.rested_min);
+        w.u16(self.injured_min);
+        w.u16(self.groggy_min);
+        w.u16(self.hangover_min);
+        w.u16(self.rehab_min);
+        w.u16(self.recovering_min);
+        w.u16(self.junk_min);
+        w.u16(self.ozempic_min);
+        w.u16(self.reversal_min);
+        w.u8(self.booze_peak as u8
+            | (self.deprived as u8) << 1
+            | (self.night as u8) << 2
+            | (self.no_groggy as u8) << 3);
+        w.u8(self.short_nights);
+        w.u8(self.good_nights);
+        w.u8(self.tick_rem);
+        w.u32(self.care_good_min);
+        w.u32(self.care_awake_min);
+        // The running action's food and drink (R23); the rest is reserved.
+        w.u8(self.active_food.map_or(NONE_BYTE, food_to_u8));
+        w.u8(self.active_drink.map_or(NONE_BYTE, drink_to_u8));
+        b
     }
 
-    /// Deserialize a game state from a byte buffer.
-    /// Returns `None` if the buffer is too short.
-    #[allow(unused_assignments)]
+    /// Deserialize a format-3 save. Any other length or version byte is
+    /// `None` (the caller falls back to the format-2 key, or a fresh egg).
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
-        let _ = b;
-        todo!("BornPets v3 plan 1 task 11: v3 save format")
+        if b.len() != SAVE_SIZE || b[0] != SAVE_FORMAT_VERSION {
+            return None;
+        }
+        let mut r = Reader { b, i: 1 };
+        let h = Head::read(&mut r);
+        let mut s = h.into_state();
+        // The slots format 3 reuses (see `to_bytes`).
+        s.fullness = h.levels[0];
+        s.energy = h.levels[1];
+        s.health = h.levels[2];
+        s.mood = h.levels[3];
+        s.booze = h.booze;
+        s.leaving_min = h.leaving;
+        s.med_cd_min = h.cooldowns[1];
+        s.insulin_min = h.cooldowns[5];
+        s.ozempic_cd_min = h.cooldowns[6];
+        s.diabetes_min = h.overweight_ticks;
+        s.dependence_min = h.drunk_ticks;
+        s.dependent = h.alcoholic;
+        s.active_action = Action::from_u8(h.action);
+        s.action_ticks_remaining = h.action_ticks;
+
+        s.hydration = r.u16();
+        s.fun = r.u16();
+        s.strain = r.u16();
+        s.dirt = r.u16();
+        s.fitness = r.u16();
+        s.sleep_min = r.u16();
+        s.oversleep_min = r.u16();
+        s.good_sleep_min = r.u16();
+        s.rested_min = r.u16();
+        s.injured_min = r.u16();
+        s.groggy_min = r.u16();
+        s.hangover_min = r.u16();
+        s.rehab_min = r.u16();
+        s.recovering_min = r.u16();
+        s.junk_min = r.u16();
+        s.ozempic_min = r.u16();
+        s.reversal_min = r.u16();
+        let flags = r.u8();
+        s.booze_peak = flags & 1 != 0;
+        s.deprived = flags & 2 != 0;
+        s.night = flags & 4 != 0;
+        s.no_groggy = flags & 8 != 0;
+        s.short_nights = r.u8();
+        s.good_nights = r.u8();
+        s.tick_rem = r.u8();
+        s.care_good_min = r.u32();
+        s.care_awake_min = r.u32();
+        s.active_food = food_from_u8(r.u8());
+        s.active_drink = drink_from_u8(r.u8());
+        Some(s)
     }
+
+    /// Read a format-2 save and make a living format-3 pet of it. The old
+    /// 0-high stats are mirrored (`MAX - x`); levels format 2 never had get
+    /// the `MIGRATE_*` defaults; a running action is dropped.
+    pub fn from_bytes_v2(b: &[u8; SAVE_SIZE_V2]) -> Option<Self> {
+        if b[0] != SAVE_FORMAT_VERSION_V2 {
+            return None;
+        }
+        let h = Head::read(&mut Reader { b: &b[..], i: 1 });
+        let mut s = h.into_state();
+        let pct = |p: i32| (p * P) as u16;
+        let flip = |v: u16| (MAX - v as i32) as u16;
+        s.fullness = (MAX - h.levels[0] as i32)
+            .clamp(MIGRATE_FULLNESS_MIN_PCT * P, MIGRATE_FULLNESS_MAX_PCT * P) as u16;
+        s.energy = flip(h.levels[1]);
+        s.health = flip(h.levels[2]);
+        s.mood = flip(h.levels[3]);
+        s.booze = h.booze;
+        s.weight = (MIGRATE_WEIGHT_BASE_PCT * P + h.weight as i32 / 2) as u16;
+        s.fitness = pct(MIGRATE_FITNESS_PCT);
+        s.hydration = pct(MIGRATE_HYDRATION_PCT);
+        s.fun = pct(MIGRATE_FUN_PCT);
+        s.dirt = pct(MIGRATE_DIRT_PCT);
+        s.strain = 0;
+        // A leaving pet gets its full countdown again.
+        s.leaving_min = 0;
+        // cooldown_medicate counted ticks; cap at one dose of insulin.
+        s.insulin_min = (h.cooldowns[5] as u32 / TICKS_PER_MIN).min(MIGRATE_INSULIN_CAP_MIN) as u16;
+        // The slow counters count quarter-minutes now and stay one
+        // quarter-minute under onset, so the upgrade never turns a
+        // condition on by itself (R17).
+        s.dependence_min = (h.drunk_ticks / TICKS_PER_MIN * SLOW_SCALE)
+            .min(DEPENDENCE_ONSET_MIN() as u32 * SLOW_SCALE - 1);
+        s.diabetes_min = (h.overweight_ticks / TICKS_PER_MIN * SLOW_SCALE)
+            .min(DIABETES_ONSET_MIN() as u32 * SLOW_SCALE - 1);
+        s.dependent = h.alcoholic;
+        s.night = h.is_sleeping;
+        Some(s)
+    }
+}
+
+/// The 97-byte head formats 2 and 3 share, with the format-2 meanings of
+/// the slots. Each format maps them to `GameState` fields itself.
+#[derive(Clone, Copy)]
+struct Head {
+    /// hunger, tired, sick, miserable.
+    levels: [u16; 4],
+    weight: u16,
+    booze: u16,
+    vitality: u16,
+    curiosity: u16,
+    resilience: u16,
+    last_update_tick: u32,
+    age_ticks: u32,
+    phase: u8,
+    hatching_countdown: u16,
+    leaving: u32,
+    generation: u16,
+    action: u8,
+    action_ticks: u8,
+    /// feed, heal, relax, play, exercise, medicate, ozempic, drink, rehab.
+    cooldowns: [u16; 9],
+    overweight_ticks: u32,
+    drunk_ticks: u32,
+    is_sleeping: bool,
+    hibernating: bool,
+    diabetic: bool,
+    alcoholic: bool,
+    hibernate_ticks: u32,
+    last_save_tick: u32,
+    pet_kind: u8,
+    wins: u16,
+    losses: u16,
+    cooldown_battle: u16,
+    money: u32,
+    money_enabled: bool,
+    hard_mode: bool,
+}
+
+impl Head {
+    fn read(r: &mut Reader) -> Self {
+        let levels = [r.u16(), r.u16(), r.u16(), r.u16()];
+        let weight = r.u16();
+        let booze = r.u16();
+        let vitality = r.u16();
+        let curiosity = r.u16();
+        let resilience = r.u16();
+        let last_update_tick = r.u32();
+        let age_ticks = r.u32();
+        let phase = r.u8();
+        let hatching_countdown = r.u16();
+        let leaving = r.u32();
+        let generation = r.u16();
+        let action = r.u8();
+        let action_ticks = r.u8();
+        let mut cooldowns = [0u16; 9];
+        for c in &mut cooldowns {
+            *c = r.u16();
+        }
+        r.skip(8); // miserable_interval_counter, tired_passive_counter
+        let overweight_ticks = r.u32();
+        let drunk_ticks = r.u32();
+        let is_sleeping = r.u8() != 0;
+        let hibernating = r.u8() != 0;
+        let diabetic = r.u8() != 0;
+        let alcoholic = r.u8() != 0;
+        let hibernate_ticks = r.u32();
+        let last_save_tick = r.u32();
+        let pet_kind = r.u8();
+        let wins = r.u16();
+        let losses = r.u16();
+        let cooldown_battle = r.u16();
+        let money = r.u32();
+        let money_enabled = r.u8() != 0;
+        let hard_mode = r.u8() != 0;
+        debug_assert_eq!(r.i, HEAD_SIZE);
+        Self {
+            levels,
+            weight,
+            booze,
+            vitality,
+            curiosity,
+            resilience,
+            last_update_tick,
+            age_ticks,
+            phase,
+            hatching_countdown,
+            leaving,
+            generation,
+            action,
+            action_ticks,
+            cooldowns,
+            overweight_ticks,
+            drunk_ticks,
+            is_sleeping,
+            hibernating,
+            diabetic,
+            alcoholic,
+            hibernate_ticks,
+            last_save_tick,
+            pet_kind,
+            wins,
+            losses,
+            cooldown_battle,
+            money,
+            money_enabled,
+            hard_mode,
+        }
+    }
+
+    /// The fields both formats read the same way, on top of a fresh egg
+    /// (so every field `Head` does not carry starts at its default). The
+    /// loaded state is not flagged for saving, and `last_update_tick`
+    /// comes from the save as before.
+    fn into_state(self) -> GameState {
+        let mut s = GameState::new_egg(0, PetKind::from_u8(self.pet_kind));
+        s.save_pending = false;
+        s.weight = self.weight;
+        s.vitality = self.vitality;
+        s.curiosity = self.curiosity;
+        s.resilience = self.resilience;
+        s.last_update_tick = self.last_update_tick;
+        s.age_ticks = self.age_ticks;
+        s.phase = phase_from_u8(self.phase);
+        s.hatching_countdown = self.hatching_countdown;
+        s.generation = self.generation;
+        s.is_sleeping = self.is_sleeping;
+        s.hibernating = self.hibernating;
+        s.diabetic = self.diabetic;
+        s.hibernate_ticks = self.hibernate_ticks;
+        s.last_save_tick = self.last_save_tick;
+        s.wins = self.wins;
+        s.losses = self.losses;
+        s.cooldown_battle = self.cooldown_battle;
+        s.money = self.money;
+        s.money_enabled = self.money_enabled;
+        s.hard_mode = self.hard_mode;
+        s
+    }
+}
+
+/// Choose the state to load from the raw kv values: `v3` is the value of
+/// key `state_v3`, `v2` the value of the old key `state`. A format-3 save
+/// wins; a corrupt or missing one falls through to the format-2 upgrade.
+/// The flag is true when the state came from the upgrade, which is then
+/// flagged for an immediate save (to `state_v3`; `state` is never touched).
+pub fn pick_save(v3: Option<&[u8]>, v2: Option<&[u8]>) -> Option<(GameState, bool)> {
+    if let Some(s) = v3.and_then(GameState::from_bytes) {
+        return Some((s, false));
+    }
+    let old: &[u8; SAVE_SIZE_V2] = v2?.try_into().ok()?;
+    let mut s = GameState::from_bytes_v2(old)?;
+    s.request_save();
+    Some((s, true))
 }
 
 // ---------------------------------------------------------------------------
@@ -1573,63 +2019,6 @@ impl PetRealm {
 mod overweight_diabetes_tests {
     use super::*;
 
-    /// New fields round-trip through `to_bytes`/`from_bytes` at the
-    /// versioned 97-byte `SAVE_SIZE` (1 version byte + 96 fields).
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v3 plan 1 task 11"]
-    fn save_round_trip_includes_new_fields() {
-        let mut state = GameState::new_egg(42, PetKind::from_u8(1));
-        state.weight = 41000;
-        state.diabetic = true;
-        state.rehab_min = 12;
-        state.med_cd_min = 345;
-        state.wins = 3;
-        state.losses = 1;
-        state.cooldown_battle = 77;
-        state.money = 12345;
-        state.money_enabled = false;
-        state.hard_mode = true;
-
-        let bytes = state.to_bytes();
-        assert_eq!(bytes.len(), SAVE_SIZE);
-        assert_eq!(SAVE_SIZE, 97);
-        assert_eq!(bytes[0], SAVE_FORMAT_VERSION);
-
-        let restored = GameState::from_bytes(&bytes).expect("valid save should parse");
-        assert_eq!(restored.weight, 41000);
-        assert!(restored.diabetic);
-        assert_eq!(restored.rehab_min, 12);
-        assert_eq!(restored.med_cd_min, 345);
-        assert_eq!(restored.wins, 3);
-        assert_eq!(restored.losses, 1);
-        assert_eq!(restored.cooldown_battle, 77);
-        assert_eq!(restored.pet_kind.id(), 1);
-        assert_eq!(restored.money, 12345);
-        assert!(!restored.money_enabled);
-        assert!(restored.hard_mode);
-    }
-
-    /// A save blob with a different layout/version is rejected (→ fresh egg)
-    /// rather than silently misparsed. Regression guard for the pre-money
-    /// 96-byte layout (which dropped `drained` and kept SAVE_SIZE at 96)
-    /// being reinterpreted with the new field offsets and corrupting the pet.
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v3 plan 1 task 11"]
-    fn old_or_wrong_version_save_is_rejected() {
-        // A valid current save round-trips.
-        let good = GameState::new_egg(7, PetKind::from_u8(2)).to_bytes();
-        assert!(GameState::from_bytes(&good).is_some());
-
-        // Old-layout blob one byte short of the versioned size — rejected on length.
-        let old = [0xABu8; SAVE_SIZE - 1];
-        assert!(GameState::from_bytes(&old).is_none());
-
-        // Right size but wrong version byte — rejected on version.
-        let mut wrong_ver = good;
-        wrong_ver[0] = SAVE_FORMAT_VERSION.wrapping_add(1);
-        assert!(GameState::from_bytes(&wrong_ver).is_none());
-    }
-
     /// A fresh egg starts with the Stage-1 HAX default: 100 balance, money
     /// mode enabled.
     #[test]
@@ -1683,54 +2072,6 @@ mod overweight_diabetes_tests {
         state.money = 20;
         assert!(state.can_afford(20));
         assert!(!state.can_afford(21));
-    }
-
-    /// Every `Action` variant must round-trip through the persisted byte
-    /// exactly. Regression test for a real bug: `to_bytes` wrote the
-    /// discriminant via a bare `as u8` cast, but `from_bytes`'s
-    /// hand-written match only recognized the first four discriminants
-    /// (0-3, at the time Feed/Heal/Relax/Play) — Exercise/Medicate/
-    /// Ozempic/Drink/Rehab (4-8) all silently came back as `None`,
-    /// discarding an in-progress action (and, for Drink specifically,
-    /// dropping `active_drink` context too, so the remainder of the
-    /// action would have applied under the wrong drink's multipliers
-    /// had the match not dropped the action entirely first). `2`
-    /// (formerly `Relax`) is now a deliberate gap — see `Action::to_u8`.
-    #[test]
-    #[ignore = "v1 rules; replaced by BornPets v3 plan 1 task 11"]
-    fn every_action_round_trips_through_save() {
-        let all = [
-            Action::Feed,
-            Action::Heal,
-            Action::Play,
-            Action::Exercise,
-            Action::Medicate,
-            Action::Ozempic,
-            Action::Drink,
-            Action::Rehab,
-            Action::OnlyPets,
-        ];
-        for action in all {
-            let mut state = GameState::new_egg(5, PetKind::DEFAULT);
-            state.active_action = Some(action);
-            state.action_ticks_remaining = 3;
-
-            let bytes = state.to_bytes();
-            let restored = GameState::from_bytes(&bytes).expect("valid save should parse");
-            assert_eq!(
-                restored.active_action,
-                Some(action),
-                "{action:?} did not survive a save/restore round-trip"
-            );
-            assert_eq!(restored.action_ticks_remaining, 3);
-        }
-
-        // No action in progress still round-trips as None, not some
-        // stray Some(_).
-        let mut state = GameState::new_egg(6, PetKind::DEFAULT);
-        state.active_action = None;
-        let restored = GameState::from_bytes(&state.to_bytes()).unwrap();
-        assert_eq!(restored.active_action, None);
     }
 
     /// `record_battle` bumps the right counter and always sets the
