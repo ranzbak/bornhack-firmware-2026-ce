@@ -518,6 +518,14 @@ pub fn feed(food: super::engine::FoodKind) -> bool {
     with_state(|s| s.feed(food))
 }
 
+pub fn wash() -> bool {
+    with_state(|s| s.wash())
+}
+
+pub fn relax() -> bool {
+    with_state(|s| s.relax())
+}
+
 pub fn heal() -> bool {
     with_state(|s| s.heal())
 }

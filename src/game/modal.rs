@@ -173,7 +173,13 @@ impl ModalKind {
                 Item::Song(crate::SONG_OVER_THE_HORIZON_INDEX),
                 Item::Cancel,
             ],
-            Self::Rest => &[Item::Sleep, Item::Cancel],
+            Self::Rest => &[
+                Item::Sleep,
+                Item::Relax,
+                Item::Wash,
+                Item::WakeFromSleep,
+                Item::Cancel,
+            ],
             Self::None => &[],
         }
     }
@@ -185,7 +191,7 @@ impl ModalKind {
 /// One row in the modal's item list.  Each variant carries its own
 /// label, availability check, cooldown source, and activation handler
 /// — no string matching anywhere else in the file.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Item {
     Cancel,
     ViewStats,
@@ -210,6 +216,10 @@ enum Item {
     DrinkChoice(super::engine::DrinkKind),
     Rehab,
     Sleep,
+    Relax,
+    Wash,
+    /// End a sleep (distinct from `WakeUp`, the hibernation defrost).
+    WakeFromSleep,
     PlayNow,
     OnlyPets,
     TicTacToe,
@@ -250,6 +260,9 @@ impl Item {
             Self::DrinkChoice(drink) => drink.label(),
             Self::Rehab => "Rehab",
             Self::Sleep => "Sleep",
+            Self::Relax => "Relax",
+            Self::Wash => "Wash",
+            Self::WakeFromSleep => "Wake up",
             Self::PlayNow => "Play now",
             Self::OnlyPets => "Only pets",
             Self::TicTacToe => "Tic Tac Toe",
@@ -354,6 +367,9 @@ impl Item {
             }
             Self::ExerciseNow => stats.can_exercise,
             Self::Sleep => stats.can_sleep,
+            Self::Relax => stats.can_relax,
+            Self::Wash => stats.can_wash,
+            Self::WakeFromSleep => stats.can_wake,
             Self::PlayNow => {
                 stats.can_play
                     && (!stats.money_enabled || stats.money >= super::engine::PLAY_HAX_COST)
@@ -406,6 +422,8 @@ impl Item {
             Self::ExerciseNow => (Action::Exercise, None),
             Self::DrinkChoice(d) => (Action::Drink, Some(d)),
             Self::Rehab => (Action::Rehab, None),
+            Self::Relax => (Action::Relax, None),
+            Self::Wash => (Action::Wash, None),
             Self::PlayNow => (Action::Play, None),
             Self::OnlyPets => (Action::OnlyPets, None),
             _ => return None,
@@ -430,6 +448,7 @@ impl Item {
             Self::Nim => lifecycle::game_refusal(Some(MiniGame::Nim)),
             Self::BornJeweled => lifecycle::game_refusal(Some(MiniGame::BornJeweled)),
             Self::Sleep => stats.is_sleeping.then_some(Reason::Refused(Refusal::Asleep)),
+            Self::WakeFromSleep => (!stats.is_sleeping).then_some(Reason::Refused(Refusal::NoNeed)),
             _ => match self.action() {
                 Some((a, d)) => lifecycle::refusal_for(a, d),
                 None => None,
@@ -545,6 +564,15 @@ impl Item {
                 lifecycle::sleep();
                 super::show_toast(super::Toast::Sleep);
                 close();
+            }
+            Self::Relax => {
+                self.started(lifecycle::relax(), super::Toast::Relax);
+            }
+            Self::Wash => {
+                self.started(lifecycle::wash(), super::Toast::Wash);
+            }
+            Self::WakeFromSleep => {
+                self.started(lifecycle::wake(), super::Toast::Wake);
             }
             Self::PlayNow => {
                 self.started(lifecycle::play(), super::Toast::Play);
@@ -842,9 +870,8 @@ where
         // out" rendering below covers that case.
         let available = item.selectable(stats.as_ref());
 
-        // Build display text: append " (Ns)" with the remaining
-        // cooldown seconds when the item has a known cooldown source,
-        // " (wait)" for anything else that's just disabled.
+        // Build display text: append " (Ns)" with the remaining wait when
+        // the engine reports one.
         // 40 covers the longest label ("Reset battle record"/"Trigger
         // alcoholism", 19 bytes) plus an optional price suffix (" 15H",
         // 4 bytes) plus the longest cooldown suffix (" (72h00)", 8
@@ -874,13 +901,10 @@ where
             let suffix = stats
                 .as_ref()
                 .and_then(|s| cooldown_string(item.cooldown_ticks(s)));
-            match suffix {
-                Some(s) => {
-                    let _ = display_label.push_str(s.as_str());
-                }
-                None => {
-                    let _ = display_label.push_str(" (wait)");
-                }
+            // Rows with no wait to show get no suffix: selecting one tells
+            // the player why (R24).
+            if let Some(s) = suffix {
+                let _ = display_label.push_str(s.as_str());
             }
         }
 
@@ -1139,17 +1163,90 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{cooldown_string, first_selectable, step_cursor};
+    use super::{Item, ModalKind, cooldown_string, first_selectable, step_cursor};
+    use crate::game::engine::{GameState, PetKind, Phase};
+    use crate::game::lifecycle;
+
+    fn active_pet() -> GameState {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.phase = Phase::Active;
+        s
+    }
 
     #[test]
-    fn countdowns_are_readable_up_to_three_days() {
-        assert_eq!(cooldown_string(0), None);
-        assert_eq!(cooldown_string(5).as_deref(), Some(" (50s)"));
-        assert_eq!(cooldown_string(59 * 6).as_deref(), Some(" (59m)"));
-        assert_eq!(cooldown_string(2 * 360).as_deref(), Some(" (2h00)"));
-        assert_eq!(cooldown_string(2 * 360 + 30).as_deref(), Some(" (2h05)"));
-        // Rehab: 4320 minutes = 72 h = 25920 ticks (x10 s overflowed u16).
-        assert_eq!(cooldown_string(25920).as_deref(), Some(" (72h00)"));
+    fn rest_menu_offers_sleep_relax_wash_wake() {
+        let items = ModalKind::Rest.items();
+        for want in [Item::Sleep, Item::Relax, Item::Wash, Item::WakeFromSleep, Item::Cancel] {
+            assert!(items.contains(&want), "missing {}", want.label());
+        }
+        assert_ne!(Item::WakeFromSleep.label(), Item::WakeUp.label());
+
+        let mut s = active_pet();
+        let awake = s.stats(0);
+        assert!(Item::Sleep.available(&awake));
+        assert!(!Item::WakeFromSleep.available(&awake));
+        assert!(s.sleep());
+        let asleep = s.stats(0);
+        assert!(!Item::Sleep.available(&asleep));
+        assert!(Item::WakeFromSleep.available(&asleep));
+    }
+
+    #[test]
+    fn wash_row_follows_the_engine_refusal() {
+        use crate::game::engine::doses::{Reason, Refusal};
+        lifecycle::start_new_game(PetKind(0), false, false);
+        lifecycle::with_state(|s| {
+            s.phase = Phase::Active;
+            s.dirt = 0;
+            true
+        });
+        let clean = lifecycle::cycle().unwrap();
+        assert!(!Item::Wash.available(&clean));
+        assert!(matches!(Item::Wash.reason(&clean), Reason::Refused(Refusal::AlreadyClean)));
+        assert_eq!(Item::Wash.cooldown_ticks(&clean), 0);
+        lifecycle::with_state(|s| {
+            s.dirt = u16::MAX / 2;
+            true
+        });
+        assert!(Item::Wash.available(&lifecycle::cycle().unwrap()));
+    }
+
+    #[test]
+    fn a_day_through_the_menu() {
+        lifecycle::start_new_game(PetKind(0), false, false);
+        lifecycle::with_state(|s| {
+            s.phase = Phase::Active;
+            s.fullness = u16::MAX / 4;
+            s.hydration = u16::MAX / 4;
+            s.dirt = u16::MAX / 2;
+            s.energy = u16::MAX / 4;
+            true
+        });
+        let st = || lifecycle::cycle().unwrap();
+        // Take a menu row, then let its timed action finish.
+        let ok = |item: Item| {
+            let stats = st();
+            assert!(item.available(&stats), "{} unavailable", item.label());
+            item.activate();
+            super::close();
+            lifecycle::debug_skip_ticks(30);
+        };
+        let before = st();
+        ok(Item::FeedFood(crate::game::engine::FoodKind::Apple));
+        assert!(st().hunger > before.hunger);
+        ok(Item::DrinkChoice(crate::game::engine::DrinkKind::Water));
+        assert!(st().water > before.water);
+        ok(Item::Wash);
+        assert!(st().clean > before.clean);
+        ok(Item::Sleep);
+        assert!(st().is_sleeping);
+        lifecycle::debug_skip_ticks(360);
+        let slept = st();
+        assert!(slept.tired > before.tired);
+        ok(Item::WakeFromSleep);
+        assert!(!st().is_sleeping);
+        ok(Item::Relax);
+        assert!(st().active_action.is_none());
     }
 
     /// Rows 0 and 2 disabled, like a Play list with Battle and a

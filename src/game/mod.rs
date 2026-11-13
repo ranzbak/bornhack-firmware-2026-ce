@@ -101,6 +101,8 @@ pub enum Toast {
     /// Why an action was refused or a row is disabled; the text comes from
     /// the stored `engine::doses::Reason` (see `show_reason`).
     Reason = 27,
+    /// Started a wash — see `engine::Action::Wash`.
+    Wash = 28,
 }
 
 impl Toast {
@@ -133,6 +135,7 @@ impl Toast {
             25 => Self::OnlyPets,
             26 => Self::MinigameWin,
             27 => Self::Reason,
+            28 => Self::Wash,
             _ => Self::None,
         }
     }
@@ -168,6 +171,7 @@ impl Toast {
             Toast::OnlyPets => "Only pets!",
             Toast::MinigameWin => "nice game!",
             // Dynamic — handled in the renderer.
+            Toast::Wash => "-dirty",
             Toast::Reason => "",
         }
     }

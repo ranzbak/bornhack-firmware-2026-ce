@@ -1115,6 +1115,8 @@ pub struct PetStats {
     pub can_drink: bool,
     /// Only true once `alcoholic` is set — mirrors `can_medicate`.
     pub can_rehab: bool,
+    pub can_relax: bool,
+    pub can_wash: bool,
     pub can_sleep: bool,
     pub can_wake: bool,
     /// Per-mini-game availability.  False while that game's post-win
@@ -1268,6 +1270,8 @@ impl GameState {
             can_drink: can(Action::Drink),
             can_drink_water: self.refusal_for(Action::Drink, Some(DrinkKind::Water)).is_none(),
             can_rehab: can(Action::Rehab),
+            can_relax: can(Action::Relax),
+            can_wash: can(Action::Wash),
             can_sleep: alive && !self.is_sleeping,
             can_wake: self.is_sleeping,
             can_play_tictactoe: can_game(Some(MiniGame::TicTacToe)),
