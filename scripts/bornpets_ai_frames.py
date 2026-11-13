@@ -450,9 +450,12 @@ SEASTAR_POSES: dict[str, str] = {
     "seastar_relaxing_1": "Relaxing, second animation frame: still in the deck chair, sipping a drink through a straw, with a couple of bold red hearts floating up.",
     "seastar_relaxing_2": "Relaxing, third animation frame: the drink is gone and the sea star has dozed off, slumped far down and sideways in the SAME deck chair as in the previous frame, eyes closed, mouth open, one arm dangling over the side to the ground. The chair's fabric keeps its bold SOLID RED and white stripes.",
     "seastar_playing_0": "Playing. The sea star's face is fully visible and unobstructed, grinning with delight. It bats a bold red-and-white beach ball that flies off to ONE SIDE, clearly clear of the face - the ball must never cover or overlap the face. Motion ticks trail behind the ball. No ground, no sand.",
-    "seastar_sleeping_0": "Fast asleep. The sea star sits upright facing the viewer, its top arm tipped forward and drooping, eyes closed as two curved lines, three Z's rising to one side, each a white letter with a thick black outline. Nothing else in the frame.",
-    "seastar_sleeping_1": "Fast asleep, second animation frame: the same sitting sea star has slumped a little further forward, a round white snoring bubble growing at its mouth, the Z's drifting higher. Nothing else in the frame.",
-    "seastar_sleeping_2": "Fast asleep, third animation frame: the same sitting sea star jolts slightly as the snoring bubble pops, still drooping with eyes closed. Nothing else in the frame.",
+    # The sleeping row plays straight after the tired row, whose sea star wears a
+    # red nightcap; without the hat stated here (and the previous frame passed in
+    # via SEASTAR_CONTINUES) the hat vanished the moment it fell asleep.
+    "seastar_sleeping_0": "Fast asleep at last, continuing the tired animation. The sea star sits upright facing the viewer, its top arm tipped forward and drooping, eyes closed as two curved lines, a small contented smile, red cheek blush. It is STILL WEARING the SAME nightcap from image 2 on its top arm: a floppy cone filled SOLID RED with a thick black outline, its tip flopped down over to one side ending in a round SOLID RED pom-pom. Three Z's rise to one side, each a white letter with a thick black outline. A seashell or two may sit beside it. Nothing else in the frame.",
+    "seastar_sleeping_1": "Fast asleep, second animation frame: the SAME sitting sea star in the SAME solid red nightcap with its red pom-pom (exactly as in image 2) has slumped a little further forward, eyes closed as curved lines, a round white snoring bubble with a black outline growing at its mouth, the Z's drifting higher. The SAME seashells and bubbles from image 2 stay where they were, so the sea star keeps its size and place in the frame. Nothing else in the frame.",
+    "seastar_sleeping_2": "Fast asleep, third animation frame: the SAME sitting sea star in the SAME solid red nightcap with its red pom-pom (exactly as in image 2) jolts slightly as the snoring bubble pops - where the bubble was, three or four SHORT CHUNKY black burst dashes, each at least 3 pixels thick (thin hairlines vanish when scaled down) - still drooping with eyes closed as curved lines. The SAME three Z's from image 2 still rise above it, white letters with a thick black outline. The nightcap stays on its top arm. The SAME seashells from image 2 stay where they were, so the sea star keeps its size and place in the frame. Nothing else in the frame.",
     "seastar_leaving_0": "Leaving. The sea star stands facing the viewer, sad and disappointed that things did not work out: eyes downcast, a single tear, mouth a small wobbly frown, one arm raised in a half-hearted goodbye wave, a small bindle on a stick over its shoulder. Not smiling. Nothing else in the frame.",
     "seastar_leaving_1": "Leaving, second animation frame: the sea star has turned away and is cartwheeling off to one side, seen from BEHIND: its back is plain white with a scattering of small round bumps and no face, the bindle swinging from one arm. It must read clearly as the sea star leaving. Nothing else in the frame.",
     "seastar_gone_0": "THE SEA STAR IS NOT IN THIS FRAME AT ALL - no star, no arms, no face, no eyes peeking out. The pet has moved out and its home is up for rent. Composition, like a signposted but deserted site:\n(1) LEFT AND CENTRE: a solid WHITE rock with a lumpy uneven top, sitting along the bottom of the frame. Low in its face is a BLACK crevice that is clearly WIDER THAN IT IS TALL - the sea star's old home. A couple of white seashells and a strand of seaweed lie beside the rock.\n(2) RIGHT FOREGROUND: a wooden signboard on a post leaning at a slight angle, standing taller than the rock - a white rectangular plank with the words FOR RENT in black pixel capitals.\n(3) Two or three small bubbles rising, white circles with a black outline.\nNothing else at all. The home is empty.",
@@ -475,7 +478,9 @@ SEASTAR_POSES: dict[str, str] = {
     "seastar_rehab_0": "In rehab. The sea star sits sheepishly on a small stool clutching a red pill bottle, looking guilty.",
     "seastar_rehab_1": "In rehab, second animation frame: the sea star throws the red pill bottle away with a determined look, sparkles around it.",
     # Kept innocent on purpose: a racier take tripped the image API's moderation on the badger.
-    "seastar_onlypets_0": "Hamming it up for the camera. The sea star lounges on top of a small bed with a pillow and a blanket, posing coyly for the camera with one arm behind its head and a cheeky grin. Beside the bed, a small camera on a tripod points straight at it, a bold red recording light on. A little sign board leaning on the bed reads 'TIP ME IN MUSSELS' in black pixel text.",
+    # The joke is the censor bar on a starfish: there is nothing to censor. One short
+    # word only - the older 'TIP ME IN MUSSELS' sign was illegible at 152x75.
+    "seastar_onlypets_0": "OnlyPets parody, the censor-bar joke. The sea star stands facing the viewer looking bashful, cheeks extra red, eyes glancing sideways. A thick SOLID BLACK rectangular censor bar runs straight across the middle of its body, and on the bar the single word PREMIUM is written in big blocky WHITE capital letters that fill the bar's height. (The joke: it is a starfish, there is nothing to censor.) Beside it a small camera on a tripod with a bold red recording light points at it. No other text. The censor bar is the ONE deliberate exception to the rule against large solid black areas below; nothing else is solid black. Keep it completely safe-for-work and wholesome: a cheeky, family-friendly parody of a social-media 'content creator', nothing sexual.",
 }
 
 SEASTAR_STRIPS: dict[str, dict] = {
@@ -642,6 +647,28 @@ SEASTAR_CONTINUES: dict[str, str] = {
     "seastar_feeding_1": "seastar_feeding_0",
     "seastar_relaxing_2": "seastar_relaxing_1",
     "seastar_warning_drained_1": "seastar_warning_drained_0",
+    # Sleeping follows tired on the badge, so the nightcap is carried down the
+    # chain: tired_2 -> sleeping_0 -> sleeping_1 -> sleeping_2.
+    "seastar_sleeping_0": "seastar_warning_tired_2",
+    "seastar_sleeping_1": "seastar_sleeping_0",
+    "seastar_sleeping_2": "seastar_sleeping_1",
+}
+
+# The generic CONTINUITY text tells the model to change the pose and treat image
+# 2 as props only, which reads a worn hat as optional. These frames keep
+# something the character WEARS, so they get a stricter continuity text.
+WORN_CONTINUITY = (
+    "IMAGE 2 is the PREVIOUS animation frame. The {pet} in this frame is still "
+    "wearing exactly what it wears in image 2 - reproduce that worn item with "
+    "the same shape, size, solid red fill, black outline and position on the "
+    "body; it must not disappear, change colour or turn white. Image 2 also "
+    "sets the line weight, scale and style to match. Draw the new moment the "
+    "scene brief describes; do not return image 2 unchanged."
+)
+
+SEASTAR_CONTINUITY: dict[str, str] = {
+    fid: WORN_CONTINUITY
+    for fid in ("seastar_sleeping_0", "seastar_sleeping_1", "seastar_sleeping_2")
 }
 
 
@@ -667,6 +694,7 @@ PROFILES: dict[str, dict] = {
         "anchor_prompt": seastar_anchor_prompt,
         "anchor_fidelity": "low",
         "continues": SEASTAR_CONTINUES,
+        "continuity": SEASTAR_CONTINUITY,
     },
     "jellyfish": {
         "noun": "jellyfish",
@@ -709,10 +737,14 @@ def build_prompt(frame_id: str) -> str:
     markings, proportions and line weight identical across 48 independent
     generations, while the scene itself is composed fresh each time.
     """
+    continuity = ""
+    if frame_id in CONTINUES:
+        text = PROFILE.get("continuity", {}).get(frame_id, CONTINUITY)
+        continuity = text.format(pet=PROFILE["noun"]) + "\n\n"
     return (
         "Draw one frame of a pixel-art virtual-pet game.\n\n"
         f"{IDENTITY}\n\n"
-        f"{CONTINUITY + chr(10) + chr(10) if frame_id in CONTINUES else ''}"
+        f"{continuity}"
         f"Scene for this frame: {POSES[frame_id]}\n\n"
         f"{FREEDOM}\n\n"
         f"{style()}"
