@@ -47,18 +47,20 @@ pub enum Act {
     Wash,
     /// A mini-game of grade 1 (draw) or 2 (win).
     Mini(u8),
-    /// Meeting a known mesh friend.
+    /// Meeting a new mesh friend (stimulation +15).
     Friend,
     Insulin,
 }
 
-/// What a routine returns for one minute: at most six steps.
-pub type Plan = heapless::Vec<Act, 6>;
+/// What a routine returns for one minute: at most eight steps.
+pub type Plan = heapless::Vec<Act, 8>;
 
 /// Result of one run. Percentages are whole percent of the level.
 #[derive(Clone, Copy, Debug)]
 pub struct Outcome {
     pub alive: bool,
+    /// End phase: a pet at health 0 shows as `Leaving` while still `alive`.
+    pub phase: Phase,
     pub days: f32,
     pub avg_mood_pct: u8,
     pub end_health_pct: u8,
@@ -106,12 +108,18 @@ thread_local! {
 
 /// Called by `GameState::update` after each closed-form segment of `dt`
 /// minutes: mood and health are linear inside one, so ends are enough.
-pub(super) fn note_segment(mood_before: u16, mood_after: u16, health_after: u16, dt: u32) {
+pub(super) fn note_segment(
+    mood_before: u16,
+    mood_after: u16,
+    health_before: u16,
+    health_after: u16,
+    dt: u32,
+) {
     PROBE.with(|p| {
         let mut v = p.get();
         v.mood_sum2 += (mood_before as i64 + mood_after as i64) * dt as i64;
         v.minutes += dt as u64;
-        v.min_health = v.min_health.min(health_after);
+        v.min_health = v.min_health.min(health_before).min(health_after);
         p.set(v);
     });
 }
@@ -194,7 +202,7 @@ fn perform(s: &mut GameState, a: Act) -> bool {
         Act::Wash => s.wash(),
         Act::Insulin => s.medicate(),
         Act::Friend => {
-            s.friend_boost(false);
+            s.friend_boost(true);
             true
         }
         Act::Mini(g) => {
@@ -308,6 +316,7 @@ pub fn run_full(routine: Routine, days: u32, driver: Driver, seed: u64) -> Run {
     Run {
         outcome: Outcome {
             alive: s.phase != Phase::Gone,
+            phase: s.phase,
             days: s.age_ticks as f32 / TICKS_PER_DAY as f32,
             avg_mood_pct: avg,
             end_health_pct: pct(s.health),
@@ -333,7 +342,7 @@ const fn at(m: u32, h: u32, mi: u32) -> bool {
 
 fn plan(acts: &[Act]) -> Plan {
     let mut v = Plan::new();
-    for &a in acts.iter().take(6) {
+    for &a in acts.iter().take(Plan::new().capacity()) {
         let _ = v.push(a);
     }
     v
@@ -347,7 +356,7 @@ fn pct_lvl(p: i32) -> u16 {
 /// water at a check-in (one under 55 % hydration, two under 25 %, before a
 /// trailing Sleep), and with `weight_habit` richer food when thin and lighter
 /// food when heavy (spec 15.8). A diabetic pet gets insulin first when the
-/// last dose is nearly worn off. Anything past six steps is dropped.
+/// last dose is nearly worn off. Anything past eight steps (never reached by the ported routines) is dropped.
 fn habits(mut acts: Plan, s: &GameState, weight_habit: bool) -> Plan {
     if acts.is_empty() {
         return acts;

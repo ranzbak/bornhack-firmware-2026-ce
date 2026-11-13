@@ -219,13 +219,16 @@ pub fn minigame(s: &mut GameState, grade: u8) {
 }
 
 /// Meeting a mesh friend: a new one lifts the fun a lot, a known one a little.
+/// Like every fun gain it is doubled while the pet is tired (spec rule 7),
+/// judged on the state before the dose. No energy cost.
 pub fn friend(s: &mut GameState, big: bool) {
     let pct = if big {
         t::DOSE_FRIEND_BIG_FUN_PCT()
     } else {
         t::DOSE_FRIEND_SMALL_FUN_PCT()
     };
-    bump(&mut s.fun, lvl(pct));
+    let fun = fun_for(s, pct as i32);
+    bump(&mut s.fun, fun);
 }
 
 fn exercise(s: &mut GameState) {

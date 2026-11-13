@@ -44,11 +44,12 @@ fn reproducible_with_same_seed() {
 }
 
 /// The routines are deterministic, so a seed changes only what the egg
-/// rolls: the three traits, and through `vitality` the starting health.
-/// (The needs and the rules read no trait, so whole-percent run outcomes do
-/// not move with the seed.)
+/// rolls: the three traits, and through `vitality` the starting health. No
+/// need or rule reads a trait, so a routine run differs only in the lowest
+/// health it saw (the starting health, now counted) and nothing else.
 #[test]
 fn different_seeds_produce_different_results() {
+    use bornhack_aegg::game::engine::sim::{self, Driver};
     let (a, b) = (
         GameState::new_egg(1, PetKind::DEFAULT),
         GameState::new_egg(2, PetKind::DEFAULT),
@@ -58,4 +59,20 @@ fn different_seeds_produce_different_results() {
         (b.vitality, b.curiosity, b.resilience)
     );
     assert_ne!(a.health, b.health, "vitality sets the starting health");
+    for driver in [Driver::Oracle, Driver::Delta] {
+        let ra = sim::run_full(&sim::balanced, 3, driver, 1).outcome;
+        let rb = sim::run_full(&sim::balanced, 3, driver, 2).outcome;
+        assert_ne!(ra.min_health_pct, rb.min_health_pct, "{driver:?}");
+        let same = |o: sim::Outcome| {
+            (
+                o.alive,
+                o.avg_mood_pct,
+                o.end_health_pct,
+                o.end_fitness_pct,
+                o.end_weight_pct,
+                o.injuries,
+            )
+        };
+        assert_eq!(same(ra), same(rb), "{driver:?}");
+    }
 }

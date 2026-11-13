@@ -50,7 +50,6 @@ macro_rules! thresholds_table {
 
 thresholds_table! {
     // Scale
-    STAT_MAX: u16,
     UNIT: u16,
     // Actions
     FEED_DURATION: u8,
@@ -330,7 +329,6 @@ thresholds_table! {
 impl Thresholds {
     /// The original balance — what the badge ships with.
     pub const CLASSIC: Thresholds = Thresholds {
-        STAT_MAX: 65535,
         UNIT: 655,
 
         FEED_DURATION: 2,
@@ -612,7 +610,6 @@ impl Thresholds {
     /// Aim: a forgiving balance for badge holders who don't want to baby-sit.
     pub const CASUAL: Thresholds = Thresholds {
         // Everything not listed below is identical to CLASSIC.
-        STAT_MAX: 65535,
         UNIT: 655,
 
         FEED_DURATION: 2,

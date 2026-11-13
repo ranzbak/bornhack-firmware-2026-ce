@@ -541,16 +541,22 @@ impl GameState {
         self.tick_rem = (ticks % TICKS_PER_MINUTE) as u8;
         // Minutes still to step singly after a runaway target was seen.
         let mut steep = 0u32;
-        while minutes > 0 {
+        while minutes > 0 && self.phase != Phase::Gone {
             let dt = self.segment(minutes, &mut steep);
             #[cfg(feature = "simulator")]
             ADVANCE_CALLS.with(|c| c.set(c.get() + 1));
             #[cfg(feature = "simulator")]
-            let mood_before = self.mood;
+            let (mood_before, health_before) = (self.mood, self.health);
             advance::advance(self, dt);
             #[cfg(feature = "simulator")]
-            sim::note_segment(mood_before, self.mood, self.health, dt);
+            sim::note_segment(mood_before, self.mood, health_before, self.health, dt);
             minutes -= dt;
+        }
+        // Gone partway through the gap: the pet lived only the time it was
+        // advanced, not the rest of the gap.
+        if minutes > 0 {
+            self.age_ticks -= minutes * TICKS_PER_MINUTE + self.tick_rem as u32;
+            self.tick_rem = 0;
         }
     }
 
@@ -1317,7 +1323,8 @@ impl GameState {
     /// Meeting (or spending time with) a mesh friend over the SHDW channel —
     /// see `crate::game::friends`. `big` is the bigger one-time bump for a
     /// brand-new friend; the smaller one applies to a cooldown-gated
-    /// recurring reunion with someone already known. Both add fun.
+    /// recurring reunion with someone already known. Both add fun (doubled
+    /// while tired). A passive mesh event: it does not wake a sleeping pet.
     pub fn friend_boost(&mut self, big: bool) {
         doses::friend(self, big);
     }

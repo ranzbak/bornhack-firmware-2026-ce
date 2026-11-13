@@ -2072,6 +2072,28 @@ mod doses_care {
     }
 
     #[test]
+    fn friend_doubles_when_tired() {
+        for big in [true, false] {
+            let gain = if big { 15 } else { 5 };
+            let mut s = pet();
+            s.energy = pct(20) as u16;
+            s.fun = pct(30) as u16;
+            s.friend_boost(big);
+            assert_eq!(s.fun as i32, pct(30 + 2 * gain), "tired, big={big}");
+            assert_eq!(s.energy as i32, pct(20), "no energy cost");
+            let mut s = pet();
+            s.energy = pct(33) as u16; // the Classic energy band edge
+            s.fun = pct(30) as u16;
+            s.friend_boost(big);
+            assert_eq!(s.fun as i32, pct(30 + gain), "at the line is not tired");
+        }
+        let mut s = pet();
+        s.is_sleeping = true;
+        s.friend_boost(false);
+        assert!(s.is_sleeping, "a friend does not wake the pet");
+    }
+
+    #[test]
     fn care_actions_on_a_sleeper_wake_it_but_refusals_do_not() {
         let mut s = pet();
         s.is_sleeping = true;
@@ -2826,30 +2848,93 @@ mod oracle {
         }
     }
 
-    #[test]
-    fn fourteen_day_gap_matches_oracle() {
+    fn fresh_sleeper() -> GameState {
+        use bornhack_aegg::game::engine::PetKind;
         use bornhack_aegg::game::engine::thresholds::HATCHING_TICKS;
-        let mut fresh = GameState::new_egg(42, bornhack_aegg::game::engine::PetKind::DEFAULT);
+        let mut fresh = GameState::new_egg(42, PetKind::DEFAULT);
         fresh.update(HATCHING_TICKS() as u32);
         assert!(fresh.sleep());
+        fresh
+    }
+
+    /// Step `s` one minute at a time up to tick `end`.
+    fn step_to(s: &mut GameState, end: u32) {
+        while s.last_update_tick < end {
+            s.update((s.last_update_tick + 6).min(end));
+        }
+    }
+
+    #[test]
+    fn fourteen_day_gap_matches_oracle() {
+        let fresh = fresh_sleeper();
+        // Before death the whole state is identical.
+        for hours in [6u32, 12, 24] {
+            let end = fresh.last_update_tick + hours * 360;
+            let mut delta = fresh.clone();
+            delta.update(end);
+            let mut oracle = fresh.clone();
+            step_to(&mut oracle, end);
+            assert_eq!(delta, oracle, "{hours} h");
+        }
         let end = fresh.last_update_tick + 14 * sim::TICKS_PER_DAY;
         let mut delta = fresh.clone();
         delta.update(end);
         let mut oracle = fresh.clone();
-        let mut t = oracle.last_update_tick;
-        while t < end {
-            t += 6;
-            oracle.update(t);
-        }
+        step_to(&mut oracle, end);
         println!(
-            "14 days: delta {:?} h={} / oracle {:?} h={}",
+            "14 days: delta {:?} age {} h={} / oracle {:?} age {} h={}",
             delta.phase,
+            delta.age_ticks,
             delta.health / 655,
             oracle.phase,
+            oracle.age_ticks,
             oracle.health / 655
         );
         assert_eq!(delta.phase, oracle.phase);
+        assert_eq!(delta.phase, bornhack_aegg::game::engine::Phase::Gone);
+        // The moment of Gone: the age the pet reached.
+        assert_eq!(delta.age_ticks, oracle.age_ticks);
         assert!((delta.health as i32 / 655 - oracle.health as i32 / 655).abs() <= 2);
+    }
+
+    #[test]
+    fn gone_mid_gap_records_true_age() {
+        let fresh = fresh_sleeper();
+        let end = fresh.last_update_tick + 14 * sim::TICKS_PER_DAY;
+        let mut one = fresh.clone();
+        one.update(end);
+        let mut stepped = fresh.clone();
+        step_to(&mut stepped, end);
+        assert_eq!(one.phase, bornhack_aegg::game::engine::Phase::Gone);
+        assert_eq!(one.age_ticks, stepped.age_ticks);
+        assert!(
+            one.age_ticks < 4 * sim::TICKS_PER_DAY,
+            "age {}",
+            one.age_ticks
+        );
+        // A pet that survives the gap is credited all of it.
+        let mut alive = GameState::new_egg(1, bornhack_aegg::game::engine::PetKind::DEFAULT);
+        alive.update(6);
+        let before = alive.age_ticks;
+        alive.update(alive.last_update_tick + 100);
+        assert_eq!(alive.age_ticks, before + 100);
+    }
+
+    #[test]
+    fn party_plan_keeps_every_step_for_a_diabetic() {
+        use bornhack_aegg::game::engine::{DrinkKind, FoodKind};
+        use sim::Act;
+        let mut s = GameState::new_egg(1, bornhack_aegg::game::engine::PetKind::DEFAULT);
+        s.diabetic = true;
+        s.insulin_min = 0;
+        s.dirt = 60 * 655;
+        s.hydration = 10 * 655;
+        let p = sim::party(0, 11 * 60, &s);
+        let water = Act::Drink(DrinkKind::Water);
+        assert_eq!(p.len(), 7, "{:?}", p.as_slice());
+        assert_eq!(p[0], Act::Insulin);
+        assert_eq!(p.iter().filter(|a| **a == water).count(), 3);
+        assert!(p.contains(&Act::Eat(FoodKind::Frikandel)));
     }
 
     #[test]
