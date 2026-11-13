@@ -75,7 +75,6 @@ Known keys (everything else is silently ignored, so you don't have to keep your 
 | `SICK_CONDITION_MISERABLE_RATE` | sick decay when miserable | 0 – 4000 |
 | `MISERABLE_INTERVAL_BASE` | base miserable interval | 120 – 600 |
 | `MISERABLE_INTERVAL_MIN` | min miserable interval (when many stats are bad) | 10 – 200 |
-| `FEED_HUNGER_RELIEF` | hunger drop per Feed tick | 1000 – 20000 |
 | `FEED_DRAINED_RELIEF` | drained drop per Feed tick | 0 – 5000 |
 | `HEAL_SICK_RELIEF` | sick drop per Heal tick | 1000 – 30000 |
 | `RELAX_DRAINED_RELIEF` | drained drop per Relax tick | 1000 – 20000 |

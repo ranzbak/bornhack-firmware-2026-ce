@@ -1006,14 +1006,12 @@ pub struct PetStats {
     /// Remaining action cooldowns in ticks (1 tick = 10 s).  0 = ready.
     /// Mirrored from the matching `GameState` fields so the modal can
     /// show the exact remaining time on a disabled menu row.
-    pub cooldown_feed: u16,
     pub cooldown_heal: u16,
     pub cooldown_play: u16,
     pub cooldown_onlypets: u16,
     pub cooldown_exercise: u16,
     pub cooldown_medicate: u16,
     pub cooldown_ozempic: u16,
-    pub cooldown_drink: u16,
     pub cooldown_rehab: u16,
     pub cooldown_tictactoe: u16,
     pub cooldown_lightsout: u16,

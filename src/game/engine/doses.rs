@@ -234,7 +234,7 @@ fn sip(s: &mut GameState, drink: DrinkKind) {
     }
 
     let p = pour(drink);
-    let alcoholic = p.booze > 0;
+    let alcoholic = drink.is_alcoholic();
     if alcoholic && s.rehab_min > 0 {
         // Relapse.
         s.rehab_min = 0;

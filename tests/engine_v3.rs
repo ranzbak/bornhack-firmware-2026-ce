@@ -1588,4 +1588,63 @@ mod doses_food_drink {
         s.update(now);
         assert_eq!(s.tick_rem, 0, "5 + 1 = one whole minute");
     }
+
+    #[test]
+    fn remainder_waits_out_a_partial_update_of_the_action() {
+        let mut s = pet();
+        s.tick_rem = 5;
+        let full0 = s.fullness;
+        assert!(s.feed(FoodKind::Apple));
+        let t0 = s.last_update_tick;
+        s.update(t0 + 1);
+        assert_eq!(s.active_action, Some(Action::Feed));
+        assert_eq!(s.action_ticks_remaining, 1);
+        assert_eq!(s.tick_rem, 5);
+        assert_eq!(s.fullness, full0, "dose not yet applied");
+        s.update(t0 + 2);
+        assert_eq!(s.active_action, None);
+        assert_eq!(s.tick_rem, 5);
+        assert_eq!(s.fullness as i32, full0 as i32 + pct(25));
+    }
+
+    #[test]
+    fn leftover_ticks_plus_remainder_age_exactly_one_minute() {
+        let mut s = pet();
+        s.tick_rem = 5;
+        assert!(s.feed(FoodKind::Apple));
+        let t0 = s.last_update_tick;
+        // Dose only, then one more tick: 5 + 1 = one minute, aged once.
+        let mut after_dose = s.clone();
+        after_dose.update(t0 + FEED_DURATION() as u32);
+        assert_eq!(after_dose.tick_rem, 5);
+        // 2 ticks feed, 1 left over, in one call.
+        s.update(t0 + FEED_DURATION() as u32 + 1);
+        assert_eq!(s.tick_rem, 0);
+        let mut one_minute = after_dose.clone();
+        bornhack_aegg::game::engine::advance::advance(&mut one_minute, 1);
+        assert_eq!(s.fullness, one_minute.fullness);
+        assert_eq!(s.hydration, one_minute.hydration);
+        assert_eq!(s.energy, one_minute.energy);
+        assert_ne!(s.fullness, after_dose.fullness, "one minute did age");
+    }
+
+    #[test]
+    fn tired_is_judged_before_the_glass() {
+        let mut s = pet();
+        s.energy = (pct(33) - 1) as u16; // just under ENERGY_LO, +5 would lift it over
+        sip(&mut s, DrinkKind::Beer);
+        assert_eq!(s.booze as i32 / P, 22);
+    }
+
+    #[test]
+    fn unaffordable_action_on_a_sleeper_neither_wakes_nor_charges() {
+        let mut s = pet();
+        s.is_sleeping = true;
+        s.money_enabled = true;
+        s.money = 5;
+        assert!(!s.feed(FoodKind::Salad));
+        assert_eq!(s.money, 5);
+        assert!(s.is_sleeping);
+        assert_eq!(s.active_action, None);
+    }
 }

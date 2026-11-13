@@ -390,13 +390,13 @@ impl Item {
             }
         };
         match self {
-            Self::FeedFood(_) => action_remaining(Action::Feed).max(stats.cooldown_feed),
+            Self::FeedFood(_) => action_remaining(Action::Feed),
             Self::GiveMedicine => action_remaining(Action::Heal).max(stats.cooldown_heal),
             Self::GiveMedication => {
                 action_remaining(Action::Medicate).max(stats.cooldown_medicate)
             }
             Self::Ozempic => action_remaining(Action::Ozempic).max(stats.cooldown_ozempic),
-            Self::DrinkChoice(_) => action_remaining(Action::Drink).max(stats.cooldown_drink),
+            Self::DrinkChoice(_) => action_remaining(Action::Drink),
             Self::Rehab => action_remaining(Action::Rehab).max(stats.cooldown_rehab),
             Self::ExerciseNow => action_remaining(Action::Exercise).max(stats.cooldown_exercise),
             Self::Battle => stats.cooldown_battle,
