@@ -105,12 +105,13 @@ pub enum Phase {
 
 /// HAX earned by the "Only pets" hobby (non-broke) branch.
 pub const ONLYPETS_HOBBY_REWARD: u32 = 20;
+/// Grade (0..=2) the mini-game dose is given for a win or draw: the best one.
+/// The games report no finer result yet.
+pub const MINIGAME_WIN_GRADE: u8 = 2;
 /// HAX earned for winning a mini-game.
 pub const MINIGAME_HAX_REWARD: u32 = 15;
 /// HAX earned for winning a mesh Battle.
 pub const BATTLE_HAX_REWARD: u32 = 20;
-/// Happiness change per Play / Only-pets completion = 30% of STAT_MAX (65535).
-pub const HAPPINESS_STEP: u16 = 19660;
 /// HAX cost of the basic Play action.
 pub const PLAY_HAX_COST: u32 = 10;
 /// HAX cost of a drug dose (Ozempic / Medicate / Rehab).
@@ -131,11 +132,6 @@ pub fn medication_price(hard: bool) -> u32 {
 pub fn rehab_price(hard: bool) -> u32 {
     DRUG_HAX_COST * if hard { REHAB_HARD_MULT } else { 1 }
 }
-/// Below this balance the pet is "broke" — Only-pets forces the low-pay,
-/// happiness-draining work branch instead of the hobby branch.
-pub const BROKE_THRESHOLD: u32 = 20;
-/// HAX from the Only-pets BROKE (forced-work) branch.
-pub const ONLYPETS_BROKE_REWARD: u32 = 100;
 
 /// Active user action (mutually exclusive).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -344,7 +340,6 @@ pub struct GameState {
     /// Cooldown after completing "Only pets". Transient (not persisted),
     /// same policy as the mini-game cooldowns above — rebooting mid-cooldown
     /// just makes the action available again a little early.
-    pub cooldown_onlypets: u16,
 
     // Sleep.
     pub is_sleeping: bool,
@@ -471,7 +466,6 @@ impl GameState {
             cooldown_blackhole: 0,
             cooldown_nim: 0,
             cooldown_bornjeweled: 0,
-            cooldown_onlypets: 0,
 
             is_sleeping: false,
             hibernating: false,
@@ -616,9 +610,14 @@ impl GameState {
         self.action_ticks_remaining -= used as u8;
         if self.action_ticks_remaining == 0 {
             if let Some(action) = self.active_action.take() {
-                // A refusal leaves the pet untouched; the starters already
-                // turned those away, so only a changed state lands here.
-                let _ = doses::apply(self, action);
+                // A refusal leaves the pet untouched. The starters already
+                // turned those away and needs do not age during an action
+                // (R23), so it only happens when the saved state changed
+                // under a running action (a reboot mid-action).
+                if let Err(_refusal) = doses::apply(self, action) {
+                    #[cfg(feature = "embassy-core")]
+                    defmt::warn!("action dose refused at animation end: {}", _refusal);
+                }
             }
             self.active_food = None;
             self.active_drink = None;
@@ -645,7 +644,10 @@ impl GameState {
     /// On success the action and its duration are set. Callers with extra
     /// state (`active_food`, `active_drink`) set it after a `true` return.
     fn start_action(&mut self, action: Action, price: Option<u32>, duration: u8) -> bool {
-        if !self.is_alive() || self.active_action.is_some() {
+        if !self.is_alive()
+            || self.active_action.is_some()
+            || doses::refusal(self, action, None).is_some()
+        {
             return false;
         }
         let price = price.filter(|_| self.money_enabled);
@@ -686,10 +688,17 @@ impl GameState {
 
     /// Send the pet to "Only pets" to earn HAX. Timed action like Play.
     pub fn only_pets(&mut self) -> bool {
-        if self.cooldown_onlypets > 0 {
-            return false;
-        }
         self.start_action(Action::OnlyPets, None, PLAY_DURATION())
+    }
+
+    /// Start a bath.
+    pub fn wash(&mut self) -> bool {
+        self.start_action(Action::Wash, None, PLAY_DURATION())
+    }
+
+    /// Start a rest.
+    pub fn relax(&mut self) -> bool {
+        self.start_action(Action::Relax, None, PLAY_DURATION())
     }
 
     /// Start the exercise action — the primary relief valve for `weight`.
@@ -697,14 +706,9 @@ impl GameState {
         self.start_action(Action::Exercise, None, EXERCISE_DURATION())
     }
 
-    /// Administer diabetes medication.  Only meaningful once `diabetic`
-    /// is set — resets `cooldown_medicate`, which doubles as the
-    /// protection window during which the diabetes sick-penalty is
-    /// suppressed.
+    /// Administer insulin. Only for a diabetic pet whose last dose is
+    /// nearly worn off (see `doses::refusal`).
     pub fn medicate(&mut self) -> bool {
-        if !self.diabetic || self.med_cd_min > 0 {
-            return false;
-        }
         self.start_action(
             Action::Medicate,
             Some(medication_price(self.hard_mode)),
@@ -716,9 +720,6 @@ impl GameState {
     /// treatment than Exercise. Unlike `medicate()`, this is *not*
     /// gated on being diabetic — any pet can take it.
     pub fn ozempic(&mut self) -> bool {
-        if self.ozempic_cd_min > 0 {
-            return false;
-        }
         self.start_action(
             Action::Ozempic,
             Some(medication_price(self.hard_mode)),
@@ -739,12 +740,9 @@ impl GameState {
         true
     }
 
-    /// Administer rehab treatment for alcoholism.  Only meaningful once
-    /// `alcoholic` is set — mirrors `medicate()`.
+    /// Administer rehab treatment. Only for a dependent pet not already in
+    /// rehab — mirrors `medicate()`.
     pub fn rehab(&mut self) -> bool {
-        if !self.dependent || self.rehab_min > 0 {
-            return false;
-        }
         self.start_action(
             Action::Rehab,
             Some(rehab_price(self.hard_mode)),
@@ -754,20 +752,12 @@ impl GameState {
 
     /// Put the pet to sleep.
     pub fn sleep(&mut self) -> bool {
-        if !self.is_alive() || self.is_sleeping {
-            return false;
-        }
-        self.is_sleeping = true;
-        true
+        self.is_alive() && doses::fall_asleep(self).is_ok()
     }
 
     /// Wake the pet up.
     pub fn wake(&mut self) -> bool {
-        if !self.is_sleeping {
-            return false;
-        }
-        self.is_sleeping = false;
-        true
+        doses::wake_up(self).is_ok()
     }
 
     /// Hibernate the pet — all progression freezes.  Marks the
@@ -801,7 +791,7 @@ impl GameState {
         if self.phase != Phase::Active {
             return;
         }
-        self.fullness = self.fullness.saturating_sub(MINIGAME_HUNGER_COST());
+        doses::minigame(self, MINIGAME_WIN_GRADE);
         match game {
             MiniGame::TicTacToe => self.cooldown_tictactoe = MINIGAME_COOLDOWN(),
             MiniGame::LightsOut => self.cooldown_lightsout = MINIGAME_COOLDOWN(),
@@ -1006,13 +996,6 @@ pub struct PetStats {
     /// Remaining action cooldowns in ticks (1 tick = 10 s).  0 = ready.
     /// Mirrored from the matching `GameState` fields so the modal can
     /// show the exact remaining time on a disabled menu row.
-    pub cooldown_heal: u16,
-    pub cooldown_play: u16,
-    pub cooldown_onlypets: u16,
-    pub cooldown_exercise: u16,
-    pub cooldown_medicate: u16,
-    pub cooldown_ozempic: u16,
-    pub cooldown_rehab: u16,
     pub cooldown_tictactoe: u16,
     pub cooldown_lightsout: u16,
     pub cooldown_blackhole: u16,
@@ -1098,22 +1081,12 @@ impl GameState {
         self.save_pending = true;
     }
 
-    /// Reduce `miserable` from meeting (or spending time with) a mesh
-    /// friend over the SHDW channel — see `crate::game::friends`.
-    /// `big` is a bigger one-time bump for a brand-new friend; a smaller
-    /// bump applies to a cooldown-gated recurring reunion with someone
-    /// already known.  Just another `miserable` reduction, so it's
-    /// naturally re-clamped by `apply_miserable_floor()` on the next tick
-    /// if the pet is Leaving/critical, the same way `Play` already works.
+    /// Meeting (or spending time with) a mesh friend over the SHDW channel —
+    /// see `crate::game::friends`. `big` is the bigger one-time bump for a
+    /// brand-new friend; the smaller one applies to a cooldown-gated
+    /// recurring reunion with someone already known. Both add fun.
     pub fn friend_boost(&mut self, big: bool) {
-        // STAT_MAX() is 65535, so `* 2` overflows u16 before the `/ 5` can
-        // bring it back down — widen to u32 for the multiply.
-        let amount = if big {
-            (STAT_MAX() as u32 * 2 / 5) as u16 // ~40%
-        } else {
-            STAT_MAX() / 10 // ~10%
-        };
-        self.mood = self.mood.saturating_add(amount);
+        doses::friend(self, big);
     }
 
     /// Record the outcome of a mesh Battle — see `crate::game::battle`.
@@ -1546,29 +1519,27 @@ mod overweight_diabetes_tests {
         assert_eq!(state.cooldown_battle, BATTLE_COOLDOWN());
     }
 
-    /// `friend_boost(true)` used to compute `STAT_MAX() * 2 / 5` with the
-    /// multiply in u16 space — since STAT_MAX() is 65535, that overflows
-    /// before the divide ever runs (panics under overflow-checks, silently
-    /// wraps to roughly half the intended ~40% otherwise). Meeting a brand
-    /// new mesh friend must not panic and must actually apply a bigger cut
-    /// than the "already-known friend" ~10% boost.
+    /// Meeting a brand new mesh friend lifts fun more than a reunion with a
+    /// known one, and never overflows the level range.
     #[test]
-    fn friend_boost_does_not_overflow_and_scales_with_big() {
+    fn friend_boost_scales_with_big() {
         let mut state = GameState::new_egg(17, PetKind::DEFAULT);
-        state.mood = 0;
-
+        state.fun = 0;
         state.friend_boost(true);
-        let after_big = state.mood;
-        assert!(after_big > 0, "a big friend boost should raise mood");
+        let after_big = state.fun;
+        assert!(after_big > 0, "a big friend boost should raise fun");
 
-        state.mood = 0;
+        state.fun = 0;
         state.friend_boost(false);
-        let after_small = state.mood;
-
         assert!(
-            after_big > after_small,
-            "meeting a new friend (big={after_big}) should lift mood more than an already-known one (small={after_small})"
+            after_big > state.fun,
+            "a new friend (big={after_big}) should lift fun more than a known one (small={})",
+            state.fun
         );
+
+        state.fun = u16::MAX;
+        state.friend_boost(true);
+        assert_eq!(state.fun, u16::MAX);
     }
 
     // ── Stage 2: "user can make money" ──────────────────────────────────

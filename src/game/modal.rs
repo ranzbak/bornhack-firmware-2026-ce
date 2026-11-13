@@ -391,19 +391,15 @@ impl Item {
         };
         match self {
             Self::FeedFood(_) => action_remaining(Action::Feed),
-            Self::GiveMedicine => action_remaining(Action::Heal).max(stats.cooldown_heal),
-            Self::GiveMedication => {
-                action_remaining(Action::Medicate).max(stats.cooldown_medicate)
-            }
-            Self::Ozempic => action_remaining(Action::Ozempic).max(stats.cooldown_ozempic),
+            Self::GiveMedicine => action_remaining(Action::Heal),
+            Self::GiveMedication => action_remaining(Action::Medicate),
+            Self::Ozempic => action_remaining(Action::Ozempic),
             Self::DrinkChoice(_) => action_remaining(Action::Drink),
-            Self::Rehab => action_remaining(Action::Rehab).max(stats.cooldown_rehab),
-            Self::ExerciseNow => action_remaining(Action::Exercise).max(stats.cooldown_exercise),
+            Self::Rehab => action_remaining(Action::Rehab),
+            Self::ExerciseNow => action_remaining(Action::Exercise),
             Self::Battle => stats.cooldown_battle,
-            Self::PlayNow => action_remaining(Action::Play).max(stats.cooldown_play),
-            Self::OnlyPets => {
-                action_remaining(Action::OnlyPets).max(stats.cooldown_onlypets)
-            }
+            Self::PlayNow => action_remaining(Action::Play),
+            Self::OnlyPets => action_remaining(Action::OnlyPets),
             Self::TicTacToe => stats.cooldown_tictactoe,
             Self::LightsOut => stats.cooldown_lightsout,
             Self::BlackHole => stats.cooldown_blackhole,

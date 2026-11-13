@@ -1648,3 +1648,333 @@ mod doses_food_drink {
         assert_eq!(s.active_action, None);
     }
 }
+
+mod doses_care {
+    use bornhack_aegg::game::engine::needs::P;
+    use bornhack_aegg::game::engine::thresholds::{
+        EXERCISE_DURATION, HATCHING_TICKS, HEAL_DURATION, MEDICATE_DURATION, OZEMPIC_DURATION,
+        PLAY_DURATION, REHAB_DURATION,
+    };
+    use bornhack_aegg::game::engine::{
+        GameState, MiniGame, ONLYPETS_HOBBY_REWARD, PetKind, Phase, doses,
+    };
+
+    fn pct(v: i32) -> i32 {
+        v * P
+    }
+
+    fn pet() -> GameState {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        assert_eq!(s.phase, Phase::Active);
+        s.is_sleeping = false;
+        s.tick_rem = 0;
+        s.money_enabled = false;
+        s.mood = pct(50) as u16;
+        s.energy = pct(90) as u16;
+        s.fullness = pct(60) as u16;
+        s.hydration = pct(60) as u16;
+        s.weight = pct(50) as u16;
+        s.dirt = pct(40) as u16;
+        s.fitness = pct(50) as u16;
+        s.fun = pct(50) as u16;
+        s.strain = 0;
+        s.booze = 0;
+        s.health = pct(70) as u16;
+        s
+    }
+
+    fn finish(s: &mut GameState, ticks: u8) {
+        let now = s.last_update_tick + ticks as u32;
+        s.update(now);
+        assert_eq!(s.active_action, None);
+    }
+
+    fn exercise(s: &mut GameState) {
+        assert!(s.exercise());
+        finish(s, EXERCISE_DURATION());
+    }
+
+    #[test]
+    fn play_is_a_dose() {
+        let mut s = pet();
+        s.groggy_min = 100;
+        assert!(s.play());
+        finish(&mut s, PLAY_DURATION());
+        assert_eq!(s.fun as i32, pct(75));
+        assert_eq!(s.energy as i32, pct(85));
+        assert_eq!(s.fullness as i32, pct(57));
+        assert_eq!(s.hydration as i32, pct(56));
+        assert_eq!(s.fitness as i32, pct(52));
+        assert_eq!(s.dirt as i32, pct(43));
+        assert_eq!(s.groggy_min, 40);
+    }
+
+    #[test]
+    fn tired_play_counts_double_and_injured_play_is_refused() {
+        let mut s = pet();
+        s.energy = pct(30) as u16;
+        assert!(s.play());
+        finish(&mut s, PLAY_DURATION());
+        assert_eq!(s.fun as i32, pct(100));
+
+        let mut s = pet();
+        s.injured_min = 10;
+        assert!(!s.play());
+        assert!(!s.exercise());
+        assert_eq!(s.active_action, None);
+    }
+
+    #[test]
+    fn minigame_grade_scales_fun_and_doubles_when_tired() {
+        let mut s = pet();
+        doses::minigame(&mut s, 2);
+        assert_eq!(s.fun as i32, pct(50 + 10 + 14));
+        assert_eq!(s.energy as i32, pct(87));
+        let mut s = pet();
+        s.energy = pct(30) as u16;
+        doses::minigame(&mut s, 1);
+        assert_eq!(s.fun as i32, pct(50 + 34));
+        assert_eq!(s.energy as i32, pct(27));
+        let mut s = pet();
+        s.award_inspiration(MiniGame::Nim);
+        assert!(s.fun as i32 > pct(50));
+    }
+
+    #[test]
+    fn sport_while_hungry_injures_on_the_second_session() {
+        let mut s = pet();
+        s.fullness = pct(20) as u16; // under FULL_LO: strain times 3/2 = 52.5 %
+        exercise(&mut s);
+        assert_eq!(s.strain as i32, pct(35) * 150 / 100);
+        assert_eq!(s.injured_min, 0);
+        assert_eq!(s.fitness as i32, pct(62));
+        let health = s.health;
+        exercise(&mut s);
+        assert!(s.strain as i32 > pct(60));
+        assert_eq!(s.injured_min, 1440);
+        assert_eq!(s.health as i32, health as i32 - pct(5));
+        assert_eq!(s.fitness as i32, pct(62), "an injury earns no fitness");
+        assert!(!s.exercise(), "injured: refused");
+    }
+
+    #[test]
+    fn exercise_dose_numbers() {
+        let mut s = pet();
+        s.booze = pct(20) as u16;
+        s.hangover_min = 200;
+        s.groggy_min = 50;
+        exercise(&mut s);
+        assert_eq!(s.strain as i32, pct(35));
+        assert_eq!(s.energy as i32, pct(80));
+        assert_eq!(s.fullness as i32, pct(52));
+        assert_eq!(s.hydration as i32, pct(48));
+        assert_eq!(s.fun as i32, pct(60));
+        assert_eq!(s.booze as i32, pct(15));
+        assert_eq!(s.dirt as i32, pct(52));
+        assert_eq!(s.weight as i32, pct(47));
+        assert_eq!(s.hangover_min, 80);
+        assert_eq!(s.groggy_min, 0);
+        assert_eq!(s.fitness as i32, pct(62));
+    }
+
+    #[test]
+    fn exercise_strain_multipliers_stack() {
+        // Rested and fit: 35 * 7/10 * 85/100.
+        let mut s = pet();
+        s.rested_min = 100;
+        s.fitness = pct(80) as u16;
+        exercise(&mut s);
+        assert_eq!(s.strain as i32, pct(35) * 70 / 100 * 85 / 100);
+
+        // Hungry and overweight: 35 * 3/2 * 6/5.
+        let mut s = pet();
+        s.fullness = pct(20) as u16;
+        s.weight = pct(90) as u16;
+        exercise(&mut s);
+        assert_eq!(s.strain as i32, pct(35) * 150 / 100 * 120 / 100);
+
+        // Deprived: 5/4.
+        let mut s = pet();
+        s.deprived = true;
+        exercise(&mut s);
+        assert_eq!(s.strain as i32, pct(35) * 125 / 100);
+    }
+
+    #[test]
+    fn wash_refused_when_clean_and_does_not_wake() {
+        let mut s = pet();
+        s.dirt = pct(20) as u16;
+        s.is_sleeping = true;
+        s.money_enabled = true;
+        let money = s.money;
+        assert!(!s.wash());
+        assert!(s.is_sleeping);
+        assert_eq!(s.money, money);
+        assert_eq!(s.active_action, None);
+
+        s.dirt = pct(80) as u16;
+        assert!(s.wash());
+        assert!(!s.is_sleeping, "a care action wakes the pet");
+        finish(&mut s, PLAY_DURATION());
+        assert_eq!(s.dirt as i32, pct(10));
+    }
+
+    #[test]
+    fn relax_trades_fun_for_calm() {
+        let mut s = pet();
+        s.strain = pct(40) as u16;
+        assert!(s.relax());
+        finish(&mut s, PLAY_DURATION());
+        assert_eq!(s.fun as i32, pct(25));
+        assert_eq!(s.strain as i32, pct(25));
+        assert_eq!(s.energy as i32, pct(93));
+        assert_eq!(s.fitness as i32, pct(49));
+    }
+
+    #[test]
+    fn medicine_on_an_injury_halves_it_and_adds_booze() {
+        let mut s = pet();
+        s.injured_min = 1440;
+        assert!(s.heal());
+        finish(&mut s, HEAL_DURATION());
+        assert_eq!(s.injured_min, 720);
+        assert_eq!(s.booze as i32, pct(10));
+        assert_eq!(s.med_cd_min, 240);
+        assert_eq!(s.health as i32, pct(70));
+    }
+
+    #[test]
+    fn medicine_heals_or_numbs_and_waits_out_its_cooldown() {
+        let mut s = pet();
+        s.health = pct(50) as u16;
+        assert!(s.heal());
+        finish(&mut s, HEAL_DURATION());
+        assert_eq!(s.health as i32, pct(60));
+        assert_eq!(s.booze, 0);
+        assert!(!s.heal(), "240 minute cooldown");
+
+        let mut s = pet();
+        s.health = pct(90) as u16;
+        assert!(s.heal());
+        finish(&mut s, HEAL_DURATION());
+        assert_eq!(s.health as i32, pct(90));
+        assert_eq!(s.booze as i32, pct(10));
+    }
+
+    #[test]
+    fn medicate_gates_on_insulin_window() {
+        let mut s = pet();
+        assert!(!s.medicate(), "not diabetic");
+        s.diabetic = true;
+        s.insulin_min = 121;
+        assert!(!s.medicate());
+        s.insulin_min = 120;
+        assert!(s.medicate());
+        finish(&mut s, MEDICATE_DURATION());
+        assert_eq!(s.insulin_min, 480);
+        // The banner reads `diabetic && insulin_min == 0`.
+        assert!(s.diabetic && s.insulin_min != 0);
+        assert!(!s.medicate(), "inside the window");
+    }
+
+    #[test]
+    fn ozempic_cooldown_refuses_second_dose() {
+        let mut s = pet();
+        s.weight = pct(80) as u16;
+        assert!(s.ozempic());
+        finish(&mut s, OZEMPIC_DURATION());
+        assert_eq!(s.weight as i32, pct(65));
+        assert_eq!(s.fitness as i32, pct(45));
+        assert_eq!(s.ozempic_min, 1440);
+        assert_eq!(s.ozempic_cd_min, 2880);
+        assert!(!s.ozempic());
+        assert_eq!(s.active_action, None);
+    }
+
+    #[test]
+    fn rehab_only_when_dependent() {
+        let mut s = pet();
+        assert!(!s.rehab());
+        s.dependent = true;
+        assert!(s.rehab());
+        finish(&mut s, REHAB_DURATION());
+        assert_eq!(s.rehab_min, 4320);
+        assert!(!s.rehab(), "already in rehab");
+    }
+
+    #[test]
+    fn only_pets_on_a_sleeping_pet_is_refused_and_does_not_wake() {
+        let mut s = pet();
+        s.is_sleeping = true;
+        assert!(!s.only_pets());
+        assert!(s.is_sleeping);
+        assert_eq!(s.active_action, None);
+    }
+
+    #[test]
+    fn only_pets_pays_and_tires() {
+        let mut s = pet();
+        s.money_enabled = true;
+        s.money = 0;
+        assert!(s.only_pets());
+        finish(&mut s, PLAY_DURATION());
+        assert_eq!(s.money, ONLYPETS_HOBBY_REWARD);
+        assert_eq!(s.energy as i32, pct(75));
+        assert_eq!(s.fun as i32, pct(60));
+        assert_eq!(s.mood as i32, pct(45));
+        // No cooldown: it can go again.
+        assert!(s.only_pets());
+    }
+
+    #[test]
+    fn only_pets_refused_when_tired_or_injured() {
+        let mut s = pet();
+        s.energy = pct(30) as u16;
+        assert!(!s.only_pets());
+        let mut s = pet();
+        s.injured_min = 5;
+        assert!(!s.only_pets());
+    }
+
+    #[test]
+    fn sleep_sets_night_from_energy_and_zeroes_the_counters() {
+        let mut s = pet();
+        s.energy = pct(40) as u16;
+        s.sleep_min = 99;
+        s.good_sleep_min = 99;
+        assert!(s.sleep());
+        assert!(s.is_sleeping && s.night);
+        assert_eq!((s.sleep_min, s.good_sleep_min), (0, 0));
+        assert!(!s.sleep(), "already asleep");
+        assert!(s.wake());
+        assert!(!s.is_sleeping);
+        assert!(!s.wake(), "already awake");
+
+        let mut s = pet();
+        assert!(s.sleep());
+        assert!(!s.night, "a nap");
+    }
+
+    #[test]
+    fn friend_boost_gives_fun_not_mood() {
+        let mut s = pet();
+        s.friend_boost(true);
+        assert_eq!(s.fun as i32, pct(65));
+        s.friend_boost(false);
+        assert_eq!(s.fun as i32, pct(70));
+        assert_eq!(s.mood as i32, pct(50));
+    }
+
+    #[test]
+    fn care_actions_on_a_sleeper_wake_it_but_refusals_do_not() {
+        let mut s = pet();
+        s.is_sleeping = true;
+        s.injured_min = 1;
+        assert!(!s.play());
+        assert!(s.is_sleeping);
+        s.injured_min = 0;
+        assert!(s.play());
+        assert!(!s.is_sleeping);
+    }
+}
