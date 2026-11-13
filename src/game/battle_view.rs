@@ -397,11 +397,20 @@ where
     }
 }
 
+/// Picker title carrying the lifetime record, e.g. `Battle 3W-1L`.
+pub fn picker_title(wins: u16, losses: u16) -> heapless::String<21> {
+    use core::fmt::Write;
+    let mut title = heapless::String::new();
+    let _ = write!(title, "Battle {}W-{}L", wins, losses);
+    title
+}
+
 fn draw_picker<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    ui::draw_title_bar(display, "Battle a Friend", Point::zero(), 152)?;
+    let (wins, losses) = super::lifecycle::battle_record().unwrap_or((0, 0));
+    ui::draw_title_bar(display, &picker_title(wins, losses), Point::zero(), 152)?;
 
     let count = super::friends::count();
     if count == 0 {
@@ -610,5 +619,16 @@ mod anim_tests {
         // Both labels centre inside the 152px panel.
         assert!(ANIM_LEFT_CX > 0 && ANIM_LEFT_CX < 152);
         assert!(ANIM_RIGHT_CX > 0 && ANIM_RIGHT_CX < 152);
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::picker_title;
+
+    #[test]
+    fn the_battle_picker_shows_your_record() {
+        assert_eq!(picker_title(3, 1).as_str(), "Battle 3W-1L");
+        assert!(picker_title(9999, 9999).len() <= 21);
     }
 }

@@ -1120,7 +1120,7 @@ impl GameState {
 /// Display-friendly snapshot of the pet's state.
 ///
 /// All stats are whole percent of the internal u16 level; for the needs
-/// 100 = best (`drunk` = 100 - booze).
+/// 100 = best (`booze` and `weight_pct` report the raw level).
 ///
 /// Obtain via [`GameState::stats()`] which triggers a state update first.
 #[derive(Clone, Copy, Debug)]
@@ -1134,19 +1134,10 @@ pub struct PetStats {
     pub healthy: u8,
     /// How happy the pet is (100 = happy, 0 = miserable).
     pub happy: u8,
-    /// How sober the pet is (100 = stone sober, 0 = maximally drunk).
-    pub drunk: u8,
 
     /// Whether the pet has developed type 2 diabetes (permanent once set).
     pub diabetic: bool,
-    /// Whether weight is above the weight band (`weight_hi`) — the status
-    /// word `Overweight`. Diabetes counts its own, higher line
-    /// (`DIABETES_WEIGHT_HI_PCT`), and `diabetic` is permanent once set, so
-    /// a pet can be overweight without being diabetic, or diabetic while
-    /// back inside the band.
-    pub overweight: bool,
-    /// Whether the pet has developed alcoholism (permanent once set) —
-    /// same relationship to `drunk` as `diabetic` has to `overweight`.
+    /// Whether the pet has developed alcoholism (permanent once set).
     pub alcoholic: bool,
 
     /// Current lifecycle phase.
@@ -1304,7 +1295,6 @@ impl GameState {
             tired: level_pct(self.energy),
             healthy: level_pct(self.health),
             happy: level_pct(self.mood),
-            drunk: 100 - level_pct(self.booze),
 
             water: level_pct(self.hydration),
             fun: level_pct(self.fun),
@@ -1323,7 +1313,6 @@ impl GameState {
             injured_min: self.injured_min,
 
             diabetic: self.diabetic,
-            overweight: self.weight as i32 > needs::weight_hi(),
             alcoholic: self.dependent,
 
             phase: self.phase,

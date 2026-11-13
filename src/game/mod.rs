@@ -24,7 +24,6 @@ pub mod diary_view;
 pub mod engine;
 pub mod friends;
 pub mod friends_view;
-pub mod health_view;
 pub mod input;
 pub mod lifecycle;
 pub mod lightsout;
@@ -440,7 +439,6 @@ pub fn full_screen_view_up() -> bool {
     crate::text_entry::is_active()
         || diary_view::is_active()
         || traits_view::is_active()
-        || health_view::is_active()
         || friends_view::is_active()
         || battle_view::is_active()
         || realm_view::is_active()

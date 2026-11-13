@@ -100,12 +100,18 @@ Stats interact: if several are out of band, the pet becomes miserable
 faster, and a miserable pet is worse off everywhere. Keep on top of things
 before they spiral!
 
-The Stats menu also offers "Health status" for a plain-language readout of Diabetic /
-Overweight / Alcoholic / Fit% (plus your lifetime Battle win/loss
-record — see [Battles](#battles) below), with a short explanation of
-what triggers each, or "Friends" for the pets your badge has met over
-the mesh (see
-[Friends & the SHDW Channel](#friends--the-shdw-channel) below).
+The Stats menu offers "View stats" (a two-page view: page 2 covers the
+conditions, Fit and Booze), "Diary", "Rolled stats", and "Friends" for the
+pets your badge has met over the mesh (see
+[Friends & the SHDW Channel](#friends--the-shdw-channel) below). Your
+lifetime Battle win/loss record shows in the title of the Battle picker
+(see [Battles](#battles) below).
+
+**Permanent conditions.** Diabetes (from sustained overweight) and
+dependence (from sustained heavy drinking) do not wear off on their own.
+They stay until treated: Rehab clears dependence once it has run its
+course, and diabetes only reverses after the pet has been lean and fit
+for a sustained period. Until then, neglect leaves them in place.
 
 "Diary" lists the last 6 things that went wrong (or well), newest first,
 three per page (Left / Right flips the page, any other button closes).
@@ -328,7 +334,8 @@ computed fresh for each fight and discarded afterward. Losing a battle
 never affects `sick`, `miserable`, or anything else about the pet's
 actual wellbeing; the worst that happens is you lose the bragging
 rights. Wins and losses are tracked two ways: a simple lifetime counter
-on your pet overall (visible in Health Status), and a **head-to-head
+on your pet overall (visible in the title of the Battle picker, as
+"Battle 3W-1L"), and a **head-to-head
 record against each specific friend** (visible on that friend's detail
 screen under Stats > Friends). Both badges update the same
 head-to-head tally for every battle between them — win it as the

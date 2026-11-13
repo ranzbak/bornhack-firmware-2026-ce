@@ -94,7 +94,6 @@ impl ModalKind {
                 Item::ViewStats,
                 Item::Diary,
                 Item::RolledStats,
-                Item::HealthStatus,
                 Item::Friends,
                 Item::Cancel,
             ],
@@ -188,7 +187,6 @@ enum Item {
     ViewStats,
     Diary,
     RolledStats,
-    HealthStatus,
     Friends,
     Battle,
     FeedFood(super::engine::FoodKind),
@@ -299,7 +297,6 @@ impl Item {
             Self::ViewStats => "View stats",
             Self::Diary => "Diary",
             Self::RolledStats => "Rolled stats",
-            Self::HealthStatus => "Health status",
             Self::Friends => "Friends",
             Self::Battle => "Battle",
             Self::FeedFood(food) => food.label(),
@@ -377,7 +374,6 @@ impl Item {
             | Self::ViewStats
             | Self::Diary
             | Self::RolledStats
-            | Self::HealthStatus
             | Self::Friends
             | Self::PlayMusic
             | Self::Song(_)
@@ -533,10 +529,6 @@ impl Item {
             }
             Self::RolledStats => {
                 super::traits_view::open();
-                close();
-            }
-            Self::HealthStatus => {
-                super::health_view::open();
                 close();
             }
             Self::Friends => {
@@ -1438,12 +1430,12 @@ mod tests {
     }
 
     #[test]
-    fn stats_menu_has_a_diary_row() {
+    fn stats_menu_has_no_health_status_row() {
         let labels: std::vec::Vec<&str> =
             ModalKind::Stats.items().iter().map(|i| i.label()).collect();
         assert_eq!(
             labels,
-            ["View stats", "Diary", "Rolled stats", "Health status", "Friends", "Cancel"]
+            ["View stats", "Diary", "Rolled stats", "Friends", "Cancel"]
         );
     }
 

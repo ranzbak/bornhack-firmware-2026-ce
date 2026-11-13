@@ -38,12 +38,6 @@ pub fn dispatch(btn: ButtonId) -> bool {
         return true;
     }
 
-    // ── Health status view: any button closes it ────────────────────────
-    if super::health_view::is_active() {
-        super::health_view::close();
-        return true;
-    }
-
     // ── Friends view: owns its own input logic across its two states ────
     if super::friends_view::is_active() {
         super::friends_view::handle_input(btn);

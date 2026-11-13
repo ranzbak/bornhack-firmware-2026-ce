@@ -2749,8 +2749,8 @@ mod status_wake {
         let now = s.last_update_tick;
         let st = s.stats(now);
         assert_eq!(
-            (st.hunger, st.tired, st.healthy, st.happy, st.fit, st.drunk),
-            (50, 40, 90, 70, 45, 80)
+            (st.hunger, st.tired, st.healthy, st.happy, st.fit, st.booze),
+            (50, 40, 90, 70, 45, 20)
         );
         assert_eq!(
             (st.water, st.fun, st.clean, st.booze, st.weight_pct, st.fit),

@@ -23,9 +23,9 @@ here's what changed:
 - **Drinks & Alcoholism** — a second permanent-condition track, parallel
   to weight/diabetes: choose from Water/Cola/Beer/Wine/Whiskey; sustained
   heavy drinking triggers permanent alcoholism, managed with **Rehab**.
-- **Health Status view** (Stats menu) — a plain-language readout of
-  Diabetic/Overweight/Alcoholic/Fit%, plus your lifetime mesh Battle
-  win/loss record.
+- **Two-page stats view** (Stats menu) — page 1 shows the needs, page 2
+  the conditions (diabetic, alcoholic, Fit and Booze). Your lifetime mesh
+  Battle win/loss record shows in the title of the Battle picker.
 - **HAX economy** — an optional in-game currency. Turn it on at pet
   select ("With money"). Earn **HAX** from mini-game wins, Battle wins,
   and the new **OnlyPets** work action; spend it on food, drinks, and

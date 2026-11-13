@@ -899,6 +899,13 @@ pub fn pet_traits() -> Option<(u16, u16, u16)> {
     state.map(|s| (s.vitality, s.curiosity, s.resilience))
 }
 
+/// Lifetime mesh Battle record `(wins, losses)` of the current pet, or
+/// `None` if no game is active.
+pub fn battle_record() -> Option<(u16, u16)> {
+    let state = unsafe { (*GAME.get()).as_ref() };
+    state.map(|s| (s.wins, s.losses))
+}
+
 /// Derive the current pet's mesh-Battle combat stats (Attack/Defense/
 /// Speed/HP) from its live `PetStats` snapshot plus traits. Used both by
 /// the beacon ticker (to fill the outgoing `PetBeacon`) and by

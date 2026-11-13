@@ -644,12 +644,6 @@ where
         return game::diary_view::draw(display);
     }
 
-    // Health status: full-screen weight/diabetes modifiers view.
-    #[cfg(feature = "game")]
-    if game::health_view::is_active() {
-        return game::health_view::draw(display);
-    }
-
     // Friends: full-screen list of pets met over the SHDW mesh channel.
     #[cfg(feature = "game")]
     if game::friends_view::is_active() {
