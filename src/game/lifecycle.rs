@@ -126,9 +126,10 @@ async fn try_load() -> Option<GameState> {
             s.last_update_tick = 0;
             // Clock already known: catch up now. Otherwise `on_wall_clock_set`
             // does it when the clock first becomes known.
+            BOOT_SAVED_UNIX.store(s.saved_unix, Ordering::Relaxed);
             if let Some(now) = crate::unix_now() {
                 let uptime_s = (crate::platform::uptime_ms() / 1000) as u32;
-                apply_boot_catch_up(&mut s, &CATCH_UP_DONE, now, uptime_s);
+                apply_boot_catch_up(&mut s, &CATCH_UP_DONE, s.saved_unix, now, uptime_s);
             }
             defmt::info!(
                 "game: restored from flash (gen={} age={} upgraded={})",
@@ -212,16 +213,44 @@ pub fn deferred_catch_up_minutes(saved_unix: u32, now_unix: u32, uptime_s: u32) 
 /// first call takes it and applies the off-time (then requests a save so
 /// `saved_unix` is refreshed); later calls do nothing. Returns true if the
 /// catch-up was taken.
-pub fn apply_boot_catch_up(s: &mut GameState, done: &AtomicBool, now_unix: u32, uptime_s: u32) -> bool {
+pub fn apply_boot_catch_up(
+    s: &mut GameState,
+    done: &AtomicBool,
+    boot_saved_unix: u32,
+    now_unix: u32,
+    uptime_s: u32,
+) -> bool {
     if done.swap(true, Ordering::Relaxed) {
         return false;
     }
-    let minutes = deferred_catch_up_minutes(s.saved_unix, now_unix, uptime_s);
+    let minutes = deferred_catch_up_minutes(boot_saved_unix, now_unix, uptime_s);
     if minutes > 0 {
         s.catch_up(minutes);
         s.request_save();
     }
     true
+}
+
+/// `saved_unix` as loaded at boot (RAM only). A save made before the clock
+/// is known rewrites `GameState::saved_unix`, so the deferred catch-up reads
+/// this copy instead.
+static BOOT_SAVED_UNIX: AtomicU32 = AtomicU32::new(0);
+
+/// The `saved_unix` a save writes. Clock known: now. Clock unknown and the
+/// boot catch-up still pending: the boot value plus the uptime, a lower bound
+/// of the real time (so a reboot catches up the unknown gap but never counts
+/// time the badge ran). Otherwise 0 (unknown).
+pub fn saved_unix_to_write(
+    now_unix: Option<u32>,
+    boot_saved_unix: u32,
+    uptime_s: u32,
+    catch_up_done: bool,
+) -> u32 {
+    match now_unix {
+        Some(now) => now,
+        None if !catch_up_done && boot_saved_unix != 0 => boot_saved_unix.saturating_add(uptime_s),
+        None => 0,
+    }
 }
 
 /// Set once the boot catch-up was taken (RAM only, one per boot).
@@ -234,7 +263,8 @@ static CATCH_UP_DONE: AtomicBool = AtomicBool::new(false);
 pub fn on_wall_clock_set(now_unix: u32) {
     if let Some(s) = unsafe { (*GAME.get()).as_mut() } {
         let uptime_s = (crate::platform::uptime_ms() / 1000) as u32;
-        apply_boot_catch_up(s, &CATCH_UP_DONE, now_unix, uptime_s);
+        let saved = BOOT_SAVED_UNIX.load(Ordering::Relaxed);
+        apply_boot_catch_up(s, &CATCH_UP_DONE, saved, now_unix, uptime_s);
     }
 }
 
@@ -933,7 +963,15 @@ pub async fn save_if_needed() -> bool {
         return false;
     }
 
-    state.saved_unix = crate::unix_now().unwrap_or(0);
+    // Note: `mark_saved` below can clear a save flag set between this write
+    // and now; accepted, the state is self-consistent and persists at the
+    // next autosave.
+    state.saved_unix = saved_unix_to_write(
+        crate::unix_now(),
+        BOOT_SAVED_UNIX.load(Ordering::Relaxed),
+        (crate::platform::uptime_ms() / 1000) as u32,
+        CATCH_UP_DONE.load(Ordering::Relaxed),
+    );
     let buf = state.to_bytes();
     let ns = crate::fw::kv::namespace("game");
     match ns.set(SAVE_KEY, &buf, true).await {
@@ -961,6 +999,7 @@ pub async fn save_if_needed() -> bool {
 mod tests {
     use super::{
         Severity, apply_boot_catch_up, catch_up_minutes, current_severity, deferred_catch_up_minutes,
+        saved_unix_to_write,
     };
     use crate::game::engine::needs::P;
     use crate::game::engine::{GameState, PetKind, Phase};
@@ -1033,8 +1072,9 @@ mod tests {
     #[test]
     fn catch_up_carries_the_sub_minute_remainder() {
         let mut s = pet();
+        let age0 = s.age_ticks;
         s.catch_up(1);
-        assert_eq!(s.tick_rem, 0);
+        assert_eq!(s.age_ticks, age0 + 6);
         assert_eq!(s.last_update_tick, 0);
         s.update(3); // half a minute of real time
         assert_eq!(s.tick_rem, 3);
@@ -1062,11 +1102,53 @@ mod tests {
         let done = AtomicBool::new(false);
         let mut s = pet();
         s.saved_unix = 1000;
-        assert!(apply_boot_catch_up(&mut s, &done, 1000 + 3600, 0));
+        assert!(apply_boot_catch_up(&mut s, &done, 1000, 1000 + 3600, 0));
         assert_eq!(s.age_ticks, 360);
         assert!(s.needs_save());
         let age = s.age_ticks;
-        assert!(!apply_boot_catch_up(&mut s, &done, 1000 + 7200, 0));
+        assert!(!apply_boot_catch_up(&mut s, &done, 1000, 1000 + 7200, 0));
         assert_eq!(s.age_ticks, age);
+    }
+
+    #[test]
+    fn saved_unix_to_write_branches() {
+        // Clock known: the clock.
+        assert_eq!(saved_unix_to_write(Some(9000), 1000, 600, false), 9000);
+        assert_eq!(saved_unix_to_write(Some(9000), 0, 0, true), 9000);
+        // No clock, catch-up pending, boot value known: lower bound.
+        assert_eq!(saved_unix_to_write(None, 1000, 600, false), 1600);
+        assert_eq!(saved_unix_to_write(None, u32::MAX, 600, false), u32::MAX);
+        // Otherwise unknown.
+        assert_eq!(saved_unix_to_write(None, 0, 600, false), 0);
+        assert_eq!(saved_unix_to_write(None, 1000, 600, true), 0);
+    }
+
+    #[test]
+    fn save_before_clock_keeps_the_catch_up() {
+        let done = AtomicBool::new(false);
+        let mut s = pet();
+        s.saved_unix = 1000; // loaded
+        let boot_saved = s.saved_unix;
+        // A save at uptime 600, no clock yet, rewrites the field.
+        s.saved_unix = saved_unix_to_write(None, boot_saved, 600, false);
+        assert_eq!(s.saved_unix, 1600);
+        // Booted at 1000 + 3600, clock set 900 s after boot.
+        assert!(apply_boot_catch_up(&mut s, &done, boot_saved, 1000 + 3600 + 900, 900));
+        assert_eq!(s.age_ticks, 60 * 6);
+    }
+
+    #[test]
+    fn reboot_before_clock_counts_both_off_gaps() {
+        // Boot 1 happened 1800 s after the save at 1000, clock never set.
+        // It ran 600 s, saved (lower bound 1600), then the badge was off
+        // 3600 s. Boot 2 is at real 1000 + 1800 + 600 + 3600 = 7000.
+        let written = saved_unix_to_write(None, 1000, 600, false);
+        assert_eq!(written, 1600);
+        let done = AtomicBool::new(false);
+        let mut s = pet();
+        s.saved_unix = written;
+        assert!(apply_boot_catch_up(&mut s, &done, written, 7000, 0));
+        // 90 min = 30 (gap 1) + 60 (gap 2); the 10 min session is not counted.
+        assert_eq!(s.age_ticks, 90 * 6);
     }
 }
