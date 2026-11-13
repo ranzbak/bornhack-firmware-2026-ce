@@ -160,7 +160,7 @@ thresholds_table! {
     SLEEP_FUN_FLOOR_PCT: u8,
     DIRT_GAIN_PM: u16,
     BOOZE_CLEAR_PM: u16,
-    BOOZE_CLEAR_SLOW_PCT: u16,
+    BOOZE_CLEAR_SLOW_PCT: u16, // approximates 2/3; 36 -> 24 -> 16
     STRAIN_CLEAR_PM: u16,
     FIT_DECAY_HIGH_PM: u16,
     FIT_DECAY_MID_PM: u16,
@@ -312,7 +312,7 @@ impl Thresholds {
         SLEEP_FUN_FLOOR_PCT: 40,
         DIRT_GAIN_PM: 8,
         BOOZE_CLEAR_PM: 36,
-        BOOZE_CLEAR_SLOW_PCT: 67,
+        BOOZE_CLEAR_SLOW_PCT: 67, // approximates 2/3; 36 -> 24 -> 16
         STRAIN_CLEAR_PM: 80,
         FIT_DECAY_HIGH_PM: 4,
         FIT_DECAY_MID_PM: 2,
@@ -461,7 +461,7 @@ impl Thresholds {
         SLEEP_FUN_FLOOR_PCT: 40,
         DIRT_GAIN_PM: 8,
         BOOZE_CLEAR_PM: 36,
-        BOOZE_CLEAR_SLOW_PCT: 67,
+        BOOZE_CLEAR_SLOW_PCT: 67, // approximates 2/3; 36 -> 24 -> 16
         STRAIN_CLEAR_PM: 80,
         FIT_DECAY_HIGH_PM: 4,
         FIT_DECAY_MID_PM: 2,

@@ -147,4 +147,66 @@ mod regime_rates {
         assert_eq!(energy_cap(&s), 70 * P);
         assert_eq!(rates(&s)[2], 0);
     }
+
+    fn awake() -> GameState {
+        let mut s = egg();
+        s.is_sleeping = false;
+        s
+    }
+
+    fn pct(p: i32) -> u16 {
+        (p * P) as u16
+    }
+
+    #[test]
+    fn weight_rate_follows_band_and_belly() {
+        let w = |weight: i32, full: i32| {
+            let mut s = awake();
+            s.weight = pct(weight);
+            s.fullness = pct(full);
+            rates(&s)[8]
+        };
+        assert_eq!(w(70, 50), -3); // heavy, belly in band
+        assert_eq!(w(30, 50), 0); // light, belly in band
+        assert_eq!(w(50, 50), -1); // in band
+        assert_eq!(w(70, 20), -6); // heavy, empty belly
+        assert_eq!(w(30, 90), 3); // light, stuffed belly
+        assert_eq!(w(50, 90), 2); // in band, stuffed belly
+    }
+
+    #[test]
+    fn heavy_pet_loses_fitness_faster() {
+        let mut s = awake();
+        s.fitness = pct(60);
+        assert_eq!(rates(&s)[7], -4);
+        s.weight = pct(70);
+        assert_eq!(rates(&s)[7], -6);
+        s.fitness = pct(40);
+        assert_eq!(rates(&s)[7], -3); // -2 * 3 / 2
+        s.fitness = pct(10);
+        assert_eq!(rates(&s)[7], -1); // -1 * 3 / 2
+    }
+
+    #[test]
+    fn booze_clears_slower_when_dry_or_dependent() {
+        let mut s = awake();
+        assert_eq!(rates(&s)[5], -36);
+        s.hydration = pct(10);
+        assert_eq!(rates(&s)[5], -24);
+        s.dependent = true;
+        assert_eq!(rates(&s)[5], -16);
+        s.hydration = pct(60);
+        assert_eq!(rates(&s)[5], -24);
+    }
+
+    #[test]
+    fn thirst_steps_with_booze_band() {
+        let mut s = awake();
+        for (b, want) in [(0, 100), (14, 100), (15, 110), (39, 110), (40, 125), (69, 125), (70, 140), (100, 140)] {
+            s.booze = if b == 100 { 65535 } else { pct(b) };
+            assert_eq!(thirst_pct(&s), want, "booze {b}");
+        }
+        s.booze = pct(70);
+        assert_eq!(rates(&s)[1], -45 * 140 / 100);
+    }
 }
