@@ -632,8 +632,8 @@ impl Item {
     }
 }
 
-/// Format a cooldown count (ticks of 10 s each) as a " (50s)", " (59m)" or
-/// " (2h05)" suffix for a disabled menu row.  Returns `None` when the cooldown is 0.
+/// Format a cooldown count (ticks of 10 s each) as a " 50s", " 59m" or
+/// " 2h05" suffix for a disabled menu row.  Returns `None` when the cooldown is 0.
 fn cooldown_string(ticks: u32) -> Option<heapless::String<12>> {
     if ticks == 0 {
         return None;
@@ -641,7 +641,7 @@ fn cooldown_string(ticks: u32) -> Option<heapless::String<12>> {
     let mut s = heapless::String::new();
     let _ = core::fmt::Write::write_fmt(
         &mut s,
-        format_args!(" ({})", super::engine::doses::fmt_wait(ticks.saturating_mul(10))),
+        format_args!(" {}", super::engine::doses::fmt_wait(ticks.saturating_mul(10))),
     );
     Some(s)
 }
@@ -863,25 +863,27 @@ fn row_indent(kind: ModalKind) -> i32 {
     if kind == ModalKind::Feed { 0 } else { 4 }
 }
 
-/// The row's text: label, price (money mode) and the wait while disabled.
-/// The risk mark is drawn, not typed, so it takes no columns.
+/// The row's text: label, then the wait while disabled, else the price in
+/// money mode. A row that cannot be bought now shows its wait instead of its
+/// price ("Frikandel spec 20s"), so the longest wait ("Ozempic 47h59") still
+/// fits the popover. The risk mark is drawn, not typed, so it takes no
+/// columns.
 fn row_text(item: Item, stats: Option<&super::engine::PetStats>) -> heapless::String<40> {
-    // 40 covers the longest label (19 bytes), a price (" 15H"), and the
-    // longest wait (" (72h00)"); `push_str` silently no-ops past capacity.
+    // 40 covers the longest label (19 bytes) and a price (" 15H") or the
+    // longest wait (" 72h00"); `push_str` silently no-ops past capacity.
     let mut text: heapless::String<40> = heapless::String::new();
     let _ = text.push_str(shown_label(item, stats.is_some_and(|s| s.hard_mode)));
     if let Some(s) = stats {
-        if let Some(price) = item.hax_price(s)
-            && s.money_enabled
-        {
-            let _ = core::fmt::Write::write_fmt(&mut text, format_args!(" {price}H"));
-        }
         if !item.available(s)
             && let Some(wait) = cooldown_string(item.cooldown_ticks(s))
         {
             // Rows with no wait to show get no suffix: selecting one tells
             // the player why (R24).
             let _ = text.push_str(wait.as_str());
+        } else if let Some(price) = item.hax_price(s)
+            && s.money_enabled
+        {
+            let _ = core::fmt::Write::write_fmt(&mut text, format_args!(" {price}H"));
         }
     }
     text
@@ -1405,12 +1407,12 @@ mod tests {
     #[test]
     fn countdowns_are_readable_up_to_three_days() {
         assert_eq!(cooldown_string(0), None);
-        assert_eq!(cooldown_string(5).as_deref(), Some(" (50s)"));
-        assert_eq!(cooldown_string(59 * 6).as_deref(), Some(" (59m)"));
-        assert_eq!(cooldown_string(2 * 360).as_deref(), Some(" (2h00)"));
-        assert_eq!(cooldown_string(2 * 360 + 30).as_deref(), Some(" (2h05)"));
+        assert_eq!(cooldown_string(5).as_deref(), Some(" 50s"));
+        assert_eq!(cooldown_string(59 * 6).as_deref(), Some(" 59m"));
+        assert_eq!(cooldown_string(2 * 360).as_deref(), Some(" 2h00"));
+        assert_eq!(cooldown_string(2 * 360 + 30).as_deref(), Some(" 2h05"));
         // Rehab: 4320 minutes = 72 h = 25920 ticks (x10 s overflowed u16).
-        assert_eq!(cooldown_string(25920).as_deref(), Some(" (72h00)"));
+        assert_eq!(cooldown_string(25920).as_deref(), Some(" 72h00"));
     }
 
     #[test]
@@ -1904,6 +1906,52 @@ mod tests {
         lifecycle::set_state_for_test(None);
     }
 
+    /// Pet states that put the longest real wait on a row: every engine
+    /// cooldown at its longest, and each action running at its longest.
+    fn worst_waits() -> std::vec::Vec<std::boxed::Box<dyn Fn(&mut GameState)>> {
+        use crate::game::engine::thresholds as t;
+        let mut all: std::vec::Vec<std::boxed::Box<dyn Fn(&mut GameState)>> = vec![
+            std::boxed::Box::new(|_| {}),
+            std::boxed::Box::new(|s| {
+                s.diabetic = true;
+                s.med_cd_min = t::DOSE_MED_CD_MIN();
+                s.ozempic_cd_min = t::DOSE_OZEMPIC_CD_MIN();
+                s.rehab_min = t::DOSE_REHAB_MIN();
+                s.insulin_min = t::DOSE_INSULIN_MIN();
+                s.cooldown_battle = t::BATTLE_COOLDOWN();
+                s.cooldown_tictactoe = t::MINIGAME_COOLDOWN();
+                s.cooldown_lightsout = t::MINIGAME_COOLDOWN();
+                s.cooldown_blackhole = t::MINIGAME_COOLDOWN();
+                s.cooldown_nim = t::MINIGAME_COOLDOWN();
+                s.cooldown_bornjeweled = t::MINIGAME_COOLDOWN();
+            }),
+        ];
+        for kind in [ModalKind::Feed, ModalKind::Drink, ModalKind::Heal, ModalKind::Play, ModalKind::Rest, ModalKind::Exercise] {
+            for item in kind.items() {
+                if let Some((action, _)) = item.action() {
+                    all.push(std::boxed::Box::new(move |s| {
+                        s.active_action = Some(action);
+                        s.action_ticks_remaining = u8::MAX;
+                    }));
+                }
+            }
+        }
+        all
+    }
+
+    /// Every (hard, money, worst-wait state) combination.
+    fn wait_scenarios() -> std::vec::Vec<(bool, bool, std::boxed::Box<dyn Fn(&mut GameState)>)> {
+        let mut out = std::vec::Vec::new();
+        for hard in [false, true] {
+            for money in [true, false] {
+                for worst in worst_waits() {
+                    out.push((hard, money, worst));
+                }
+            }
+        }
+        out
+    }
+
     #[test]
     fn rows_and_risk_titles_fit() {
         let _guard = crate::game::lock_test_state();
@@ -1912,8 +1960,8 @@ mod tests {
             super::MARGIN + super::BORDER as i32,
             4,
         );
-        for hard in [false, true] {
-            let stats = menu_pet(true, hard, |_| {});
+        for (hard, money, worst) in wait_scenarios() {
+            let stats = menu_pet(money, hard, |s| worst(s));
             for kind in [
                 ModalKind::Feed,
                 ModalKind::Drink,
@@ -1928,9 +1976,10 @@ mod tests {
                     let frik = matches!(item, Item::FeedFood(FoodKind::Frikandel));
                     let budget = if frik && !hard { 18 } else { 17 };
                     assert!(cols <= budget, "{:?} {text:?} is {cols} cols", kind.title());
-                    if frik && !hard {
+                    if frik && !hard && money && item.available(&stats) {
                         assert_eq!(text.as_str(), "Frikandel spec 10H");
                     }
+                    assert!(!text.contains('('), "{text:?}: no parentheses");
                     // The gutter mark must not touch the row text.
                     let indent = if kind == ModalKind::Feed { 0 } else { indent_gap };
                     let text_end = inner_x + indent + cols as i32 * ink_w;

@@ -121,7 +121,9 @@ diabetes: Insulin only manages it, and it reverses after the pet has been
 lean and fit for a sustained period. Until then, neglect leaves them in place.
 
 "Diary" lists the last 6 things that went wrong (or well), newest first,
-three per page (Left / Right flips the page, any other button closes).
+three per page (Left / Right flips the page, any other button closes). The
+title is "Diary" while everything fits one page, and "Diary 1/2" or
+"Diary 2/2" once there are more than three entries.
 Each entry shows how long ago it happened ("now", "59m", "23h", "9d") and
 the same two lines as the toast. The diary is kept in memory only: a new
 pet or a reboot starts it empty.
@@ -172,8 +174,8 @@ Feed page the title shows the selected food's full name, so the Frikandel
 row ("Frikandel spec") reads "Frikandel speciaal" there. In Hard mode that
 row and its title both say "Hamburger".
 
-A row that is not ready yet shows the time left, e.g. "(50s)", "(59m)" or
-"(2h05)". Actions are mutually exclusive: the pet can only do one thing at
+A row that is not ready yet shows the time left instead of its price, e.g.
+"Frikandel spec 50s", "Aspirine 4h00" or "Ozempic 47h59". Actions are mutually exclusive: the pet can only do one thing at
 a time.
 
 ## HAX Economy & Hard Mode

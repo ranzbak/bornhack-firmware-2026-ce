@@ -52,6 +52,18 @@ pub fn page() -> u8 {
     PAGE.load(Ordering::Relaxed)
 }
 
+/// "Diary" alone while everything fits one page, else "Diary 1/2" (the page
+/// is never flipped to a second one then, see [`flip`]).
+fn title(entries: usize, page: u8) -> heapless::String<12> {
+    let mut title: heapless::String<12> = heapless::String::new();
+    let _ = if entries <= PER_PAGE {
+        core::fmt::Write::write_str(&mut title, "Diary")
+    } else {
+        core::fmt::Write::write_fmt(&mut title, format_args!("Diary {}/{}", page + 1, PAGES))
+    };
+    title
+}
+
 pub fn draw<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
@@ -60,11 +72,8 @@ where
     ui::clear_screen(display)?;
 
     let page = page();
-    let mut title: heapless::String<12> = heapless::String::new();
-    let _ = core::fmt::Write::write_fmt(&mut title, format_args!("Diary {}/{}", page + 1, PAGES));
-    ui::draw_title_bar(display, title.as_str(), Point::zero(), 152)?;
-
     let diary = super::lifecycle::diary();
+    ui::draw_title_bar(display, title(diary.len(), page).as_str(), Point::zero(), 152)?;
     if diary.is_empty() {
         return ui::draw_centered_message(display, "Nothing yet", Point::new(76, 76));
     }
@@ -99,6 +108,14 @@ where
 mod tests {
     use crate::game::engine::{GameState, PetKind, Phase};
     use crate::menu::ButtonId;
+
+    #[test]
+    fn the_title_shows_pages_only_when_there_are_two() {
+        assert_eq!(super::title(0, 0).as_str(), "Diary");
+        assert_eq!(super::title(3, 0).as_str(), "Diary");
+        assert_eq!(super::title(4, 0).as_str(), "Diary 1/2");
+        assert_eq!(super::title(6, 1).as_str(), "Diary 2/2");
+    }
 
     #[test]
     fn diary_pages_flip_with_left_right() {
