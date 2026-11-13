@@ -436,7 +436,8 @@ pub fn show_reason(why: engine::doses::Reason) {
 /// True while a full-screen view replaces the main game screen. Only the
 /// main screen clears a toast, so none may be raised behind one.
 pub fn full_screen_view_up() -> bool {
-    diary_view::is_active()
+    crate::text_entry::is_active()
+        || diary_view::is_active()
         || traits_view::is_active()
         || health_view::is_active()
         || friends_view::is_active()
