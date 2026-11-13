@@ -528,8 +528,9 @@ fn check_severity_transition(state: &GameState) {
 /// that decides it. `seen` starts false each boot, so a pet that still has
 /// the condition alerts again after every boot, in case the player forgot
 /// the pet is sick. While the pet hibernates nothing fires and `seen` is
-/// left alone, so the alert comes when the pet is defrosted and the
-/// condition is still there, as if it were a boot.
+/// left alone. The alert fires once per boot, when the condition is present
+/// and the pet is not hibernating, so a pet that hibernated since boot alerts
+/// on defrost; one that already alerted this boot does not alert again.
 fn onset_alert_due(seen: &AtomicBool, present: bool, hibernating: bool) -> bool {
     if hibernating {
         return false;

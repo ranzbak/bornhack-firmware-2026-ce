@@ -66,6 +66,13 @@ fn bad_band_pair_falls_back_to_preset() {
 }
 
 #[test]
+fn validate_leaves_each_preset_unchanged() {
+    for preset in [Thresholds::CLASSIC, Thresholds::CASUAL] {
+        assert_eq!(validate(&preset, &preset), preset);
+    }
+}
+
+#[test]
 fn custom_flag_only_when_values_differ() {
     let mut t = Thresholds::CLASSIC;
     let n = apply_overrides(&mut t, b"FULL_LO_PCT=38\nFULL_HI_PCT=78\n");

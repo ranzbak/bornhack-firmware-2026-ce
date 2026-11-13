@@ -146,11 +146,11 @@ impl Toast {
     fn message(self) -> &'static str {
         match self {
             Toast::None => "",
-            Toast::Feed => "-hunger",
-            Toast::Heal => "+health",
-            Toast::Sleep => "-tired",
-            Toast::Relax => "+energy +fun",
-            Toast::Wash => "-dirty",
+            Toast::Feed => "+full",
+            Toast::Heal => "healing",
+            Toast::Sleep => "sleeping",
+            Toast::Relax => "calmer +energy",
+            Toast::Wash => "cleaner",
             Toast::Play => "+fun",
             Toast::Inspired => "+inspired",
             Toast::Hibernate => "hibernating",
@@ -933,14 +933,20 @@ mod tests {
     fn toasts_name_the_v3_effects() {
         use super::Toast;
         for (toast, text) in [
-            (Toast::Heal, "+health"),
-            (Toast::Relax, "+energy +fun"),
+            (Toast::Feed, "+full"),
+            (Toast::Heal, "healing"),
+            (Toast::Sleep, "sleeping"),
+            (Toast::Relax, "calmer +energy"),
+            (Toast::Wash, "cleaner"),
             (Toast::Play, "+fun"),
             (Toast::Rehab, "rehab started"),
             (Toast::Ozempic, "-weight"),
         ] {
             assert_eq!(toast.message(), text);
-            assert!(text.len() <= 15, "{text}: wider than the old longest toast");
+            assert!(
+                text.len() <= 14,
+                "{text}: wider than the longest toast (Inspire bonus!)"
+            );
         }
     }
 

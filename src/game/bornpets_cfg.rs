@@ -58,10 +58,17 @@ pub async fn load_and_install(mode: Mode) -> (Mode, bool) {
     let mut chunk = [0u8; READ_CHUNK_LEN];
     let mut offset = 0u32;
     let mut applied = 0u32;
+    let mut read_failed = false;
     loop {
         let n = match fat12::read_file(&file, offset, &mut chunk).await {
             Ok(n) => n,
-            Err(_) => 0,
+            // A failed read is not EOF: stop here and do NOT run `finish`,
+            // which would apply a partial last line (a cut-off value).
+            // Only the lines that were complete have been applied.
+            Err(_) => {
+                read_failed = true;
+                0
+            }
         };
         if n == 0 {
             break;
@@ -71,7 +78,9 @@ pub async fn load_and_install(mode: Mode) -> (Mode, bool) {
             applied += apply_line(&mut values, l) as u32
         });
     }
-    lines.finish(&mut |l| applied += apply_line(&mut values, l) as u32);
+    if !read_failed {
+        lines.finish(&mut |l| applied += apply_line(&mut values, l) as u32);
+    }
 
     let values = thresholds::validate(&values, &mode.preset());
     defmt::info!(
