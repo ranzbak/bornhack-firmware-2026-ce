@@ -709,3 +709,17 @@ fn saved_unix_is_zero_for_upgrades_and_old_v3_saves() {
     let back = GameState::from_bytes(&bytes).expect("v3 save must decode");
     assert_eq!(back.saved_unix, 0);
 }
+
+#[test]
+fn pet_name_prefers_name_v3_and_falls_back_to_the_old_key() {
+    use bornhack_aegg::game::engine::{NAME_KEY, NAME_KEY_V2, pick_name};
+    assert_eq!(NAME_KEY, "name_v3");
+    assert_eq!(NAME_KEY_V2, "name"); // the old firmware's key, read only
+    // Both present: v3 wins.
+    assert_eq!(pick_name(Some(b"New"), Some(b"Old")), Some(&b"New"[..]));
+    // Upgraded pet, no v3 name yet: the old name carries over.
+    assert_eq!(pick_name(None, Some(b"Old")), Some(&b"Old"[..]));
+    // A present but empty v3 name is a real answer, not "missing".
+    assert_eq!(pick_name(Some(b""), Some(b"Old")), Some(&b""[..]));
+    assert_eq!(pick_name(None, None), None);
+}

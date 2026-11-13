@@ -1433,6 +1433,8 @@ pub const SAVE_SIZE: usize = 177;
 pub const SAVE_SIZE_V2: usize = 97;
 
 /// kv key (namespace "game") of the format-3 save.
+/// The pet name sits beside it under `NAME_KEY` (`name_v3`); the old `name`
+/// key is only read as a fallback (`pick_name`), never written.
 pub const SAVE_KEY: &str = "state_v3";
 
 /// kv key of the format-2 save. Read for the upgrade, never written or
@@ -1882,6 +1884,23 @@ impl Head {
         s.hard_mode = self.hard_mode;
         s
     }
+}
+
+/// kv key (namespace "game") of the pet's name under v3, beside `state_v3`.
+pub const NAME_KEY: &str = "name_v3";
+
+/// kv key of the old firmware's pet name. Read as a fallback when
+/// `name_v3` is missing (an upgraded pet keeps its name), never written or
+/// deleted, so a player who reverts still sees the old pet under its own
+/// name. (The Unicorn Realm key `realm` stays shared: its format is the
+/// same.)
+pub const NAME_KEY_V2: &str = "name";
+
+/// Choose the pet name from the raw kv values: `v3` is the value of
+/// `name_v3`, `old` the value of `name`. A present `name_v3` wins, even an
+/// empty one (an unnamed new pet must not inherit the old pet's name).
+pub fn pick_name<'a>(v3: Option<&'a [u8]>, old: Option<&'a [u8]>) -> Option<&'a [u8]> {
+    v3.or(old)
 }
 
 /// Choose the state to load from the raw kv values: `v3` is the value of

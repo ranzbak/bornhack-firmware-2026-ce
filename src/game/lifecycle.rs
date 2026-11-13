@@ -10,7 +10,10 @@ use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
 use super::engine::{DisplayAnim, GameState, PET_NAME_MAX, PetRealm, PetRecord, PetStats};
 #[cfg(feature = "embassy-core")]
-use super::engine::{REALM_SAVE_SIZE, SAVE_KEY, SAVE_KEY_V2, SAVE_SIZE, SAVE_SIZE_V2, pick_save};
+use super::engine::{
+    NAME_KEY, NAME_KEY_V2, REALM_SAVE_SIZE, SAVE_KEY, SAVE_KEY_V2, SAVE_SIZE, SAVE_SIZE_V2,
+    pick_name, pick_save,
+};
 
 // ---------------------------------------------------------------------------
 // Static game state
@@ -81,9 +84,12 @@ pub async fn init() {
         let ns = kv::namespace("game");
 
         // Pet name.
-        let mut name_buf = [0u8; PET_NAME_MAX];
-        if let Ok(n) = ns.get("name", &mut name_buf).await {
-            set_pet_name(&name_buf[..n]);
+        let mut v3_buf = [0u8; PET_NAME_MAX];
+        let mut old_buf = [0u8; PET_NAME_MAX];
+        let v3 = ns.get(NAME_KEY, &mut v3_buf).await.ok().map(|n| &v3_buf[..n]);
+        let old = ns.get(NAME_KEY_V2, &mut old_buf).await.ok().map(|n| &old_buf[..n]);
+        if let Some(name) = pick_name(v3, old) {
+            set_pet_name(name);
         }
 
         // If a saved game is active but has no name, prompt for one.
@@ -1033,7 +1039,7 @@ pub async fn save_if_needed() -> bool {
             state.mark_saved();
             // Also persist pet name alongside state.
             let name = pet_name_bytes_sync();
-            let _ = ns.set("name", name, true).await;
+            let _ = ns.set(NAME_KEY, name, true).await;
             true
         }
         Err(_) => {
