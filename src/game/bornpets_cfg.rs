@@ -6,9 +6,9 @@
 //! skipped, so adding a new tunable later doesn't break older files.
 //!
 //! ```text
-//! # speed up hunger decay, slow down sickness
+//! # make food fill more, halve the starvation damage
 //! FEED_HUNGER_RELIEF=4000
-//! SICK_RATE=2
+//! DMG_FULL_LOW_PM=20
 //! ```
 //!
 //! Call [`load_and_install`] exactly once during boot, after `kv::init()`
@@ -99,11 +99,11 @@ mod tests {
         let mut t = Thresholds::CLASSIC;
         let n = apply_overrides(
             &mut t,
-            b"# comment\nFEED_HUNGER_RELIEF = 4000\nUNKNOWN = 99\nSICK_RATE=2\n",
+            b"# comment\nFEED_HUNGER_RELIEF = 4000\nUNKNOWN = 99\nDMG_FULL_LOW_PM=2\n",
         );
         assert_eq!(n, 2);
         assert_eq!(t.FEED_HUNGER_RELIEF, 4000);
-        assert_eq!(t.SICK_RATE, 2);
+        assert_eq!(t.DMG_FULL_LOW_PM, 2);
     }
 
     #[test]

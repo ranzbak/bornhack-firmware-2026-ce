@@ -210,3 +210,76 @@ mod regime_rates {
         assert_eq!(rates(&s)[1], -45 * 140 / 100);
     }
 }
+
+mod health_terms {
+    use bornhack_aegg::game::engine::needs::{MAX, P};
+    use bornhack_aegg::game::engine::regime::{health_ceiling, health_damage, mood_target};
+    use bornhack_aegg::game::engine::thresholds::Thresholds;
+    use bornhack_aegg::game::engine::{GameState, PetKind};
+
+    fn awake() -> GameState {
+        let mut s = GameState::new_egg(1, PetKind(0));
+        s.is_sleeping = false;
+        s
+    }
+
+    fn pct(p: i32) -> u16 {
+        (p * P) as u16
+    }
+
+    #[test]
+    fn target_is_full_when_all_in_band() {
+        assert_eq!(mood_target(&awake()), MAX);
+    }
+
+    #[test]
+    fn hungry_and_bored_penalties_add() {
+        let mut s = awake();
+        s.fullness = pct(20);
+        s.fun = pct(10);
+        assert_eq!(mood_target(&s), MAX - (18 * P * 3 / 2) - 23 * P);
+    }
+
+    #[test]
+    fn ceiling_steps() {
+        let mut s = awake();
+        for (fit, want) in [(24, 55), (49, 65), (69, 80), (70, 100)] {
+            s.fitness = pct(fit);
+            assert_eq!(health_ceiling(&s), want * P, "fitness {fit}");
+        }
+        s.diabetic = true;
+        s.insulin_min = 0;
+        assert_eq!(health_ceiling(&s), 80 * P);
+        s.insulin_min = 5;
+        assert_eq!(health_ceiling(&s), 100 * P);
+    }
+
+    #[test]
+    fn sleep_shortage_stops_damaging_at_30() {
+        let mut s = awake();
+        s.energy = pct(5);
+        s.health = pct(31);
+        assert_eq!(health_damage(&s), 8);
+        s.health = pct(30);
+        assert_eq!(health_damage(&s), 0);
+    }
+
+    #[test]
+    fn casual_halves_only_damage_rates() {
+        let (c, k) = (Thresholds::CLASSIC, Thresholds::CASUAL);
+        assert_eq!(c.DMG_FULL_LOW_PM, 40);
+        assert_eq!(k.DMG_FULL_LOW_PM, 20);
+        let dmg = |t: &Thresholds| {
+            [
+                t.DMG_FULL_LOW_PM, t.DMG_FULL_HIGH_PM, t.DMG_WATER_LOW_PM, t.DMG_WATER_HIGH_PM,
+                t.DMG_ENERGY_PM, t.DMG_BOOZE_PM, t.DMG_MOOD_PM, t.DMG_DIRT_PM,
+                t.DMG_WEIGHT_HIGH_PM, t.DMG_WEIGHT_LOW_PM,
+            ]
+        };
+        for (a, b) in dmg(&c).iter().zip(dmg(&k)) {
+            assert_eq!(*a / 2, b);
+        }
+        assert_eq!(c.MOOD_STEP, k.MOOD_STEP);
+        assert_eq!(c.REC_GOOD_PM, k.REC_GOOD_PM);
+    }
+}

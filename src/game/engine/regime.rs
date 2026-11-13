@@ -1,4 +1,5 @@
-//! Per-minute need rates of the pet's current regime (awake or asleep).
+//! Per-minute need rates of the pet's current regime (awake or asleep), plus
+//! the mood target and health terms.
 //!
 //! Rates are signed levels per engine minute on the `u16` scale. Every
 //! magnitude and multiplier is a [`thresholds`] field; the sign lives here.
@@ -144,4 +145,99 @@ pub fn rates(s: &GameState) -> [i32; NEEDS] {
     r[Need::Fit as usize] = -fit_decay;
     r[Need::Weight as usize] = metabolism + belly;
     r
+}
+
+/// Mood the pet drifts toward (`MAX` when nothing is wrong), moving at most
+/// `MOOD_STEP` per minute. Each need contributes a penalty only when outside
+/// its band. The 3/2 and 1/2 weights are structure (how much a need hurts
+/// relative to its distance), not balance, so they stay literals.
+pub fn mood_target(s: &GameState) -> i32 {
+    let gap = |x: i32| x.max(0);
+    let awake = !s.is_sleeping;
+    let (full, water, energy, fun) = (s.fullness as i32, s.hydration as i32, s.energy as i32, s.fun as i32);
+    let (weight, fit) = (s.weight as i32, s.fitness as i32);
+    let mut pen = gap(needs::full_lo() - full) * 3 / 2
+        + gap(full - needs::full_hi())
+        + gap(needs::water_lo() - water) * 3 / 2
+        + gap(water - needs::water_hi())
+        + gap(fun - needs::fun_hi()) * 3 / 2
+        + gap(s.booze as i32 - needs::booze_hi())
+        + gap(s.dirt as i32 - needs::dirt_hi())
+        + gap(needs::fit_lo() - fit) / 2
+        + gap(weight - needs::weight_hi()) / 2
+        + gap(needs::weight_lo() - weight) / 2
+        + gap(lvl(t::MOOD_HEALTH_FLOOR_PCT()) - s.health as i32);
+    if awake {
+        pen += gap(needs::energy_lo() - energy) * 3 / 2 + gap(needs::fun_lo() - fun);
+    }
+    let flat = |on: bool, pct: u16| if on { pct as i32 * P } else { 0 };
+    pen += flat(s.injured_min > 0, t::MOOD_PEN_INJURED_PCT())
+        + flat(s.groggy_min > 0, t::MOOD_PEN_GROGGY_PCT())
+        + flat(s.hangover_min > 0, t::MOOD_PEN_HANGOVER_PCT())
+        + flat(s.deprived, t::MOOD_PEN_DEPRIVED_PCT());
+    pen += if s.rehab_min > 0 {
+        flat(true, t::MOOD_PEN_REHAB_PCT())
+    } else {
+        // craving: dependent, nearly sober and awake
+        flat(
+            s.dependent && (s.booze as i32) < lvl(t::MOOD_CRAVING_BOOZE_PCT()) && awake,
+            t::MOOD_PEN_CRAVING_PCT(),
+        )
+    };
+    needs::clamp_level(MAX - pen)
+}
+
+/// Highest health the pet can recover to: steps up with fitness; an
+/// untreated diabetic loses a fixed slice.
+pub fn health_ceiling(s: &GameState) -> i32 {
+    let fit = s.fitness as i32;
+    let step = if fit < lvl(t::CEILING_FIT_STEP1_PCT()) {
+        t::CEILING_STEP0_PCT()
+    } else if fit < lvl(t::CEILING_FIT_STEP2_PCT()) {
+        t::CEILING_STEP1_PCT()
+    } else if fit < lvl(t::CEILING_FIT_STEP3_PCT()) {
+        t::CEILING_STEP2_PCT()
+    } else {
+        t::CEILING_STEP3_PCT()
+    } as i32;
+    let cut = if s.diabetic && s.insulin_min == 0 { t::CEILING_DIABETIC_PCT() as i32 } else { 0 };
+    (step - cut) * P
+}
+
+/// Health lost per engine minute.
+pub fn health_damage(s: &GameState) -> i32 {
+    let (full, water, energy) = (s.fullness as i32, s.hydration as i32, s.energy as i32);
+    let (low, high) = (lvl(t::DMG_NEED_LOW_PCT()), lvl(t::DMG_NEED_HIGH_PCT()));
+    let weight = s.weight as i32;
+    let terms = [
+        (full < low, t::DMG_FULL_LOW_PM()),
+        (full > high, t::DMG_FULL_HIGH_PM()),
+        (water < low, t::DMG_WATER_LOW_PM()),
+        (water > high, t::DMG_WATER_HIGH_PM()),
+        // sleep shortage alone never takes health under the floor
+        (
+            energy < lvl(t::DMG_ENERGY_PCT()) && !s.is_sleeping && s.health as i32 > lvl(t::DMG_ENERGY_HEALTH_PCT()),
+            t::DMG_ENERGY_PM(),
+        ),
+        (s.booze as i32 > needs::booze_danger(), t::DMG_BOOZE_PM()),
+        ((s.mood as i32) < lvl(t::DMG_MOOD_PCT()), t::DMG_MOOD_PM()),
+        (s.dirt as i32 > lvl(t::DMG_DIRT_PCT()), t::DMG_DIRT_PM()),
+        (weight > lvl(t::DMG_WEIGHT_HIGH_PCT()), t::DMG_WEIGHT_HIGH_PM()),
+        (weight < lvl(t::DMG_WEIGHT_LOW_PCT()), t::DMG_WEIGHT_LOW_PM()),
+    ];
+    terms.iter().filter(|(on, _)| *on).map(|(_, d)| *d as i32).sum()
+}
+
+/// Health regained per engine minute while below the ceiling (the caller
+/// applies the ceiling).
+pub fn health_recovery(s: &GameState) -> i32 {
+    let mood = s.mood as i32;
+    let base = if mood >= lvl(t::REC_GOOD_MOOD_PCT()) {
+        t::REC_GOOD_PM()
+    } else if mood >= lvl(t::REC_FAIR_MOOD_PCT()) {
+        t::REC_FAIR_PM()
+    } else {
+        0
+    } as i32;
+    if s.deprived { pct_of(base, t::REC_DEPRIVED_PCT()) } else { base }
 }

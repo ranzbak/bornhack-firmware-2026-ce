@@ -21,9 +21,7 @@
 //! ## Hot-path note
 //!
 //! Accessors are `#[inline(always)]` and the active struct is a single
-//! static — codegen folds to one load.  Array fields (e.g.
-//! `LEAVING_THRESHOLDS`) are returned by-value (Copy) per access; cache
-//! the result in a local if you index it in a tight loop.
+//! static — codegen folds to one load.
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -55,9 +53,6 @@ thresholds_table! {
     STAT_MAX: u16,
     UNIT: u16,
     // Sick
-    SICK_RATE: u16,
-    SICK_CONDITION_RATE: u16,
-    SICK_CONDITION_MISERABLE_RATE: u16,
     SICK_TRIGGER_HUNGER: u16,
     SICK_TRIGGER_TIRED: u16,
     // Warnings
@@ -67,9 +62,6 @@ thresholds_table! {
     WARNING_MISERABLE: u16,
     // Miserable
     MISERABLE_AMOUNT: u16,
-    MISERABLE_INTERVAL_BASE: u32,
-    MISERABLE_INTERVAL_PER_STAT: u32,
-    MISERABLE_INTERVAL_MIN: u32,
     MISERABLE_STAT_THRESHOLD: u16,
     MISERABLE_BOOST_THRESHOLD: u16,
     MISERABLE_DRAIN_THRESHOLD: u16,
@@ -88,7 +80,6 @@ thresholds_table! {
     MINIGAME_HUNGER_COST: u16,
     // Lifecycle
     HATCHING_TICKS: u16,
-    LEAVING_THRESHOLDS: [u32; 5],
     MAX_SLEEP_TICKS: u32,
     SAVE_INTERVAL_TICKS: u32,
     // Traits
@@ -100,8 +91,6 @@ thresholds_table! {
     WARNING_WEIGHT: u16,
     // Diabetes
     DIABETES_ONSET_TICKS: u32,
-    DIABETES_SICK_RATE: u16,
-    DIABETES_SICK_MISERABLE_RATE: u16,
     // Exercise
     EXERCISE_DURATION: u8,
     EXERCISE_COOLDOWN: u16,
@@ -126,8 +115,6 @@ thresholds_table! {
     DRUNK_TRIGGER: u16,
     WARNING_DRUNK: u16,
     ALCOHOLIC_ONSET_TICKS: u32,
-    ALCOHOLIC_SICK_RATE: u16,
-    ALCOHOLIC_SICK_MISERABLE_RATE: u16,
     // Rehab
     REHAB_DURATION: u8,
     REHAB_COOLDOWN: u16,
@@ -193,6 +180,47 @@ thresholds_table! {
     UNSETTLED_FULL_HI_PCT: u8,
     UNSETTLED_WATER_LO_PCT: u8,
     UNSETTLED_WATER_HI_PCT: u8,
+    // v2 mood / health terms (see engine::regime); DMG_*_PM are per-minute damage
+    MOOD_STEP: u16,
+    MOOD_PEN_INJURED_PCT: u16,
+    MOOD_PEN_GROGGY_PCT: u16,
+    MOOD_PEN_HANGOVER_PCT: u16,
+    MOOD_PEN_DEPRIVED_PCT: u16,
+    MOOD_PEN_REHAB_PCT: u16,
+    MOOD_PEN_CRAVING_PCT: u16,
+    MOOD_CRAVING_BOOZE_PCT: u8,
+    MOOD_HEALTH_FLOOR_PCT: u8,
+    CEILING_FIT_STEP1_PCT: u8,
+    CEILING_FIT_STEP2_PCT: u8,
+    CEILING_FIT_STEP3_PCT: u8,
+    CEILING_STEP0_PCT: u16,
+    CEILING_STEP1_PCT: u16,
+    CEILING_STEP2_PCT: u16,
+    CEILING_STEP3_PCT: u16,
+    CEILING_DIABETIC_PCT: u16,
+    DMG_NEED_LOW_PCT: u8,
+    DMG_NEED_HIGH_PCT: u8,
+    DMG_ENERGY_PCT: u8,
+    DMG_ENERGY_HEALTH_PCT: u8,
+    DMG_MOOD_PCT: u8,
+    DMG_DIRT_PCT: u8,
+    DMG_WEIGHT_HIGH_PCT: u8,
+    DMG_WEIGHT_LOW_PCT: u8,
+    DMG_FULL_LOW_PM: u16,
+    DMG_FULL_HIGH_PM: u16,
+    DMG_WATER_LOW_PM: u16,
+    DMG_WATER_HIGH_PM: u16,
+    DMG_ENERGY_PM: u16,
+    DMG_BOOZE_PM: u16,
+    DMG_MOOD_PM: u16,
+    DMG_DIRT_PM: u16,
+    DMG_WEIGHT_HIGH_PM: u16,
+    DMG_WEIGHT_LOW_PM: u16,
+    REC_GOOD_PM: u16,
+    REC_FAIR_PM: u16,
+    REC_GOOD_MOOD_PCT: u8,
+    REC_FAIR_MOOD_PCT: u8,
+    REC_DEPRIVED_PCT: u16,
 }
 
 // ---------------------------------------------------------------------------
@@ -205,9 +233,6 @@ impl Thresholds {
         STAT_MAX: 65535,
         UNIT: 655,
 
-        SICK_RATE: 1,
-        SICK_CONDITION_RATE: 655,
-        SICK_CONDITION_MISERABLE_RATE: 1310,
         SICK_TRIGGER_HUNGER: 39321,
         SICK_TRIGGER_TIRED: 49151,
 
@@ -217,9 +242,6 @@ impl Thresholds {
         WARNING_MISERABLE: 32768,
 
         MISERABLE_AMOUNT: 655,
-        MISERABLE_INTERVAL_BASE: 240,
-        MISERABLE_INTERVAL_PER_STAT: 25,
-        MISERABLE_INTERVAL_MIN: 40,
         MISERABLE_STAT_THRESHOLD: 39321,
         MISERABLE_BOOST_THRESHOLD: 45874,
         MISERABLE_DRAIN_THRESHOLD: 52428,
@@ -241,7 +263,6 @@ impl Thresholds {
         HATCHING_TICKS: 6,
         #[cfg(feature = "simulator")]
         HATCHING_TICKS: 1,
-        LEAVING_THRESHOLDS: [u32::MAX, 7200, 3600, 1800, 720],
         MAX_SLEEP_TICKS: 180,
         SAVE_INTERVAL_TICKS: 90,
 
@@ -252,8 +273,6 @@ impl Thresholds {
         WARNING_WEIGHT: 32768,
 
         DIABETES_ONSET_TICKS: 25920,
-        DIABETES_SICK_RATE: 655,
-        DIABETES_SICK_MISERABLE_RATE: 1310,
 
         EXERCISE_DURATION: 3,
         EXERCISE_COOLDOWN: 36,
@@ -278,8 +297,6 @@ impl Thresholds {
         DRUNK_TRIGGER: 39321,
         WARNING_DRUNK: 32768,
         ALCOHOLIC_ONSET_TICKS: 17280,
-        ALCOHOLIC_SICK_RATE: 655,
-        ALCOHOLIC_SICK_MISERABLE_RATE: 1310,
 
         REHAB_DURATION: 3,
         REHAB_COOLDOWN: 1440,
@@ -345,6 +362,48 @@ impl Thresholds {
         UNSETTLED_FULL_HI_PCT: 85,
         UNSETTLED_WATER_LO_PCT: 25,
         UNSETTLED_WATER_HI_PCT: 90,
+
+        // v2 mood / health terms
+        MOOD_STEP: 120,
+        MOOD_PEN_INJURED_PCT: 20,
+        MOOD_PEN_GROGGY_PCT: 10,
+        MOOD_PEN_HANGOVER_PCT: 15,
+        MOOD_PEN_DEPRIVED_PCT: 10,
+        MOOD_PEN_REHAB_PCT: 20,
+        MOOD_PEN_CRAVING_PCT: 15,
+        MOOD_CRAVING_BOOZE_PCT: 10,
+        MOOD_HEALTH_FLOOR_PCT: 50,
+        CEILING_FIT_STEP1_PCT: 25,
+        CEILING_FIT_STEP2_PCT: 50,
+        CEILING_FIT_STEP3_PCT: 70,
+        CEILING_STEP0_PCT: 55,
+        CEILING_STEP1_PCT: 65,
+        CEILING_STEP2_PCT: 80,
+        CEILING_STEP3_PCT: 100,
+        CEILING_DIABETIC_PCT: 20,
+        DMG_NEED_LOW_PCT: 15,
+        DMG_NEED_HIGH_PCT: 95,
+        DMG_ENERGY_PCT: 10,
+        DMG_ENERGY_HEALTH_PCT: 30,
+        DMG_MOOD_PCT: 20,
+        DMG_DIRT_PCT: 85,
+        DMG_WEIGHT_HIGH_PCT: 80,
+        DMG_WEIGHT_LOW_PCT: 20,
+        DMG_FULL_LOW_PM: 40,
+        DMG_FULL_HIGH_PM: 8,
+        DMG_WATER_LOW_PM: 40,
+        DMG_WATER_HIGH_PM: 8,
+        DMG_ENERGY_PM: 8,
+        DMG_BOOZE_PM: 40,
+        DMG_MOOD_PM: 10,
+        DMG_DIRT_PM: 10,
+        DMG_WEIGHT_HIGH_PM: 2,
+        DMG_WEIGHT_LOW_PM: 10,
+        REC_GOOD_PM: 14,
+        REC_FAIR_PM: 5,
+        REC_GOOD_MOOD_PCT: 60,
+        REC_FAIR_MOOD_PCT: 40,
+        REC_DEPRIVED_PCT: 50,
     };
 
     /// Half-speed decay, doubled lifetimes, more generous action relief.
@@ -354,9 +413,6 @@ impl Thresholds {
         STAT_MAX: 65535,
         UNIT: 655,
 
-        SICK_RATE: 1,
-        SICK_CONDITION_RATE: 328,
-        SICK_CONDITION_MISERABLE_RATE: 655,
         SICK_TRIGGER_HUNGER: 39321,
         SICK_TRIGGER_TIRED: 49151,
 
@@ -366,9 +422,6 @@ impl Thresholds {
         WARNING_MISERABLE: 32768,
 
         MISERABLE_AMOUNT: 655,
-        MISERABLE_INTERVAL_BASE: 360,
-        MISERABLE_INTERVAL_PER_STAT: 25,
-        MISERABLE_INTERVAL_MIN: 60,
         MISERABLE_STAT_THRESHOLD: 39321,
         MISERABLE_BOOST_THRESHOLD: 45874,
         MISERABLE_DRAIN_THRESHOLD: 52428,
@@ -390,7 +443,6 @@ impl Thresholds {
         HATCHING_TICKS: 6,
         #[cfg(feature = "simulator")]
         HATCHING_TICKS: 1,
-        LEAVING_THRESHOLDS: [u32::MAX, 14400, 7200, 3600, 1440],
         MAX_SLEEP_TICKS: 180,
         SAVE_INTERVAL_TICKS: 90,
 
@@ -401,8 +453,6 @@ impl Thresholds {
         WARNING_WEIGHT: 32768,
 
         DIABETES_ONSET_TICKS: 51840,
-        DIABETES_SICK_RATE: 328,
-        DIABETES_SICK_MISERABLE_RATE: 655,
 
         EXERCISE_DURATION: 3,
         EXERCISE_COOLDOWN: 36,
@@ -427,8 +477,6 @@ impl Thresholds {
         DRUNK_TRIGGER: 39321,
         WARNING_DRUNK: 32768,
         ALCOHOLIC_ONSET_TICKS: 34560,
-        ALCOHOLIC_SICK_RATE: 328,
-        ALCOHOLIC_SICK_MISERABLE_RATE: 655,
 
         REHAB_DURATION: 3,
         REHAB_COOLDOWN: 2880,
@@ -494,6 +542,48 @@ impl Thresholds {
         UNSETTLED_FULL_HI_PCT: 85,
         UNSETTLED_WATER_LO_PCT: 25,
         UNSETTLED_WATER_HI_PCT: 90,
+
+        // v2 mood / health terms
+        MOOD_STEP: 120,
+        MOOD_PEN_INJURED_PCT: 20,
+        MOOD_PEN_GROGGY_PCT: 10,
+        MOOD_PEN_HANGOVER_PCT: 15,
+        MOOD_PEN_DEPRIVED_PCT: 10,
+        MOOD_PEN_REHAB_PCT: 20,
+        MOOD_PEN_CRAVING_PCT: 15,
+        MOOD_CRAVING_BOOZE_PCT: 10,
+        MOOD_HEALTH_FLOOR_PCT: 50,
+        CEILING_FIT_STEP1_PCT: 25,
+        CEILING_FIT_STEP2_PCT: 50,
+        CEILING_FIT_STEP3_PCT: 70,
+        CEILING_STEP0_PCT: 55,
+        CEILING_STEP1_PCT: 65,
+        CEILING_STEP2_PCT: 80,
+        CEILING_STEP3_PCT: 100,
+        CEILING_DIABETIC_PCT: 20,
+        DMG_NEED_LOW_PCT: 15,
+        DMG_NEED_HIGH_PCT: 95,
+        DMG_ENERGY_PCT: 10,
+        DMG_ENERGY_HEALTH_PCT: 30,
+        DMG_MOOD_PCT: 20,
+        DMG_DIRT_PCT: 85,
+        DMG_WEIGHT_HIGH_PCT: 80,
+        DMG_WEIGHT_LOW_PCT: 20,
+        DMG_FULL_LOW_PM: 20,
+        DMG_FULL_HIGH_PM: 4,
+        DMG_WATER_LOW_PM: 20,
+        DMG_WATER_HIGH_PM: 4,
+        DMG_ENERGY_PM: 4,
+        DMG_BOOZE_PM: 20,
+        DMG_MOOD_PM: 5,
+        DMG_DIRT_PM: 5,
+        DMG_WEIGHT_HIGH_PM: 1,
+        DMG_WEIGHT_LOW_PM: 5,
+        REC_GOOD_PM: 14,
+        REC_FAIR_PM: 5,
+        REC_GOOD_MOOD_PCT: 60,
+        REC_FAIR_MOOD_PCT: 40,
+        REC_DEPRIVED_PCT: 50,
     };
 }
 
@@ -604,21 +694,8 @@ pub fn active_mode() -> Mode {
 pub type Setter = fn(&mut Thresholds, u32);
 
 pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
-    ("SICK_RATE", |t, v| t.SICK_RATE = clamp_u16(v)),
-    ("SICK_CONDITION_RATE", |t, v| {
-        t.SICK_CONDITION_RATE = clamp_u16(v)
-    }),
-    ("SICK_CONDITION_MISERABLE_RATE", |t, v| {
-        t.SICK_CONDITION_MISERABLE_RATE = clamp_u16(v)
-    }),
     // Interval keys divide the tick counter (see interval_fires); floor to 1
     // so a BORNPETS.CFG value of 0 can't cause a divide-by-zero.
-    ("MISERABLE_INTERVAL_BASE", |t, v| {
-        t.MISERABLE_INTERVAL_BASE = v.max(1)
-    }),
-    ("MISERABLE_INTERVAL_MIN", |t, v| {
-        t.MISERABLE_INTERVAL_MIN = v.max(1)
-    }),
     ("FEED_HUNGER_RELIEF", |t, v| {
         t.FEED_HUNGER_RELIEF = clamp_u16(v)
     }),
@@ -700,6 +777,46 @@ pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
     ("UNSETTLED_FULL_HI_PCT", |t, v| t.UNSETTLED_FULL_HI_PCT = clamp_pct(v)),
     ("UNSETTLED_WATER_LO_PCT", |t, v| t.UNSETTLED_WATER_LO_PCT = clamp_pct(v)),
     ("UNSETTLED_WATER_HI_PCT", |t, v| t.UNSETTLED_WATER_HI_PCT = clamp_pct(v)),
+    ("MOOD_STEP", |t, v| t.MOOD_STEP = clamp_u16(v)),
+    ("MOOD_PEN_INJURED_PCT", |t, v| t.MOOD_PEN_INJURED_PCT = clamp_u16(v)),
+    ("MOOD_PEN_GROGGY_PCT", |t, v| t.MOOD_PEN_GROGGY_PCT = clamp_u16(v)),
+    ("MOOD_PEN_HANGOVER_PCT", |t, v| t.MOOD_PEN_HANGOVER_PCT = clamp_u16(v)),
+    ("MOOD_PEN_DEPRIVED_PCT", |t, v| t.MOOD_PEN_DEPRIVED_PCT = clamp_u16(v)),
+    ("MOOD_PEN_REHAB_PCT", |t, v| t.MOOD_PEN_REHAB_PCT = clamp_u16(v)),
+    ("MOOD_PEN_CRAVING_PCT", |t, v| t.MOOD_PEN_CRAVING_PCT = clamp_u16(v)),
+    ("MOOD_CRAVING_BOOZE_PCT", |t, v| t.MOOD_CRAVING_BOOZE_PCT = clamp_pct(v)),
+    ("MOOD_HEALTH_FLOOR_PCT", |t, v| t.MOOD_HEALTH_FLOOR_PCT = clamp_pct(v)),
+    ("CEILING_FIT_STEP1_PCT", |t, v| t.CEILING_FIT_STEP1_PCT = clamp_pct(v)),
+    ("CEILING_FIT_STEP2_PCT", |t, v| t.CEILING_FIT_STEP2_PCT = clamp_pct(v)),
+    ("CEILING_FIT_STEP3_PCT", |t, v| t.CEILING_FIT_STEP3_PCT = clamp_pct(v)),
+    ("CEILING_STEP0_PCT", |t, v| t.CEILING_STEP0_PCT = clamp_u16(v)),
+    ("CEILING_STEP1_PCT", |t, v| t.CEILING_STEP1_PCT = clamp_u16(v)),
+    ("CEILING_STEP2_PCT", |t, v| t.CEILING_STEP2_PCT = clamp_u16(v)),
+    ("CEILING_STEP3_PCT", |t, v| t.CEILING_STEP3_PCT = clamp_u16(v)),
+    ("CEILING_DIABETIC_PCT", |t, v| t.CEILING_DIABETIC_PCT = clamp_u16(v)),
+    ("DMG_NEED_LOW_PCT", |t, v| t.DMG_NEED_LOW_PCT = clamp_pct(v)),
+    ("DMG_NEED_HIGH_PCT", |t, v| t.DMG_NEED_HIGH_PCT = clamp_pct(v)),
+    ("DMG_ENERGY_PCT", |t, v| t.DMG_ENERGY_PCT = clamp_pct(v)),
+    ("DMG_ENERGY_HEALTH_PCT", |t, v| t.DMG_ENERGY_HEALTH_PCT = clamp_pct(v)),
+    ("DMG_MOOD_PCT", |t, v| t.DMG_MOOD_PCT = clamp_pct(v)),
+    ("DMG_DIRT_PCT", |t, v| t.DMG_DIRT_PCT = clamp_pct(v)),
+    ("DMG_WEIGHT_HIGH_PCT", |t, v| t.DMG_WEIGHT_HIGH_PCT = clamp_pct(v)),
+    ("DMG_WEIGHT_LOW_PCT", |t, v| t.DMG_WEIGHT_LOW_PCT = clamp_pct(v)),
+    ("DMG_FULL_LOW_PM", |t, v| t.DMG_FULL_LOW_PM = clamp_u16(v)),
+    ("DMG_FULL_HIGH_PM", |t, v| t.DMG_FULL_HIGH_PM = clamp_u16(v)),
+    ("DMG_WATER_LOW_PM", |t, v| t.DMG_WATER_LOW_PM = clamp_u16(v)),
+    ("DMG_WATER_HIGH_PM", |t, v| t.DMG_WATER_HIGH_PM = clamp_u16(v)),
+    ("DMG_ENERGY_PM", |t, v| t.DMG_ENERGY_PM = clamp_u16(v)),
+    ("DMG_BOOZE_PM", |t, v| t.DMG_BOOZE_PM = clamp_u16(v)),
+    ("DMG_MOOD_PM", |t, v| t.DMG_MOOD_PM = clamp_u16(v)),
+    ("DMG_DIRT_PM", |t, v| t.DMG_DIRT_PM = clamp_u16(v)),
+    ("DMG_WEIGHT_HIGH_PM", |t, v| t.DMG_WEIGHT_HIGH_PM = clamp_u16(v)),
+    ("DMG_WEIGHT_LOW_PM", |t, v| t.DMG_WEIGHT_LOW_PM = clamp_u16(v)),
+    ("REC_GOOD_PM", |t, v| t.REC_GOOD_PM = clamp_u16(v)),
+    ("REC_FAIR_PM", |t, v| t.REC_FAIR_PM = clamp_u16(v)),
+    ("REC_GOOD_MOOD_PCT", |t, v| t.REC_GOOD_MOOD_PCT = clamp_pct(v)),
+    ("REC_FAIR_MOOD_PCT", |t, v| t.REC_FAIR_MOOD_PCT = clamp_pct(v)),
+    ("REC_DEPRIVED_PCT", |t, v| t.REC_DEPRIVED_PCT = clamp_u16(v)),
 ];
 
 #[inline]
