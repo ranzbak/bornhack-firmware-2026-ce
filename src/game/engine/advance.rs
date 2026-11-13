@@ -5,10 +5,19 @@
 //! solver) guarantees no threshold is crossed inside the step, so every rate
 //! stays valid. Every number is a [`thresholds`] field.
 
-use super::needs::{self, MAX, NEEDS, Need, P};
+use super::needs::{self, MAX, Need, P};
 use super::regime::{energy_cap, health_ceiling, health_damage, health_recovery, mood_target, rates, sleep_quality_pm};
 use super::thresholds as t;
 use super::{GameState, Phase};
+
+/// `dependence_min` and `diabetes_min` count quarter-minutes: +`SLOW_SCALE` per
+/// minute while rising, -1 per minute while decaying (a quarter of the speed),
+/// so a split advance gives the same result as one call (R17). Not tunable:
+/// a config change must not change what a saved value means.
+pub const SLOW_SCALE: u32 = 4;
+/// `leaving_min` counts half-minutes: +`LEAVING_SCALE` per minute at health 0,
+/// -1 per minute otherwise.
+pub const LEAVING_SCALE: u32 = 2;
 
 #[inline]
 fn lvl(pct: u8) -> i32 {
@@ -54,17 +63,16 @@ pub fn advance(s: &mut GameState, dt: u32) {
 
     // Slow counters, by the regime at the start.
     let (booze, weight, fit) = (s.booze as i32, s.weight as i32, s.fitness as i32);
-    let decay = dt / t::SLOW_DECAY_DIV() as u32;
     let (heavy, lean) = (lvl(t::DIABETES_WEIGHT_HI_PCT()), lvl(t::DIABETES_WEIGHT_LO_PCT()));
     if booze > needs::booze_hi() {
-        s.dependence_min = s.dependence_min.saturating_add(dt);
+        s.dependence_min = s.dependence_min.saturating_add(dt * SLOW_SCALE);
     } else if booze < lvl(t::BOOZE_CLEAR_PCT()) {
-        s.dependence_min = s.dependence_min.saturating_sub(decay);
+        s.dependence_min = s.dependence_min.saturating_sub(dt);
     }
     if weight > heavy {
-        s.diabetes_min = s.diabetes_min.saturating_add(dt);
+        s.diabetes_min = s.diabetes_min.saturating_add(dt * SLOW_SCALE);
     } else if weight < lean {
-        s.diabetes_min = s.diabetes_min.saturating_sub(decay);
+        s.diabetes_min = s.diabetes_min.saturating_sub(dt);
     }
     if s.diabetic && weight < lean && fit > lvl(t::REVERSAL_FIT_PCT()) {
         add_min(&mut s.reversal_min, dt);
@@ -87,7 +95,6 @@ pub fn advance(s: &mut GameState, dt: u32) {
     s.strain = bump(s.strain, step(Need::Strain));
     s.fitness = bump(s.fitness, step(Need::Fit));
     s.weight = bump(s.weight, step(Need::Weight));
-    debug_assert_eq!(r.len(), NEEDS);
 
     // Booze peak and hangover.
     if s.booze as i32 > needs::booze_hi() {
@@ -101,10 +108,10 @@ pub fn advance(s: &mut GameState, dt: u32) {
     // Flags.
     let relapse_window = s.recovering_min > 0;
     let dependence_line = if relapse_window { t::DEPENDENCE_RELAPSE_MIN() } else { t::DEPENDENCE_ONSET_MIN() };
-    if !s.dependent && s.dependence_min >= dependence_line as u32 {
+    if !s.dependent && s.dependence_min >= dependence_line as u32 * SLOW_SCALE {
         s.dependent = true;
     }
-    if !s.diabetic && s.diabetes_min >= t::DIABETES_ONSET_MIN() as u32 {
+    if !s.diabetic && s.diabetes_min >= t::DIABETES_ONSET_MIN() as u32 * SLOW_SCALE {
         s.diabetic = true;
         s.reversal_min = 0;
     }
@@ -173,8 +180,8 @@ pub fn advance(s: &mut GameState, dt: u32) {
 
     // Leaving.
     if s.health == 0 {
-        s.leaving_min = s.leaving_min.saturating_add(dt);
-        if s.leaving_min >= t::LEAVING_MIN() as u32 {
+        s.leaving_min = s.leaving_min.saturating_add(dt * LEAVING_SCALE);
+        if s.leaving_min >= t::LEAVING_MIN() as u32 * LEAVING_SCALE {
             s.phase = Phase::Gone;
             s.save_pending = true;
             s.realm_pending = true;
@@ -183,7 +190,7 @@ pub fn advance(s: &mut GameState, dt: u32) {
             s.save_pending = true;
         }
     } else if s.leaving_min > 0 {
-        s.leaving_min = s.leaving_min.saturating_sub(dt / t::LEAVING_RECOVER_DIV() as u32);
+        s.leaving_min = s.leaving_min.saturating_sub(dt);
         if s.leaving_min == 0 && s.phase == Phase::Leaving {
             s.phase = Phase::Active;
             s.save_pending = true;

@@ -467,18 +467,18 @@ mod advance_wake {
     fn dependence_builds_while_drunk_and_decays_when_sober() {
         let mut s = calm();
         s.booze = pct(90);
-        s.dependence_min = 1198;
+        s.dependence_min = 1198 * 4 + 2;
         advance(&mut s, 1);
         assert!(!s.dependent);
         advance(&mut s, 1);
-        assert_eq!(s.dependence_min, 1200);
+        assert_eq!(s.dependence_min, 1200 * 4 + 2);
         assert!(s.dependent);
 
         let mut s = calm();
         s.booze = 0;
-        s.dependence_min = 100;
+        s.dependence_min = 400;
         advance(&mut s, 40);
-        assert_eq!(s.dependence_min, 90, "minus dt / 4 while sober");
+        assert_eq!(s.dependence_min, 360, "quarter-minutes: minus 1 per sober minute");
     }
 
     #[test]
@@ -486,7 +486,7 @@ mod advance_wake {
         let mut s = calm();
         s.booze = pct(90);
         s.recovering_min = 5000;
-        s.dependence_min = 399;
+        s.dependence_min = 400 * 4 - 4;
         advance(&mut s, 1);
         assert!(s.dependent);
     }
@@ -495,7 +495,7 @@ mod advance_wake {
     fn rehab_course_cures_and_marks_recovering() {
         let mut s = calm();
         s.dependent = true;
-        s.dependence_min = 700;
+        s.dependence_min = 700 * 4;
         s.rehab_min = 3;
         advance(&mut s, 2);
         assert!(s.dependent);
@@ -513,10 +513,9 @@ mod advance_wake {
     fn diabetes_sets_in_after_4320_heavy_minutes() {
         let mut s = calm();
         s.weight = pct(85);
-        s.diabetes_min = 4319;
+        s.diabetes_min = 4319 * 4;
         advance(&mut s, 1);
-        assert!(!s.diabetic || s.diabetes_min >= 4320);
-        assert_eq!(s.diabetes_min, 4320);
+        assert_eq!(s.diabetes_min, 4320 * 4);
         assert!(s.diabetic);
         assert_eq!(s.reversal_min, 0);
     }
@@ -555,7 +554,7 @@ mod advance_wake {
         assert!(s.night);
         assert_eq!(s.sleep_min, 0);
         assert_eq!(s.good_sleep_min, 0);
-        assert!(s.health <= pct(57) + 20, "lost 3 points, health {}", s.health);
+        assert_eq!(s.health, pct(57) + 14, "lost 3 points, then +14 recovery");
 
         let mut s = calm();
         s.energy = 20;
@@ -586,7 +585,7 @@ mod advance_wake {
         s.hydration = 0;
         advance(&mut s, 100);
         assert_eq!(s.health, 0);
-        assert_eq!(s.leaving_min, 100);
+        assert_eq!(s.leaving_min, 200);
         assert_eq!(s.phase, Phase::Leaving);
         advance(&mut s, 619);
         assert_eq!(s.phase, Phase::Leaving);
@@ -598,10 +597,109 @@ mod advance_wake {
         s.leaving_min = 100;
         s.phase = Phase::Leaving;
         advance(&mut s, 40);
-        assert_eq!(s.leaving_min, 80);
-        advance(&mut s, 160);
+        assert_eq!(s.leaving_min, 60, "half-minutes: minus 1 per minute");
+        advance(&mut s, 60);
         assert_eq!(s.leaving_min, 0);
         assert_eq!(s.phase, Phase::Active);
+    }
+}
+
+mod split_invariance {
+    use bornhack_aegg::game::engine::advance::advance;
+    use bornhack_aegg::game::engine::needs::{MAX, P};
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase};
+
+    fn pct(p: i32) -> u16 {
+        (p * P) as u16
+    }
+
+    fn calm() -> GameState {
+        let mut s = GameState::new_egg(1, PetKind(0));
+        s.phase = Phase::Active;
+        s.is_sleeping = false;
+        s.fullness = pct(60);
+        s.hydration = pct(65);
+        s.energy = pct(80);
+        s.fun = pct(50);
+        s.dirt = pct(20);
+        s.booze = pct(30);
+        s.strain = pct(20);
+        s.fitness = pct(55);
+        s.weight = pct(50);
+        s.mood = MAX as u16;
+        s.health = pct(70);
+        s
+    }
+
+    type Snapshot = ([u16; 14], [u32; 4]);
+
+    fn snap(s: &GameState) -> Snapshot {
+        (
+            [
+                s.fullness, s.hydration, s.energy, s.fun, s.dirt, s.booze, s.strain, s.fitness,
+                s.weight, s.mood, s.health, s.sleep_min, s.oversleep_min, s.reversal_min,
+            ],
+            [s.dependence_min, s.diabetes_min, s.leaving_min, s.care_awake_min],
+        )
+    }
+
+    fn check(name: &str, s0: GameState) {
+        const N: u32 = 20;
+        let mut whole = s0.clone();
+        advance(&mut whole, N);
+        let mut ones = s0.clone();
+        for _ in 0..N {
+            advance(&mut ones, 1);
+        }
+        let mut halves = s0.clone();
+        advance(&mut halves, 7);
+        advance(&mut halves, N - 7);
+        assert_eq!(snap(&ones), snap(&whole), "{name}: N x 1 vs one call");
+        assert_eq!(snap(&halves), snap(&whole), "{name}: 7 + 13 vs one call");
+    }
+
+    #[test]
+    fn advance_is_split_invariant() {
+        check("awake in band", calm());
+
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.energy = pct(30);
+        s.booze = 0;
+        check("asleep", s);
+
+        let mut s = calm();
+        s.booze = pct(60);
+        s.dependence_min = 400;
+        check("drunk above booze_hi", s);
+
+        let mut s = calm();
+        s.booze = pct(10);
+        s.dependence_min = 400;
+        check("sobering", s);
+
+        let mut s = calm();
+        s.weight = pct(85);
+        s.diabetes_min = 100;
+        check("heavy", s);
+
+        let mut s = calm();
+        s.diabetes_min = 400;
+        s.weight = pct(60);
+        check("lean again", s);
+
+        let mut s = calm();
+        s.health = 0;
+        s.fullness = 0;
+        s.hydration = 0;
+        s.leaving_min = 100;
+        s.phase = Phase::Leaving;
+        check("health 0", s);
+
+        let mut s = calm();
+        s.leaving_min = 100;
+        s.phase = Phase::Leaving;
+        check("healed, leaving recovers", s);
     }
 }
 

@@ -242,8 +242,6 @@ thresholds_table! {
     COLLAPSE_DAMAGE: u16,
     COLLAPSE_HEALTH_FLOOR_PCT: u8,
     LEAVING_MIN: u16,
-    LEAVING_RECOVER_DIV: u8,
-    SLOW_DECAY_DIV: u8,
     BOOZE_CLEAR_PCT: u8,
     DIABETES_WEIGHT_HI_PCT: u8,
     DIABETES_WEIGHT_LO_PCT: u8,
@@ -433,7 +431,6 @@ impl Thresholds {
         REC_GOOD_MOOD_PCT: 60,
         REC_FAIR_MOOD_PCT: 40,
         REC_DEPRIVED_PCT: 50,
-
         // v2 advance
         DEPENDENCE_ONSET_MIN: 1200,
         DEPENDENCE_RELAPSE_MIN: 400,
@@ -458,8 +455,6 @@ impl Thresholds {
         COLLAPSE_DAMAGE: 1965,
         COLLAPSE_HEALTH_FLOOR_PCT: 33,
         LEAVING_MIN: 720,
-        LEAVING_RECOVER_DIV: 2,
-        SLOW_DECAY_DIV: 4,
         BOOZE_CLEAR_PCT: 15,
         DIABETES_WEIGHT_HI_PCT: 80,
         DIABETES_WEIGHT_LO_PCT: 65,
@@ -646,7 +641,6 @@ impl Thresholds {
         REC_GOOD_MOOD_PCT: 60,
         REC_FAIR_MOOD_PCT: 40,
         REC_DEPRIVED_PCT: 50,
-
         // v2 advance (collapse health loss halved like every damage rate)
         DEPENDENCE_ONSET_MIN: 1200,
         DEPENDENCE_RELAPSE_MIN: 400,
@@ -671,8 +665,6 @@ impl Thresholds {
         COLLAPSE_DAMAGE: 982,
         COLLAPSE_HEALTH_FLOOR_PCT: 33,
         LEAVING_MIN: 720,
-        LEAVING_RECOVER_DIV: 2,
-        SLOW_DECAY_DIV: 4,
         BOOZE_CLEAR_PCT: 15,
         DIABETES_WEIGHT_HI_PCT: 80,
         DIABETES_WEIGHT_LO_PCT: 65,
@@ -934,8 +926,6 @@ pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
     ("COLLAPSE_DAMAGE", |t, v| t.COLLAPSE_DAMAGE = clamp_u16(v)),
     ("COLLAPSE_HEALTH_FLOOR_PCT", |t, v| t.COLLAPSE_HEALTH_FLOOR_PCT = clamp_pct(v)),
     ("LEAVING_MIN", |t, v| t.LEAVING_MIN = clamp_u16(v)),
-    ("LEAVING_RECOVER_DIV", |t, v| t.LEAVING_RECOVER_DIV = v.clamp(1, 255) as u8),
-    ("SLOW_DECAY_DIV", |t, v| t.SLOW_DECAY_DIV = v.clamp(1, 255) as u8),
     ("BOOZE_CLEAR_PCT", |t, v| t.BOOZE_CLEAR_PCT = clamp_pct(v)),
     ("DIABETES_WEIGHT_HI_PCT", |t, v| t.DIABETES_WEIGHT_HI_PCT = clamp_pct(v)),
     ("DIABETES_WEIGHT_LO_PCT", |t, v| t.DIABETES_WEIGHT_LO_PCT = clamp_pct(v)),

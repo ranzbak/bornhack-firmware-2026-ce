@@ -258,10 +258,13 @@ pub struct GameState {
     pub diabetic: bool,
     /// Minutes spent overweight; once it reaches the onset time `diabetic`
     /// flips true for the rest of this pet's life.
+    /// Counted in quarter-minutes (`advance::SLOW_SCALE`).
     pub diabetes_min: u32,
 
     // Dependence — permanent once triggered by sustained drinking.
     pub dependent: bool,
+    /// Counted in quarter-minutes (`advance::SLOW_SCALE`): +4 per minute
+    /// while drunk, -1 per minute while sober.
     pub dependence_min: u32,
 
     // Traits (higher = better).
@@ -276,7 +279,8 @@ pub struct GameState {
     // Lifecycle.
     pub phase: Phase,
     pub hatching_countdown: u16,
-    /// Minutes spent in the leaving countdown.
+    /// Leaving countdown in half-minutes (`advance::LEAVING_SCALE`): +2 per
+    /// minute at health 0, -1 per minute otherwise; Gone at 720 minutes.
     pub leaving_min: u32,
     pub generation: u16,
 
