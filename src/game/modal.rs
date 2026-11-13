@@ -906,33 +906,41 @@ fn title_text(
     t
 }
 
-/// The risk mark's box: a 2 px wide "!" flush with the popover's right inner
-/// edge, in the gutter past the row text (at most 126 px from the inner left
-/// edge, on the Frikandel row; the inner width is 128).
-fn risk_mark_rect(row_top: i32) -> Rectangle {
-    let inner_right = MARGIN + (MODAL_W - BORDER) as i32;
+/// The risk mark's box. It sits at the right inner edge with one white
+/// column between it and the border (which starts at x = 141). A 7 px glyph cell ends in a blank
+/// column, so a mark starting at or after `text_end` (the x just past the
+/// row's last cell) has at least one white column between it and the text
+/// ink. It is 2 px wide when the text leaves room, else 1 px (the 18 column
+/// Frikandel row ends at x = 138).
+fn risk_mark_rect(row_top: i32, text_end: i32) -> Rectangle {
+    let right = MARGIN + (MODAL_W - BORDER) as i32 - 1;
+    let w = if text_end <= right - 2 { 2 } else { 1 };
     Rectangle::new(
-        Point::new(inner_right - RISK_MARK_W as i32, row_top + (ITEM_H - RISK_MARK_H as i32) / 2),
-        Size::new(RISK_MARK_W, RISK_MARK_H),
+        Point::new(right - w, row_top + (ITEM_H - RISK_MARK_H as i32) / 2),
+        Size::new(w as u32, RISK_MARK_H),
     )
 }
 
-const RISK_MARK_W: u32 = 2;
 const RISK_MARK_H: u32 = 9;
 
 /// A bar and a dot.
-fn draw_risk_mark<D>(display: &mut D, row_top: i32, colour: TriColor) -> Result<(), D::Error>
+fn draw_risk_mark<D>(
+    display: &mut D,
+    row_top: i32,
+    text_end: i32,
+    colour: TriColor,
+) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let r = risk_mark_rect(row_top);
+    let r = risk_mark_rect(row_top, text_end);
     let style = PrimitiveStyle::with_fill(colour);
-    Rectangle::new(r.top_left, Size::new(RISK_MARK_W, RISK_MARK_H - 3))
+    Rectangle::new(r.top_left, Size::new(r.size.width, RISK_MARK_H - 3))
         .into_styled(style)
         .draw(display)?;
     Rectangle::new(
         Point::new(r.top_left.x, r.top_left.y + RISK_MARK_H as i32 - 2),
-        Size::new(RISK_MARK_W, 2),
+        Size::new(r.size.width, 2),
     )
     .into_styled(style)
     .draw(display)
@@ -1032,6 +1040,8 @@ where
 
         let display_label = row_text(*item, stats.as_ref());
         let text_x = inner_x + row_indent(kind);
+        let text_end =
+            text_x + display_label.chars().count() as i32 * TEXT_BOLD_BLACK.font.character_size.width as i32;
         let risk = risks.get(vis_i).copied().flatten().is_some();
 
         if i == pos && available {
@@ -1079,7 +1089,7 @@ where
 
         if risk {
             let colour = if i == pos { WHITE } else { BLACK };
-            draw_risk_mark(display, row_top, colour)?;
+            draw_risk_mark(display, row_top, text_end, colour)?;
         }
 
         // Apply the grey-out overlay last so it covers everything we
@@ -1652,12 +1662,68 @@ mod tests {
         super::MODAL_POS.store(5, core::sync::atomic::Ordering::Relaxed); // Cancel
         let mut c = crate::game::test_canvas::Canvas::new();
         super::draw_modal(&mut c).unwrap();
-        let row = |i: i32| super::risk_mark_rect(30 + 16 * i);
+        let row = |i: i32| super::risk_mark_rect(30 + 16 * i, 0);
         assert!(c.any(row(3), crate::BLACK), "Pizza row has the mark");
         assert!(!c.any(row(0), crate::BLACK), "Salad row has none");
         assert!(!c.any(row(4), crate::BLACK), "Cake row has none");
         super::close();
         lifecycle::set_state_for_test(None);
+    }
+
+    /// Draw the Feed page with the cursor on `pos` and check the mark of the
+    /// risky `food` row: an `ink` mark on a `ground` row, with a `ground` column
+    /// on each side of it (the black border starts two columns right of it).
+    fn check_mark(money: bool, hard: bool, food: FoodKind, selected: bool) {
+        use crate::{BLACK, WHITE};
+        let stats = menu_pet(money, hard, |_| {});
+        let item = Item::FeedFood(food);
+        assert!(item.risk(&stats).is_some(), "{food:?} is risky at fullness 50");
+        let row = ModalKind::Feed.items().iter().position(|i| *i == item).unwrap();
+        super::open(ModalKind::Feed);
+        let pos = if selected { row } else { 5 };
+        super::MODAL_POS.store(pos as u8, core::sync::atomic::Ordering::Relaxed);
+        let mut c = crate::game::test_canvas::Canvas::new();
+        super::draw_modal(&mut c).unwrap();
+        let top = 30 + 16 * row as i32;
+        let text = super::row_text(item, Some(&stats));
+        let text_end = 12 + text.chars().count() as i32 * 7;
+        let mark = super::risk_mark_rect(top, text_end);
+        let (ink, ground) = if selected { (WHITE, BLACK) } else { (BLACK, WHITE) };
+        let (x0, x1) = (mark.top_left.x, mark.top_left.x + mark.size.width as i32);
+        let (y0, y1) = (mark.top_left.y, mark.top_left.y + mark.size.height as i32);
+        // The bar is solid from the top down to the gap before the dot.
+        for y in y0..y1 - 3 {
+            for x in x0..x1 {
+                assert_eq!(c.get(x, y), ink, "bar ({x},{y}) {text:?} sel={selected}");
+            }
+        }
+        for y in y0..y1 {
+            assert_eq!(c.get(x0 - 1, y), ground, "left of mark, {text:?} sel={selected}");
+            assert_eq!(c.get(x1, y), ground, "right of mark, {text:?} sel={selected}");
+            assert_eq!(c.get(x1 + 2, y), BLACK, "the border follows");
+        }
+        // No text ink right of the mark's left neighbour column.
+        for y in top..top + 16 {
+            for x in x0 - 1..x0 {
+                assert_eq!(c.get(x, y), ground, "text ink at ({x},{y})");
+            }
+        }
+        super::close();
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn the_mark_stays_clear_of_the_text_and_the_border() {
+        let _guard = crate::game::lock_test_state();
+        for money in [false, true] {
+            for hard in [false, true] {
+                for food in [FoodKind::Frikandel, FoodKind::Pizza] {
+                    for selected in [false, true] {
+                        check_mark(money, hard, food, selected);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -1783,7 +1849,7 @@ mod tests {
                     // The gutter mark must not touch the row text.
                     let indent = if kind == ModalKind::Feed { 0 } else { indent_gap };
                     let text_end = inner_x + indent + cols as i32 * ink_w;
-                    let mark = super::risk_mark_rect(0);
+                    let mark = super::risk_mark_rect(0, text_end);
                     assert!(text_end <= mark.top_left.x, "{text:?} runs into the mark");
                     assert!(
                         mark.top_left.x + mark.size.width as i32 <= inner_x + 128,

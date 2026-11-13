@@ -156,11 +156,14 @@ before you repeat the mistake. They are also logged in the Diary.
 A menu row that would end badly shows a small `!` at its right edge. The
 row still works: the mark is a warning, not a lock. Move the cursor onto
 it and the title bar reads "risk: " plus what would happen ("risk: food
-coma"), so you can think again before you press. The marker is the engine's
-own forecast of the dose, so it is exactly what the action would do. A row
+coma"), so you can think again before you press. For a dose
+(food, drink, medicine, play, exercise, relax, wash, wake up) the marker is
+exactly what the action would do. For Sleep it is the engine's forecast of a
+night slept until rested. A row
 you cannot use shows no mark; selecting it says why it is refused. On the
 Feed page the title shows the selected food's full name, so the Frikandel
-row ("Frikandel spec") reads "Frikandel speciaal" there.
+row ("Frikandel spec") reads "Frikandel speciaal" there. In Hard mode that
+row and its title both say "Hamburger".
 
 A row that is not ready yet shows the time left, e.g. "(50s)", "(59m)" or
 "(2h05)". Actions are mutually exclusive: the pet can only do one thing at
