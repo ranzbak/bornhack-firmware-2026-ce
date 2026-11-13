@@ -264,6 +264,7 @@ pub fn seg_len(s: &GameState, max: u32) -> u32 {
 ///
 /// Health lines (`health > line`, and `== 0`):
 /// - 0: leaving, `health_damage` floor;
+/// - `needs::HEALTH_DANGER_PCT`: the status word's danger line (shared with `status`);
 /// - 25 % and 45 % (brief; no term reads them yet);
 /// - `DMG_ENERGY_HEALTH_PCT`: energy damage stops at this floor;
 /// - `COLLAPSE_HEALTH_FLOOR_PCT`: collapse damage applies above it;
@@ -275,13 +276,14 @@ pub fn seg_len(s: &GameState, max: u32) -> u32 {
 pub fn sig(s: &GameState) -> u32 {
     let (mood, health) = (s.mood as i32, s.health as i32);
     let mood_lines = [
-        lvl(80),
+        lvl(needs::HAPPY_MOOD_PCT),
         lvl(t::REC_GOOD_MOOD_PCT()),
         lvl(t::REC_FAIR_MOOD_PCT()),
         lvl(t::CARE_GOOD_MOOD_PCT()),
         lvl(t::DMG_MOOD_PCT()),
     ];
     let health_lines = [
+        lvl(needs::HEALTH_DANGER_PCT),
         lvl(25),
         lvl(t::DMG_ENERGY_HEALTH_PCT()),
         lvl(t::COLLAPSE_HEALTH_FLOOR_PCT()),

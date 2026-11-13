@@ -3,17 +3,11 @@
 //! ([`regime::penalty_terms`]); under 3 points nothing is shown (Content).
 
 use super::GameState;
-use super::needs::{self, P};
+use super::needs::{self, DIRT_DANGER_PCT, HEALTH_DANGER_PCT, NEED_DANGER_LO_PCT, P};
 use super::regime::{PENALTY_TERMS, penalty_terms};
 
 /// Largest term must beat this to be named.
 const CONTENT_UNDER: i32 = 3 * P;
-/// Fixed safety edges of the danger flag (percent): fullness and water
-/// under, dirt and health as named. Booze danger is a tunable band edge.
-const NEED_DANGER_LO_PCT: i32 = 15;
-const DIRT_DANGER_PCT: i32 = 85;
-const HEALTH_DANGER_PCT: i32 = 30;
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "embassy-core", derive(defmt::Format))]
 #[repr(u8)]
@@ -35,6 +29,23 @@ pub enum StatusWord {
     Injured,
     Groggy,
     Poorly,
+}
+
+impl StatusWord {
+    /// Whether this word, even without danger, is worth a buzz. The
+    /// "miserable" words still animate but stay quiet.
+    pub fn alerts(self) -> bool {
+        matches!(
+            self,
+            StatusWord::Hungry
+                | StatusWord::Thirsty
+                | StatusWord::Tired
+                | StatusWord::Groggy
+                | StatusWord::HungOver
+                | StatusWord::Injured
+                | StatusWord::Poorly
+        )
+    }
 }
 
 /// The words in [`penalty_terms`] order.
@@ -68,10 +79,10 @@ pub fn status(s: &GameState) -> (StatusWord, bool) {
             word = w;
         }
     }
-    let danger = (s.fullness as i32) < NEED_DANGER_LO_PCT * P
-        || (s.hydration as i32) < NEED_DANGER_LO_PCT * P
+    let danger = (s.fullness as i32) < NEED_DANGER_LO_PCT as i32 * P
+        || (s.hydration as i32) < NEED_DANGER_LO_PCT as i32 * P
         || s.booze as i32 > needs::booze_danger()
-        || s.dirt as i32 > DIRT_DANGER_PCT * P
-        || (s.health as i32) < HEALTH_DANGER_PCT * P;
+        || s.dirt as i32 > DIRT_DANGER_PCT as i32 * P
+        || (s.health as i32) < HEALTH_DANGER_PCT as i32 * P;
     (word, danger)
 }

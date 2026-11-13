@@ -342,7 +342,7 @@ static REALM_DIRTY: AtomicBool = AtomicBool::new(false);
 
 fn current_severity(state: &GameState) -> Severity {
     use super::engine::Phase;
-    use super::engine::status::{StatusWord, status};
+    use super::engine::status::status;
 
     if state.phase == Phase::Gone {
         return Severity::Gone;
@@ -355,8 +355,8 @@ fn current_severity(state: &GameState) -> Severity {
     // "mask" an existing warning and suppress the alert when the action ends.
     match status(state) {
         (_, true) => Severity::Severe,
-        (StatusWord::Content, false) => Severity::Neutral,
-        (_, false) => Severity::Warning,
+        (word, false) if word.alerts() => Severity::Warning,
+        (_, false) => Severity::Neutral,
     }
 }
 
@@ -463,6 +463,31 @@ pub fn display_anim() -> DisplayAnim {
         return DisplayAnim::Sleeping;
     }
     raw
+}
+
+/// Why `action` (with the chosen `drink`) would be turned away now, or `None`
+/// when it would be accepted (affordability aside).
+pub fn refusal_for(
+    action: super::engine::Action,
+    drink: Option<super::engine::DrinkKind>,
+) -> Option<super::engine::doses::Reason> {
+    let state = unsafe { (*GAME.get()).as_ref() }?;
+    state.refusal_for(action, drink)
+}
+
+/// Why a mini-game (`Some`) or a Battle (`None`) cannot start now.
+pub fn game_refusal(
+    game: Option<super::engine::MiniGame>,
+) -> Option<super::engine::doses::Reason> {
+    let state = unsafe { (*GAME.get()).as_ref() }?;
+    state.game_refusal(game)
+}
+
+/// Tick the display must be redrawn by for the sleep-animation floor to end
+/// (`SLEEP_ANIM_UNTIL_TICK`), or `u32::MAX` when none is pending.
+pub fn sleep_anim_deadline_tick() -> u32 {
+    let until = SLEEP_ANIM_UNTIL_TICK.load(Ordering::Relaxed);
+    if now_tick() < until { until } else { u32::MAX }
 }
 
 /// Get the tick at which the engine wants to be woken next.
@@ -848,4 +873,39 @@ pub async fn save_if_needed() -> bool {
 #[cfg(not(feature = "embassy-core"))]
 pub async fn save_if_needed() -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Severity, current_severity};
+    use crate::game::engine::needs::P;
+    use crate::game::engine::{GameState, PetKind, Phase};
+
+    fn pet() -> GameState {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.phase = Phase::Active;
+        s
+    }
+
+    #[test]
+    fn miserable_words_animate_but_do_not_buzz() {
+        let mut s = pet();
+        assert!(current_severity(&s) == Severity::Neutral);
+        s.dirt = (70 * P) as u16; // Grubby, not in danger
+        assert!(current_severity(&s) == Severity::Neutral);
+        s.fun = (5 * P) as u16; // Bored
+        assert!(current_severity(&s) == Severity::Neutral);
+    }
+
+    #[test]
+    fn real_problems_warn_and_danger_is_severe() {
+        let mut s = pet();
+        s.fullness = (30 * P) as u16; // Hungry
+        assert!(current_severity(&s) == Severity::Warning);
+        s.fullness = (10 * P) as u16;
+        assert!(current_severity(&s) == Severity::Severe);
+        let mut s = pet();
+        s.dirt = (95 * P) as u16; // Grubby but in danger
+        assert!(current_severity(&s) == Severity::Severe);
+    }
 }

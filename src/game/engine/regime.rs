@@ -36,21 +36,12 @@ pub fn thirst_pct(s: &GameState) -> i32 {
 
 /// Energy ceiling while asleep: lower when the pet is deprived.
 pub fn energy_cap(s: &GameState) -> i32 {
-    if s.deprived {
-        lvl(t::ENERGY_CAP_DEPRIVED_PCT())
-    } else {
-        MAX
-    }
+    if s.deprived { lvl(t::ENERGY_CAP_DEPRIVED_PCT()) } else { MAX }
 }
 
 /// Sleep recovery quality in per-mille: poor when the pet is unsettled.
 pub fn sleep_quality_pm(s: &GameState) -> i32 {
-    let (b, f, h, fun) = (
-        s.booze as i32,
-        s.fullness as i32,
-        s.hydration as i32,
-        s.fun as i32,
-    );
+    let (b, f, h, fun) = (s.booze as i32, s.fullness as i32, s.hydration as i32, s.fun as i32);
     let unsettled = b > lvl(t::UNSETTLED_BOOZE_PCT())
         || f > lvl(t::UNSETTLED_FULL_HI_PCT())
         || f < lvl(t::UNSETTLED_FULL_LO_PCT())
@@ -58,11 +49,7 @@ pub fn sleep_quality_pm(s: &GameState) -> i32 {
         || h > lvl(t::UNSETTLED_WATER_HI_PCT())
         || fun > needs::fun_hi()
         || s.rehab_min > 0;
-    (if unsettled {
-        t::SLEEP_QUALITY_POOR_PM()
-    } else {
-        t::SLEEP_QUALITY_GOOD_PM()
-    }) as i32
+    (if unsettled { t::SLEEP_QUALITY_POOR_PM() } else { t::SLEEP_QUALITY_GOOD_PM() }) as i32
 }
 
 /// Awake energy drain multiplier in per-mille (1000 = base rate).
@@ -102,11 +89,7 @@ pub fn rates(s: &GameState) -> [i32; NEEDS] {
         } else {
             0
         };
-        fun = if s.fun as i32 > lvl(t::SLEEP_FUN_FLOOR_PCT()) {
-            -(t::FUN_DRAIN_PM() as i32)
-        } else {
-            0
-        };
+        fun = if s.fun as i32 > lvl(t::SLEEP_FUN_FLOOR_PCT()) { -(t::FUN_DRAIN_PM() as i32) } else { 0 };
     } else {
         full = -(t::FULL_DRAIN_AWAKE_PM() as i32);
         water = -(t::WATER_DRAIN_AWAKE_PM() as i32) * thirst / 100;
@@ -251,11 +234,7 @@ pub fn ceiling_with(th: &t::Thresholds, fit: i32, untreated_diabetic: bool) -> i
     } else {
         th.CEILING_STEP3_PCT
     } as i32;
-    let cut = if untreated_diabetic {
-        th.CEILING_DIABETIC_PCT as i32
-    } else {
-        0
-    };
+    let cut = if untreated_diabetic { th.CEILING_DIABETIC_PCT as i32 } else { 0 };
     ((step - cut) * P).clamp(0, MAX)
 }
 
@@ -271,28 +250,16 @@ pub fn health_damage(s: &GameState) -> i32 {
         (water > high, t::DMG_WATER_HIGH_PM()),
         // sleep shortage alone never takes health under the floor
         (
-            energy < lvl(t::DMG_ENERGY_PCT())
-                && !s.is_sleeping
-                && s.health as i32 > lvl(t::DMG_ENERGY_HEALTH_PCT()),
+            energy < lvl(t::DMG_ENERGY_PCT()) && !s.is_sleeping && s.health as i32 > lvl(t::DMG_ENERGY_HEALTH_PCT()),
             t::DMG_ENERGY_PM(),
         ),
         (s.booze as i32 > needs::booze_danger(), t::DMG_BOOZE_PM()),
         ((s.mood as i32) < lvl(t::DMG_MOOD_PCT()), t::DMG_MOOD_PM()),
         (s.dirt as i32 > lvl(t::DMG_DIRT_PCT()), t::DMG_DIRT_PM()),
-        (
-            weight > lvl(t::DMG_WEIGHT_HIGH_PCT()),
-            t::DMG_WEIGHT_HIGH_PM(),
-        ),
-        (
-            weight < lvl(t::DMG_WEIGHT_LOW_PCT()),
-            t::DMG_WEIGHT_LOW_PM(),
-        ),
+        (weight > lvl(t::DMG_WEIGHT_HIGH_PCT()), t::DMG_WEIGHT_HIGH_PM()),
+        (weight < lvl(t::DMG_WEIGHT_LOW_PCT()), t::DMG_WEIGHT_LOW_PM()),
     ];
-    terms
-        .iter()
-        .filter(|(on, _)| *on)
-        .map(|(_, d)| *d as i32)
-        .sum()
+    terms.iter().filter(|(on, _)| *on).map(|(_, d)| *d as i32).sum()
 }
 
 /// Health regained per engine minute while below the ceiling (the caller
@@ -306,9 +273,5 @@ pub fn health_recovery(s: &GameState) -> i32 {
     } else {
         0
     } as i32;
-    if s.deprived {
-        pct_of(base, t::REC_DEPRIVED_PCT())
-    } else {
-        base
-    }
+    if s.deprived { pct_of(base, t::REC_DEPRIVED_PCT()) } else { base }
 }

@@ -98,6 +98,9 @@ pub enum Toast {
     /// Neutral flavor toast; replaced the old `Inspired` ("+inspired")
     /// toast when the `drained`/inspired stat was removed.
     MinigameWin = 26,
+    /// Why an action was refused or a row is disabled; the text comes from
+    /// the stored `engine::doses::Reason` (see `show_reason`).
+    Reason = 27,
 }
 
 impl Toast {
@@ -129,6 +132,7 @@ impl Toast {
             24 => Self::Refreshed,
             25 => Self::OnlyPets,
             26 => Self::MinigameWin,
+            27 => Self::Reason,
             _ => Self::None,
         }
     }
@@ -163,6 +167,8 @@ impl Toast {
             Toast::Refreshed => "refreshed!",
             Toast::OnlyPets => "Only pets!",
             Toast::MinigameWin => "nice game!",
+            // Dynamic — handled in the renderer.
+            Toast::Reason => "",
         }
     }
 }
@@ -172,6 +178,10 @@ static TOAST_MSG: AtomicU8 = AtomicU8::new(0);
 /// Whether a toast is currently visible.  Cleared on the first
 /// render that occurs at or after `TOAST_MIN_VISIBLE_MS` since it was shown.
 static TOAST: TimedFlag = TimedFlag::new();
+
+/// The reason shown by [`Toast::Reason`]: `Reason::pack` kind and seconds.
+static REASON_KIND: AtomicU8 = AtomicU8::new(0);
+static REASON_SECS: AtomicU32 = AtomicU32::new(0);
 
 /// Remaining cooldown in seconds, read by the renderer when the
 /// active toast is [`Toast::StationCooldown`].  Set by
@@ -375,6 +385,31 @@ pub fn status_wants_full_refresh() -> bool {
         || lifecycle::is_overweight_warning()
         || lifecycle::is_drunk_warning()
         || battle_view::wants_full_refresh()
+}
+
+/// Tell the player why an action was refused or a row is disabled.
+pub fn show_reason(why: engine::doses::Reason) {
+    let (kind, secs) = why.pack();
+    REASON_KIND.store(kind, Ordering::Relaxed);
+    REASON_SECS.store(secs, Ordering::Relaxed);
+    show_toast(Toast::Reason);
+}
+
+/// Next tick the frame loop must wake for UI-only timed state, whatever the
+/// engine says: a toast or alert is cleared by the first draw after its
+/// minimum time, and the sleep animation floor ends at a fixed tick. Without
+/// this the 2 h engine cap would leave them on screen for hours.
+pub fn next_ui_deadline_tick() -> u32 {
+    let now = lifecycle::now_tick();
+    let overlay = TOAST.is_active()
+        || DIABETES_ALERT.is_active()
+        || ALCOHOLISM_ALERT.is_active()
+        || battle_view::wants_full_refresh();
+    let mut next = lifecycle::sleep_anim_deadline_tick();
+    if overlay {
+        next = next.min(now.saturating_add(1));
+    }
+    next
 }
 
 /// Show the station-cooldown toast with the remaining time formatted
@@ -628,7 +663,14 @@ where
         // time from a small atomic; everything else uses the static
         // message table.
         let mut dyn_buf: heapless::String<24> = heapless::String::new();
-        let msg: &str = if let Toast::StationCooldown = toast {
+        let msg: &str = if let Toast::Reason = toast {
+            let why = engine::doses::Reason::unpack(
+                REASON_KIND.load(Ordering::Relaxed),
+                REASON_SECS.load(Ordering::Relaxed),
+            );
+            dyn_buf.push_str(why.text().as_str()).ok();
+            dyn_buf.as_str()
+        } else if let Toast::StationCooldown = toast {
             let secs = STATION_COOLDOWN_SECS.load(Ordering::Relaxed);
             let m = secs / 60;
             let s = secs % 60;

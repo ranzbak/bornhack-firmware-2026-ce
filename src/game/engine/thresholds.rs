@@ -64,9 +64,6 @@ thresholds_table! {
     // Traits
     MIN_TRAIT: u16,
     MAX_TRAIT: u16,
-    // Weight
-    OVERWEIGHT_TRIGGER: u16,
-    WARNING_WEIGHT: u16,
     // Exercise
     EXERCISE_DURATION: u8,
     // Medication
@@ -350,8 +347,6 @@ impl Thresholds {
 
         MIN_TRAIT: 16384,
         MAX_TRAIT: 49152,
-        OVERWEIGHT_TRIGGER: 39321,
-        WARNING_WEIGHT: 32768,
 
 
         EXERCISE_DURATION: 3,
@@ -634,8 +629,6 @@ impl Thresholds {
 
         MIN_TRAIT: 16384,
         MAX_TRAIT: 49152,
-        OVERWEIGHT_TRIGGER: 39321,
-        WARNING_WEIGHT: 32768,
 
 
         EXERCISE_DURATION: 3,
@@ -1011,7 +1004,7 @@ pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
         t.MINIGAME_COOLDOWN = clamp_u16(v)
     }),
     ("HATCHING_TICKS", |t, v| t.HATCHING_TICKS = clamp_u16(v)),
-    ("MAX_SLEEP_TICKS", |t, v| t.MAX_SLEEP_TICKS = v),
+    ("MAX_SLEEP_TICKS", |t, v| t.MAX_SLEEP_TICKS = v.clamp(30, 1440)),
     ("FULL_LO_PCT", |t, v| t.FULL_LO_PCT = clamp_pct(v)),
     ("FULL_HI_PCT", |t, v| t.FULL_HI_PCT = clamp_pct(v)),
     ("WATER_LO_PCT", |t, v| t.WATER_LO_PCT = clamp_pct(v)),

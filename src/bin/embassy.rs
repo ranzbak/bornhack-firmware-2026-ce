@@ -1473,8 +1473,10 @@ async fn wait_display_event(
                     bornhack_aegg::game::engine::anim_files::frame_count(kind, anim) as u64;
                 if frame_count <= 1 {
                     // Single frame — no animation to advance; sleep until
-                    // the game state changes (next wake tick).
-                    let wake = bornhack_aegg::game::lifecycle::next_wake_tick();
+                    // the game state changes (next wake tick) or a UI-only
+                    // timer (toast, alert, sleep-animation floor) ends.
+                    let wake = bornhack_aegg::game::lifecycle::next_wake_tick()
+                        .min(bornhack_aegg::game::next_ui_deadline_tick());
                     let now = bornhack_aegg::game::lifecycle::now_tick();
                     let wait_ticks = wake.saturating_sub(now).max(1) as u64;
                     Timer::after_secs(wait_ticks * 10).await;

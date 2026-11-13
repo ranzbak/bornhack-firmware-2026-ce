@@ -19,6 +19,103 @@ pub enum Refusal {
     Injured,
     Asleep,
     NoNeed,
+    Tired,
+}
+
+/// Why a menu row is disabled or an action was turned away.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "embassy-core", derive(defmt::Format))]
+pub enum Reason {
+    Refused(Refusal),
+    /// Still waiting, seconds left.
+    Wait(u32),
+    CantAfford,
+    Busy,
+    Hibernating,
+}
+
+impl Refusal {
+    /// What the player is told.
+    pub fn text(self) -> &'static str {
+        match self {
+            Refusal::NotThirsty => "not thirsty",
+            Refusal::AlreadyClean => "already clean",
+            Refusal::Injured => "injured",
+            Refusal::Asleep => "asleep",
+            Refusal::NoNeed => "no need",
+            Refusal::Tired => "too tired",
+        }
+    }
+}
+
+impl Reason {
+    /// The one place a reason becomes player-facing text.
+    pub fn text(self) -> heapless::String<16> {
+        let mut out = heapless::String::new();
+        let _ = match self {
+            Reason::Refused(r) => out.push_str(r.text()),
+            Reason::Wait(secs) => {
+                let _ = out.push_str("wait ");
+                out.push_str(fmt_wait(secs).as_str())
+            }
+            Reason::CantAfford => out.push_str("can't afford"),
+            Reason::Busy => out.push_str("busy"),
+            Reason::Hibernating => out.push_str("hibernating"),
+        };
+        out
+    }
+}
+
+impl Reason {
+    /// A (kind, seconds) pair so a toast can carry it in two atomics.
+    pub fn pack(self) -> (u8, u32) {
+        let (kind, secs) = match self {
+            Reason::Refused(Refusal::NotThirsty) => (0, 0),
+            Reason::Refused(Refusal::AlreadyClean) => (1, 0),
+            Reason::Refused(Refusal::Injured) => (2, 0),
+            Reason::Refused(Refusal::Asleep) => (3, 0),
+            Reason::Refused(Refusal::NoNeed) => (4, 0),
+            Reason::Refused(Refusal::Tired) => (5, 0),
+            Reason::Wait(secs) => (6, secs),
+            Reason::CantAfford => (7, 0),
+            Reason::Busy => (8, 0),
+            Reason::Hibernating => (9, 0),
+        };
+        (kind, secs)
+    }
+
+    /// Inverse of [`pack`](Self::pack); anything unknown reads as "no need".
+    pub fn unpack(kind: u8, secs: u32) -> Self {
+        match kind {
+            0 => Reason::Refused(Refusal::NotThirsty),
+            1 => Reason::Refused(Refusal::AlreadyClean),
+            2 => Reason::Refused(Refusal::Injured),
+            3 => Reason::Refused(Refusal::Asleep),
+            5 => Reason::Refused(Refusal::Tired),
+            6 => Reason::Wait(secs),
+            7 => Reason::CantAfford,
+            8 => Reason::Busy,
+            9 => Reason::Hibernating,
+            _ => Reason::Refused(Refusal::NoNeed),
+        }
+    }
+}
+
+/// A wait of `secs` seconds as "45s", "59m" or "2h05" (the longest, 72 h,
+/// is "72h00").
+pub fn fmt_wait(secs: u32) -> heapless::String<8> {
+    let mut out = heapless::String::new();
+    let _ = if secs < 60 {
+        core::fmt::Write::write_fmt(&mut out, format_args!("{secs}s"))
+    } else if secs < 3600 {
+        core::fmt::Write::write_fmt(&mut out, format_args!("{}m", secs / 60))
+    } else {
+        core::fmt::Write::write_fmt(
+            &mut out,
+            format_args!("{}h{:02}", secs / 3600, secs % 3600 / 60),
+        )
+    };
+    out
 }
 
 /// Water is refused above this hydration and never takes it past `WATER_CAP_PCT`
@@ -40,7 +137,7 @@ fn lvl(pct: u8) -> i32 {
 
 /// Whether `a` (with the chosen `drink`, for `Action::Drink`) would be refused.
 /// Medical preconditions and cooldowns that are not met are `NoNeed`; a pet
-/// too tired to work is `NoNeed` too, an injured one `Injured`.
+/// too tired to work is `Tired`, an injured one `Injured`.
 pub fn refusal(s: &GameState, a: Action, drink: Option<DrinkKind>) -> Option<Refusal> {
     let injured = s.injured_min > 0;
     match (a, drink) {
@@ -51,7 +148,7 @@ pub fn refusal(s: &GameState, a: Action, drink: Option<DrinkKind>) -> Option<Ref
         (Action::Wash, _) if (s.dirt as i32) < WASH_REFUSE_PCT * P => Some(Refusal::AlreadyClean),
         (Action::OnlyPets, _) if s.is_sleeping => Some(Refusal::Asleep),
         (Action::OnlyPets, _) if injured => Some(Refusal::Injured),
-        (Action::OnlyPets, _) if (s.energy as i32) < needs::energy_lo() => Some(Refusal::NoNeed),
+        (Action::OnlyPets, _) if (s.energy as i32) < needs::energy_lo() => Some(Refusal::Tired),
         (Action::Heal, _) if s.med_cd_min > 0 => Some(Refusal::NoNeed),
         (Action::Medicate, _) if !s.diabetic || s.insulin_min > t::DOSE_INSULIN_WINDOW_MIN() => {
             Some(Refusal::NoNeed)

@@ -2299,7 +2299,7 @@ mod status_wake {
     fn status_picks_the_largest_penalty() {
         assert_eq!(status(&pet()), (StatusWord::Content, false));
 
-        // Hungry (gap 8 * 3/2 = 12) beats Grubby (95 - 58 = 37)? No: dirt is larger.
+        // Hungry on its own (12 points), but dirt at 95 % (37 points) is the bigger problem.
         let mut s = pet();
         s.fullness = pct(30);
         assert_eq!(status(&s), (StatusWord::Hungry, false));
@@ -2466,7 +2466,6 @@ mod status_wake {
         );
         assert_eq!((st.status, st.danger), (StatusWord::Content, false));
         assert!(st.can_feed && st.can_play && st.can_sleep && !st.can_wake);
-        assert!(!st.can_heal || st.med_cd_min == 0);
     }
 
     #[test]
@@ -2548,5 +2547,210 @@ mod status_wake {
         a.award_inspiration(MiniGame::Nim, 2);
         doses::minigame(&mut b, 2);
         assert_eq!(a.fun, b.fun);
+    }
+}
+
+mod fix_round_1 {
+    use bornhack_aegg::game::bornpets_cfg::apply_overrides;
+    use bornhack_aegg::game::engine::doses::{Reason, Refusal, fmt_wait};
+    use bornhack_aegg::game::engine::needs::P;
+    use bornhack_aegg::game::engine::status::{StatusWord, status};
+    use bornhack_aegg::game::engine::thresholds::{HATCHING_TICKS, Thresholds};
+    use bornhack_aegg::game::engine::{
+        Action, DisplayAnim, DrinkKind, GameState, MiniGame, PetKind, Phase,
+    };
+
+    fn pct(v: i32) -> u16 {
+        (v * P) as u16
+    }
+
+    fn pet() -> GameState {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        assert_eq!(s.phase, Phase::Active);
+        s.is_sleeping = false;
+        s.tick_rem = 0;
+        s.money_enabled = false;
+        s
+    }
+
+    #[test]
+    fn waits_are_readable() {
+        assert_eq!(fmt_wait(0).as_str(), "0s");
+        assert_eq!(fmt_wait(59).as_str(), "59s");
+        assert_eq!(fmt_wait(59 * 60).as_str(), "59m");
+        assert_eq!(fmt_wait(2 * 3600).as_str(), "2h00");
+        assert_eq!(fmt_wait(2 * 3600 + 5 * 60).as_str(), "2h05");
+        assert_eq!(fmt_wait(72 * 3600).as_str(), "72h00");
+    }
+
+    #[test]
+    fn every_reason_has_one_short_text() {
+        let t = |r: Reason| r.text();
+        assert_eq!(
+            t(Reason::Refused(Refusal::NotThirsty)).as_str(),
+            "not thirsty"
+        );
+        assert_eq!(
+            t(Reason::Refused(Refusal::AlreadyClean)).as_str(),
+            "already clean"
+        );
+        assert_eq!(t(Reason::Refused(Refusal::Injured)).as_str(), "injured");
+        assert_eq!(t(Reason::Refused(Refusal::Asleep)).as_str(), "asleep");
+        assert_eq!(t(Reason::Refused(Refusal::NoNeed)).as_str(), "no need");
+        assert_eq!(t(Reason::Refused(Refusal::Tired)).as_str(), "too tired");
+        assert_eq!(t(Reason::Wait(2 * 3600 + 5 * 60)).as_str(), "wait 2h05");
+        assert_eq!(t(Reason::CantAfford).as_str(), "can't afford");
+    }
+
+    #[test]
+    fn a_tired_pets_only_pets_row_says_too_tired() {
+        let mut s = pet();
+        s.energy = pct(10);
+        let why = s.refusal_for(Action::OnlyPets, None).expect("refused");
+        assert_eq!(why, Reason::Refused(Refusal::Tired));
+        assert_eq!(why.text().as_str(), "too tired");
+        assert!(!s.only_pets());
+        // not tired: accepted
+        assert_eq!(pet().refusal_for(Action::OnlyPets, None), None);
+    }
+
+    #[test]
+    fn refusal_for_gives_the_reason_the_starter_would() {
+        let mut s = pet();
+        s.dirt = pct(10);
+        assert_eq!(
+            s.refusal_for(Action::Wash, None),
+            Some(Reason::Refused(Refusal::AlreadyClean))
+        );
+        s.hydration = pct(90);
+        assert_eq!(
+            s.refusal_for(Action::Drink, Some(DrinkKind::Water)),
+            Some(Reason::Refused(Refusal::NotThirsty))
+        );
+        assert_eq!(s.refusal_for(Action::Drink, Some(DrinkKind::Cola)), None);
+        s.injured_min = 30;
+        assert_eq!(
+            s.refusal_for(Action::Play, None),
+            Some(Reason::Refused(Refusal::Injured))
+        );
+        s.is_sleeping = true;
+        assert_eq!(
+            s.refusal_for(Action::OnlyPets, None),
+            Some(Reason::Refused(Refusal::Asleep))
+        );
+        // not diabetic: no need, no wait
+        assert_eq!(
+            s.refusal_for(Action::Medicate, None),
+            Some(Reason::Refused(Refusal::NoNeed))
+        );
+        let mut s = pet();
+        s.play();
+        assert_eq!(s.refusal_for(Action::Feed, None), Some(Reason::Busy));
+    }
+
+    #[test]
+    fn medical_waits_show_the_real_remaining_time() {
+        let mut s = pet();
+        s.med_cd_min = 125;
+        assert_eq!(
+            s.refusal_for(Action::Heal, None),
+            Some(Reason::Wait(125 * 60))
+        );
+        s.ozempic_cd_min = 2880;
+        assert_eq!(
+            s.refusal_for(Action::Ozempic, None),
+            Some(Reason::Wait(2880 * 60))
+        );
+        s.dependent = true;
+        s.rehab_min = 4320;
+        assert_eq!(
+            s.refusal_for(Action::Rehab, None),
+            Some(Reason::Wait(4320 * 60))
+        );
+        assert_eq!(Reason::Wait(4320 * 60).text().as_str(), "wait 72h00");
+        s.diabetic = true;
+        s.insulin_min = 120 + 45;
+        assert_eq!(
+            s.refusal_for(Action::Medicate, None),
+            Some(Reason::Wait(45 * 60))
+        );
+    }
+
+    #[test]
+    fn game_rows_wait_out_their_cooldown() {
+        let mut s = pet();
+        assert_eq!(s.game_refusal(Some(MiniGame::Nim)), None);
+        s.cooldown_nim = 18;
+        assert_eq!(s.game_refusal(Some(MiniGame::Nim)), Some(Reason::Wait(180)));
+        assert_eq!(s.game_refusal(Some(MiniGame::TicTacToe)), None);
+        s.cooldown_battle = 6;
+        assert_eq!(s.game_refusal(None), Some(Reason::Wait(60)));
+        s.is_sleeping = true;
+        assert_eq!(
+            s.game_refusal(Some(MiniGame::TicTacToe)),
+            Some(Reason::Refused(Refusal::Asleep))
+        );
+    }
+
+    #[test]
+    fn only_danger_and_real_problems_buzz() {
+        for w in [
+            StatusWord::Hungry,
+            StatusWord::Thirsty,
+            StatusWord::Tired,
+            StatusWord::Groggy,
+            StatusWord::HungOver,
+            StatusWord::Injured,
+            StatusWord::Poorly,
+        ] {
+            assert!(w.alerts(), "{w:?}");
+        }
+        for w in [
+            StatusWord::Content,
+            StatusWord::Bored,
+            StatusWord::Wired,
+            StatusWord::Sloppy,
+            StatusWord::Grubby,
+            StatusWord::Stuffed,
+            StatusWord::Waterlogged,
+            StatusWord::Overweight,
+            StatusWord::Underweight,
+            StatusWord::Unfit,
+        ] {
+            assert!(!w.alerts(), "{w:?}");
+        }
+    }
+
+    #[test]
+    fn wake_cap_is_clamped_and_follows_the_preset() {
+        let mut t = Thresholds::CLASSIC;
+        apply_overrides(&mut t, b"MAX_SLEEP_TICKS=0\n");
+        assert_eq!(t.MAX_SLEEP_TICKS, 30);
+        apply_overrides(&mut t, b"MAX_SLEEP_TICKS=999999\n");
+        assert_eq!(t.MAX_SLEEP_TICKS, 1440);
+        apply_overrides(&mut t, b"MAX_SLEEP_TICKS=360\n");
+        assert_eq!(t.MAX_SLEEP_TICKS, 360);
+        assert_eq!(Thresholds::CLASSIC.MAX_SLEEP_TICKS, 720);
+        assert_eq!(Thresholds::CASUAL.MAX_SLEEP_TICKS, 720);
+    }
+
+    #[test]
+    fn tired_in_danger_is_critical_tired() {
+        let mut s = pet();
+        s.energy = 0;
+        s.health = pct(29);
+        assert_eq!(status(&s), (StatusWord::Tired, true));
+        assert_eq!(s.display_anim(), DisplayAnim::CriticalTired);
+    }
+
+    #[test]
+    fn stats_heal_flag_follows_the_cooldown() {
+        let mut s = pet();
+        s.med_cd_min = 30;
+        let now = s.last_update_tick;
+        let st = s.stats(now);
+        assert!(!st.can_heal);
+        assert_eq!(st.med_cd_min, 30);
     }
 }

@@ -891,9 +891,6 @@ impl GameState {
 // Next wake time — exact, from the closed-form steps
 // ---------------------------------------------------------------------------
 
-/// How far ahead (engine minutes) the wake search looks: the 2 h cap.
-const WAKE_HORIZON_MIN: u32 = 120;
-
 /// Everything on screen the engine can change by itself.
 type Visible = (
     status::StatusWord,
@@ -905,6 +902,63 @@ type Visible = (
 );
 
 impl GameState {
+    /// Why `a` (with the chosen `drink`) would be turned away right now, or
+    /// `None` when its starter accepts it (affordability aside). The menu and
+    /// the starters share this, so the UI never re-derives a rule.
+    pub fn refusal_for(&self, a: Action, drink: Option<DrinkKind>) -> Option<doses::Reason> {
+        if let Some(why) = self.cannot_act() {
+            return Some(why);
+        }
+        let r = doses::refusal(self, a, drink)?;
+        // A medical "no need" that is really a wait shows the time left.
+        let wait_min = match (a, r) {
+            (Action::Heal, doses::Refusal::NoNeed) => self.med_cd_min,
+            (Action::Ozempic, doses::Refusal::NoNeed) => self.ozempic_cd_min,
+            (Action::Rehab, doses::Refusal::NoNeed) => self.rehab_min,
+            (Action::Medicate, doses::Refusal::NoNeed) => {
+                self.insulin_min.saturating_sub(DOSE_INSULIN_WINDOW_MIN())
+            }
+            _ => 0,
+        };
+        Some(if wait_min > 0 {
+            doses::Reason::Wait(wait_min as u32 * 60)
+        } else {
+            doses::Reason::Refused(r)
+        })
+    }
+
+    /// Why a mini-game (`Some`) or a mesh Battle (`None`) cannot start now.
+    pub fn game_refusal(&self, game: Option<MiniGame>) -> Option<doses::Reason> {
+        if let Some(why) = self.cannot_act() {
+            return Some(why);
+        }
+        if self.is_sleeping {
+            return Some(doses::Reason::Refused(doses::Refusal::Asleep));
+        }
+        let cooldown = match game {
+            Some(MiniGame::TicTacToe) => self.cooldown_tictactoe,
+            Some(MiniGame::LightsOut) => self.cooldown_lightsout,
+            Some(MiniGame::BlackHole) => self.cooldown_blackhole,
+            Some(MiniGame::Nim) => self.cooldown_nim,
+            Some(MiniGame::BornJeweled) => self.cooldown_bornjeweled,
+            None => self.cooldown_battle,
+        };
+        (cooldown > 0).then(|| doses::Reason::Wait(cooldown as u32 * 10))
+    }
+
+    /// The reasons that stop every action alike.
+    fn cannot_act(&self) -> Option<doses::Reason> {
+        if self.hibernating {
+            Some(doses::Reason::Hibernating)
+        } else if !self.is_alive() {
+            Some(doses::Reason::Refused(doses::Refusal::NoNeed))
+        } else if self.active_action.is_some() {
+            Some(doses::Reason::Busy)
+        } else {
+            None
+        }
+    }
+
     fn visible(&self) -> Visible {
         let (word, danger) = status::status(self);
         (word, danger, self.display_anim(), self.is_sleeping, self.phase, self.active_action)
@@ -913,6 +967,16 @@ impl GameState {
     /// The tick at which the engine must run next: when something the
     /// player can see (status word and danger, animation, sleep, phase,
     /// action) first changes, but never later than `MAX_SLEEP_TICKS`.
+    ///
+    /// The bisection is exact only while these hold, so keep them true:
+    /// - inside one `segment` every mood term, level and rate is linear, so
+    ///   "the view differs" cannot flip back (two linear terms cross once);
+    /// - every line the view reads (the danger lines, the happy-mood line, the
+    ///   band edges) is a threshold edge or a `solver::sig` line, sharing one
+    ///   const with `status` and `display_anim` (`needs::*_PCT`), so no
+    ///   segment steps over it unseen;
+    /// - everything that ages is advanced by `advance` alone (needs do not
+    ///   age during an action, hence its own bound).
     ///
     /// The caller sleeps for `next_wake_tick - last_update_tick` ticks. Not
     /// polling: a copy of the pet is stepped by whole solver segments, and
@@ -933,9 +997,11 @@ impl GameState {
         }
         let start = self.visible();
         let mut c = self.clone();
+        // Look as far ahead as the cap allows, and no further.
+        let horizon = MAX_SLEEP_TICKS().div_ceil(TICKS_PER_MINUTE).max(1);
         let (mut used, mut steep) = (0u32, 0u32);
-        while used < WAKE_HORIZON_MIN {
-            let dt = c.segment(WAKE_HORIZON_MIN - used, &mut steep);
+        while used < horizon {
+            let dt = c.segment(horizon - used, &mut steep);
             let before = c.clone();
             advance::advance(&mut c, dt);
             if c.visible() != start {
@@ -989,11 +1055,11 @@ pub struct PetStats {
 
     /// Whether the pet has developed type 2 diabetes (permanent once set).
     pub diabetic: bool,
-    /// Whether weight is currently above the overweight trigger — the
-    /// same condition that (if sustained long enough) leads to
-    /// diabetes. Independent of `diabetic`, which is permanent once
-    /// set: a pet can be overweight without (yet) being diabetic, or
-    /// diabetic while currently back under the overweight line.
+    /// Whether weight is above the weight band (`weight_hi`) — the status
+    /// word `Overweight`. Diabetes counts its own, higher line
+    /// (`DIABETES_WEIGHT_HI_PCT`), and `diabetic` is permanent once set, so
+    /// a pet can be overweight without being diabetic, or diabetic while
+    /// back inside the band.
     pub overweight: bool,
     /// Whether the pet has developed alcoholism (permanent once set) —
     /// same relationship to `drunk` as `diabetic` has to `overweight`.
@@ -1141,8 +1207,8 @@ impl GameState {
         }
 
         let alive = self.is_alive();
-        let can = |a: Action| alive && self.active_action.is_none() && doses::refusal(self, a, None).is_none();
-        let awake_active = alive && !self.is_sleeping && self.active_action.is_none();
+        let can = |a: Action| self.refusal_for(a, None).is_none();
+        let can_game = |g: Option<MiniGame>| self.game_refusal(g).is_none();
         let (status, danger) = status::status(self);
 
         PetStats {
@@ -1195,18 +1261,16 @@ impl GameState {
             can_medicate: can(Action::Medicate),
             can_ozempic: can(Action::Ozempic),
             can_drink: can(Action::Drink),
-            can_drink_water: alive
-                && self.active_action.is_none()
-                && doses::refusal(self, Action::Drink, Some(DrinkKind::Water)).is_none(),
+            can_drink_water: self.refusal_for(Action::Drink, Some(DrinkKind::Water)).is_none(),
             can_rehab: can(Action::Rehab),
             can_sleep: alive && !self.is_sleeping,
             can_wake: self.is_sleeping,
-            can_play_tictactoe: awake_active && self.cooldown_tictactoe == 0,
-            can_play_lightsout: awake_active && self.cooldown_lightsout == 0,
-            can_play_blackhole: awake_active && self.cooldown_blackhole == 0,
-            can_play_nim: awake_active && self.cooldown_nim == 0,
-            can_play_bornjeweled: awake_active && self.cooldown_bornjeweled == 0,
-            can_battle: awake_active && self.cooldown_battle == 0,
+            can_play_tictactoe: can_game(Some(MiniGame::TicTacToe)),
+            can_play_lightsout: can_game(Some(MiniGame::LightsOut)),
+            can_play_blackhole: can_game(Some(MiniGame::BlackHole)),
+            can_play_nim: can_game(Some(MiniGame::Nim)),
+            can_play_bornjeweled: can_game(Some(MiniGame::BornJeweled)),
+            can_battle: can_game(None),
 
             cooldown_tictactoe: self.cooldown_tictactoe,
             cooldown_lightsout: self.cooldown_lightsout,

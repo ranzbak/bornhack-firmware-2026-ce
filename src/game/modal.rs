@@ -383,17 +383,18 @@ impl Item {
     /// Heal, Medicate (insulin window), Ozempic and Rehab otherwise show their
     /// real remaining wait, mini-games and Battle their cooldown.
     /// 0 = ready / not gated by a cooldown.
-    fn cooldown_ticks(self, stats: &super::engine::PetStats) -> u16 {
+    fn cooldown_ticks(self, stats: &super::engine::PetStats) -> u32 {
         use super::engine::Action;
-        let action_remaining = |a: Action| -> u16 {
+        let action_remaining = |a: Action| -> u32 {
             if stats.active_action == Some(a) {
-                stats.action_ticks_remaining as u16
+                stats.action_ticks_remaining as u32
             } else {
                 0
             }
         };
-        // Minutes of a timer as ticks (1 minute = 6 ticks), saturating.
-        let ticks = |minutes: u16| minutes.saturating_mul(6);
+        // Minutes of a timer as ticks (1 minute = 6 ticks); u32, since the
+        // 72 h rehab wait is 25920 ticks.
+        let ticks = |minutes: u16| minutes as u32 * 6;
         match self {
             Self::FeedFood(_) => action_remaining(Action::Feed),
             Self::GiveMedicine => action_remaining(Action::Heal).max(ticks(stats.med_cd_min)),
@@ -406,15 +407,75 @@ impl Item {
             Self::DrinkChoice(_) => action_remaining(Action::Drink),
             Self::Rehab => action_remaining(Action::Rehab).max(ticks(stats.rehab_min)),
             Self::ExerciseNow => action_remaining(Action::Exercise),
-            Self::Battle => stats.cooldown_battle,
+            Self::Battle => stats.cooldown_battle as u32,
             Self::PlayNow => action_remaining(Action::Play),
             Self::OnlyPets => action_remaining(Action::OnlyPets),
-            Self::TicTacToe => stats.cooldown_tictactoe,
-            Self::LightsOut => stats.cooldown_lightsout,
-            Self::BlackHole => stats.cooldown_blackhole,
-            Self::Nim => stats.cooldown_nim,
-            Self::BornJeweled => stats.cooldown_bornjeweled,
+            Self::TicTacToe => stats.cooldown_tictactoe as u32,
+            Self::LightsOut => stats.cooldown_lightsout as u32,
+            Self::BlackHole => stats.cooldown_blackhole as u32,
+            Self::Nim => stats.cooldown_nim as u32,
+            Self::BornJeweled => stats.cooldown_bornjeweled as u32,
             _ => 0,
+        }
+    }
+
+    /// The engine action (and chosen drink) behind this row, if it is one.
+    fn action(
+        self,
+    ) -> Option<(super::engine::Action, Option<super::engine::DrinkKind>)> {
+        use super::engine::Action;
+        Some(match self {
+            Self::FeedFood(_) => (Action::Feed, None),
+            Self::GiveMedicine => (Action::Heal, None),
+            Self::GiveMedication => (Action::Medicate, None),
+            Self::Ozempic => (Action::Ozempic, None),
+            Self::ExerciseNow => (Action::Exercise, None),
+            Self::DrinkChoice(d) => (Action::Drink, Some(d)),
+            Self::Rehab => (Action::Rehab, None),
+            Self::PlayNow => (Action::Play, None),
+            Self::OnlyPets => (Action::OnlyPets, None),
+            _ => return None,
+        })
+    }
+
+    /// Why this row is disabled (or its starter just refused), asked of the
+    /// engine; "can't afford" is what is left when the engine has no
+    /// objection.
+    fn reason(self, stats: &super::engine::PetStats) -> super::engine::doses::Reason {
+        use super::engine::MiniGame;
+        use super::engine::doses::{Reason, Refusal};
+        use super::lifecycle;
+        if stats.hibernating {
+            return Reason::Hibernating;
+        }
+        let engine_says = match self {
+            Self::Battle => lifecycle::game_refusal(None),
+            Self::TicTacToe => lifecycle::game_refusal(Some(MiniGame::TicTacToe)),
+            Self::LightsOut => lifecycle::game_refusal(Some(MiniGame::LightsOut)),
+            Self::BlackHole => lifecycle::game_refusal(Some(MiniGame::BlackHole)),
+            Self::Nim => lifecycle::game_refusal(Some(MiniGame::Nim)),
+            Self::BornJeweled => lifecycle::game_refusal(Some(MiniGame::BornJeweled)),
+            Self::Sleep => stats.is_sleeping.then_some(Reason::Refused(Refusal::Asleep)),
+            _ => match self.action() {
+                Some((a, d)) => lifecycle::refusal_for(a, d),
+                None => None,
+            },
+        };
+        match (engine_says, self.action()) {
+            (Some(why), _) => why,
+            (None, Some(_)) => Reason::CantAfford,
+            (None, None) => Reason::Refused(Refusal::NoNeed),
+        }
+    }
+
+    /// A starter just returned: a toast for success (and close), or the
+    /// reason it refused (menu stays open).
+    fn started(self, ok: bool, toast: super::Toast) {
+        if ok {
+            super::show_toast(toast);
+            close();
+        } else if let Some(stats) = super::lifecycle::cycle() {
+            super::show_reason(self.reason(&stats));
         }
     }
 
@@ -440,29 +501,19 @@ impl Item {
                 close();
             }
             Self::FeedFood(food) => {
-                lifecycle::feed(food);
-                super::show_toast(super::Toast::Feed);
-                close();
+                self.started(lifecycle::feed(food), super::Toast::Feed);
             }
             Self::GiveMedicine => {
-                lifecycle::heal();
-                super::show_toast(super::Toast::Heal);
-                close();
+                self.started(lifecycle::heal(), super::Toast::Heal);
             }
             Self::GiveMedication => {
-                lifecycle::medicate();
-                super::show_toast(super::Toast::Medicate);
-                close();
+                self.started(lifecycle::medicate(), super::Toast::Medicate);
             }
             Self::Ozempic => {
-                lifecycle::ozempic();
-                super::show_toast(super::Toast::Ozempic);
-                close();
+                self.started(lifecycle::ozempic(), super::Toast::Ozempic);
             }
             Self::ExerciseNow => {
-                lifecycle::exercise();
-                super::show_toast(super::Toast::Exercise);
-                close();
+                self.started(lifecycle::exercise(), super::Toast::Exercise);
             }
             Self::CheatForceOverweight => {
                 lifecycle::debug_force_overweight();
@@ -510,18 +561,11 @@ impl Item {
                 close();
             }
             Self::DrinkChoice(drink) => {
-                lifecycle::drink(drink);
-                super::show_toast(if drink.is_alcoholic() {
-                    super::Toast::Drink
-                } else {
-                    super::Toast::Refreshed
-                });
-                close();
+                let toast = if drink.is_alcoholic() { super::Toast::Drink } else { super::Toast::Refreshed };
+                self.started(lifecycle::drink(drink), toast);
             }
             Self::Rehab => {
-                lifecycle::rehab();
-                super::show_toast(super::Toast::Rehab);
-                close();
+                self.started(lifecycle::rehab(), super::Toast::Rehab);
             }
             Self::Sleep => {
                 lifecycle::sleep();
@@ -529,14 +573,10 @@ impl Item {
                 close();
             }
             Self::PlayNow => {
-                lifecycle::play();
-                super::show_toast(super::Toast::Play);
-                close();
+                self.started(lifecycle::play(), super::Toast::Play);
             }
             Self::OnlyPets => {
-                lifecycle::only_pets();
-                super::show_toast(super::Toast::OnlyPets);
-                close();
+                self.started(lifecycle::only_pets(), super::Toast::OnlyPets);
             }
             Self::TicTacToe => {
                 super::tictactoe::open();
@@ -574,15 +614,17 @@ impl Item {
     }
 }
 
-/// Format a cooldown count (ticks of 10 s each) as a " (Ns)" suffix
-/// for a disabled menu row.  Returns `None` when the cooldown is 0.
-fn cooldown_string(ticks: u16) -> Option<heapless::String<10>> {
+/// Format a cooldown count (ticks of 10 s each) as a " (50s)", " (59m)" or
+/// " (2h05)" suffix for a disabled menu row.  Returns `None` when the cooldown is 0.
+fn cooldown_string(ticks: u32) -> Option<heapless::String<12>> {
     if ticks == 0 {
         return None;
     }
-    let secs = ticks.saturating_mul(10);
     let mut s = heapless::String::new();
-    let _ = core::fmt::Write::write_fmt(&mut s, format_args!(" ({}s)", secs));
+    let _ = core::fmt::Write::write_fmt(
+        &mut s,
+        format_args!(" ({})", super::engine::doses::fmt_wait(ticks.saturating_mul(10))),
+    );
     Some(s)
 }
 
@@ -671,7 +713,8 @@ fn step_selectable(
         .unwrap_or(from)
 }
 
-/// Move the cursor one selectable row up or down, skipping disabled rows.
+/// Move the cursor one row up or down. Disabled rows are NOT skipped: the
+/// player can rest on one and press it to be told why it is disabled.
 fn move_cursor(forward: bool) {
     // While the stats-bar sub-view is showing there's no item list on
     // screen to move a cursor through — ignore Up/Down so it doesn't
@@ -685,11 +728,8 @@ fn move_cursor(forward: bool) {
     if items.is_empty() {
         return;
     }
-    let stats = super::lifecycle::cycle();
     let pos = (MODAL_POS.load(Ordering::Relaxed) as usize).min(items.len() - 1);
-    let next = step_selectable(items.len(), pos, forward, |i| {
-        items[i].selectable(stats.as_ref())
-    });
+    let next = step_selectable(items.len(), pos, forward, |_| true);
     MODAL_POS.store(next as u8, Ordering::Relaxed);
 }
 
@@ -727,6 +767,8 @@ pub fn activate() {
             None => return,
         };
         if !item.available(&stats) {
+            // Never a silent no-op: say why this row is disabled.
+            super::show_reason(item.reason(&stats));
             return;
         }
     }
@@ -834,7 +876,7 @@ where
         // " (wait)" for anything else that's just disabled.
         // 40 covers the longest label ("Reset battle record"/"Trigger
         // alcoholism", 19 bytes) plus an optional price suffix (" 15H",
-        // 4 bytes) plus the longest cooldown suffix (" (65535s)", 9
+        // 4 bytes) plus the longest cooldown suffix (" (72h00)", 8
         // bytes) with room to spare — heapless::push_str
         // silently no-ops past capacity instead of truncating, so this
         // must comfortably exceed the worst case, not just the common one.
@@ -1126,7 +1168,18 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{first_selectable, step_selectable};
+    use super::{cooldown_string, first_selectable, step_selectable};
+
+    #[test]
+    fn countdowns_are_readable_up_to_three_days() {
+        assert_eq!(cooldown_string(0), None);
+        assert_eq!(cooldown_string(5).as_deref(), Some(" (50s)"));
+        assert_eq!(cooldown_string(59 * 6).as_deref(), Some(" (59m)"));
+        assert_eq!(cooldown_string(2 * 360).as_deref(), Some(" (2h00)"));
+        assert_eq!(cooldown_string(2 * 360 + 30).as_deref(), Some(" (2h05)"));
+        // Rehab: 4320 minutes = 72 h = 25920 ticks (x10 s overflowed u16).
+        assert_eq!(cooldown_string(25920).as_deref(), Some(" (72h00)"));
+    }
 
     /// Rows 0 and 2 disabled, like a Play list with Battle and a
     /// paid game locked out.

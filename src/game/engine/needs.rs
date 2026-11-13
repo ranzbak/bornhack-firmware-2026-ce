@@ -8,6 +8,20 @@ use super::thresholds::{self, Thresholds};
 pub const P: i32 = 655;
 pub const MAX: i32 = 65535;
 
+// Fixed lines the status word, the display and the wake search read. Each is
+// ALSO a threshold edge (needs, `build_edges`) or a signature line (solver,
+// `sig`), so a segment never crosses one: one const, three users.
+/// Fullness and water below this are in danger.
+pub const NEED_DANGER_LO_PCT: u8 = 15;
+/// Fullness and water above this are fixed edges; dirt above it is in danger.
+pub const NEED_HI_EDGE_PCT: u8 = 85;
+/// Dirt above this is in danger.
+pub const DIRT_DANGER_PCT: u8 = NEED_HI_EDGE_PCT;
+/// Health below this is in danger.
+pub const HEALTH_DANGER_PCT: u8 = 30;
+/// A content pet at or above this mood shows as happy.
+pub const HAPPY_MOOD_PCT: u8 = 80;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum Need {
@@ -79,11 +93,11 @@ const fn merge(fixed: &[u8], tuned: &[u8]) -> ([u8; MAX_EDGES], u8) {
 /// Fixed edges merged with `t`'s band edges.
 pub const fn build_edges(t: &Thresholds) -> EdgeTable {
     let rows = [
-        merge(&[15, 25, 85, 95], &[t.FULL_LO_PCT, t.FULL_HI_PCT]),
-        merge(&[15, 25, 85, 90, 95], &[t.WATER_LO_PCT, t.WATER_HI_PCT]),
+        merge(&[NEED_DANGER_LO_PCT, 25, NEED_HI_EDGE_PCT, 95], &[t.FULL_LO_PCT, t.FULL_HI_PCT]),
+        merge(&[NEED_DANGER_LO_PCT, 25, NEED_HI_EDGE_PCT, 90, 95], &[t.WATER_LO_PCT, t.WATER_HI_PCT]),
         merge(&[10, 50, 70, 85], &[t.ENERGY_LO_PCT]),
         merge(&[40], &[t.FUN_LO_PCT, t.FUN_HI_PCT]),
-        merge(&[25, 85], &[t.DIRT_HI_PCT]),
+        merge(&[25, DIRT_DANGER_PCT], &[t.DIRT_HI_PCT]),
         merge(&[10, 15, 30], &[t.BOOZE_HI_PCT, t.BOOZE_DANGER_PCT]),
         merge(&[15, 40], &[t.STRAIN_INJ_PCT]),
         merge(&[25, 50, 60, 61, 70], &[t.FIT_LO_PCT]),

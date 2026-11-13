@@ -15,12 +15,10 @@
 //!   7. Status word (attention needed soon — not yet in danger)
 //!   8. Idle / Happy (content; happy from 80 % mood)
 
-use super::needs::P;
+use super::needs::{HAPPY_MOOD_PCT, P};
 use super::status::{StatusWord, status};
 use super::{Action, GameState, Phase};
 
-/// Mood (percent) from which a content pet shows as happy; also a fixed line of the solver's `sig`.
-const HAPPY_MOOD_PCT: i32 = 80;
 
 /// What the pet display area should show right now.
 ///
@@ -162,7 +160,7 @@ impl GameState {
             | StatusWord::Overweight
             | StatusWord::Underweight
             | StatusWord::Unfit => DisplayAnim::WarningMiserable,
-            StatusWord::Content if self.mood as i32 >= HAPPY_MOOD_PCT * P => DisplayAnim::Happy,
+            StatusWord::Content if self.mood as i32 >= HAPPY_MOOD_PCT as i32 * P => DisplayAnim::Happy,
             StatusWord::Content => DisplayAnim::Idle,
         }
     }
