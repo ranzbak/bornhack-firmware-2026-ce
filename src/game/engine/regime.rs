@@ -183,12 +183,23 @@ pub const TRUNCATING_TERMS: i32 = 4 + 3;
 /// Number of per-need and per-condition terms of [`penalty_terms`].
 pub const PENALTY_TERMS: usize = 16;
 
+/// Scale of [`penalty_terms_x2`] against [`penalty_terms`].
+pub const EXACT_SCALE: i32 = 2;
+
 /// The mood penalty terms that have a name for the player (see
 /// `status::status`), in status-word order: hungry, stuffed, thirsty,
 /// waterlogged, tired, bored, wired, sloppy, grubby, overweight,
 /// underweight, unfit, hung over, injured, groggy, poorly. Tired and bored
 /// only count while awake.
 pub fn penalty_terms(s: &GameState) -> [i32; PENALTY_TERMS] {
+    penalty_terms_x2(s).map(|t| t / EXACT_SCALE)
+}
+
+/// [`penalty_terms`] times [`EXACT_SCALE`], before any division: every term
+/// is a straight line in the levels, so the order of two terms is exact
+/// (the truncated values can tie on alternate minutes). The status line ranks
+/// on these; [`penalty_terms`] is these halved.
+pub fn penalty_terms_x2(s: &GameState) -> [i32; PENALTY_TERMS] {
     let gap = |x: i32| x.max(0);
     let awake = !s.is_sleeping;
     let (full, water, energy, fun) = (
@@ -198,28 +209,32 @@ pub fn penalty_terms(s: &GameState) -> [i32; PENALTY_TERMS] {
         s.fun as i32,
     );
     let (weight, fit) = (s.weight as i32, s.fitness as i32);
-    let flat = |on: bool, pct: u16| if on { pct as i32 * P } else { 0 };
+    let flat = |on: bool, pct: u16| if on { pct as i32 * P * EXACT_SCALE } else { 0 };
     [
-        gap(needs::full_lo() - full) * 3 / 2,
-        gap(full - needs::full_hi()),
-        gap(needs::water_lo() - water) * 3 / 2,
-        gap(water - needs::water_hi()),
+        gap(needs::full_lo() - full) * 3,
+        gap(full - needs::full_hi()) * 2,
+        gap(needs::water_lo() - water) * 3,
+        gap(water - needs::water_hi()) * 2,
         if awake {
-            gap(needs::energy_lo() - energy) * 3 / 2
+            gap(needs::energy_lo() - energy) * 3
         } else {
             0
         },
-        if awake { gap(needs::fun_lo() - fun) } else { 0 },
-        gap(fun - needs::fun_hi()) * 3 / 2,
-        gap(s.booze as i32 - needs::booze_hi()),
-        gap(s.dirt as i32 - needs::dirt_hi()),
-        gap(weight - needs::weight_hi()) / 2,
-        gap(needs::weight_lo() - weight) / 2,
-        gap(needs::fit_lo() - fit) / 2,
+        if awake {
+            gap(needs::fun_lo() - fun) * 2
+        } else {
+            0
+        },
+        gap(fun - needs::fun_hi()) * 3,
+        gap(s.booze as i32 - needs::booze_hi()) * 2,
+        gap(s.dirt as i32 - needs::dirt_hi()) * 2,
+        gap(weight - needs::weight_hi()),
+        gap(needs::weight_lo() - weight),
+        gap(needs::fit_lo() - fit),
         flat(s.hangover_min > 0, t::MOOD_PEN_HANGOVER_PCT()),
         flat(s.injured_min > 0, t::MOOD_PEN_INJURED_PCT()),
         flat(s.groggy_min > 0, t::MOOD_PEN_GROGGY_PCT()),
-        gap(lvl(t::MOOD_HEALTH_FLOOR_PCT()) - s.health as i32),
+        gap(lvl(t::MOOD_HEALTH_FLOOR_PCT()) - s.health as i32) * 2,
     ]
 }
 

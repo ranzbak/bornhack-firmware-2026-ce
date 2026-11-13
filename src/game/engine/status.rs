@@ -1,6 +1,13 @@
-//! The status word: the pet's worst problem in one word, plus whether it is
-//! dangerous. It is the largest term of the mood penalty
-//! ([`regime::penalty_terms`]); under 3 points nothing is shown (Content).
+//! What the player reads under the pet.
+//!
+//! [`status`] is the worst problem as one [`StatusWord`] (the largest term of
+//! the mood penalty, [`regime::penalty_terms`]; under 3 points nothing is
+//! shown) plus the danger flag. [`status_line`] widens that to up to two
+//! graded [`Word`]s: the danger word, the worst term, a prompt and a second
+//! term, else an info word. [`conditions`] lists the lasting states for the
+//! stats view. Terms are ranked on their exact values
+//! ([`regime::penalty_terms_x2`]); every line read here is a fixed edge, a
+//! solver signature line or a timer bound, so the wake stays exact.
 
 use heapless::String;
 
@@ -9,7 +16,7 @@ use super::needs::{
     self, DIRT_DANGER_PCT, EXHAUSTED_PCT, HEALTH_DANGER_PCT, HUNGRY_PCT, NEED_DANGER_LO_PCT, P,
     SORE_PCT, TIPSY_PCT,
 };
-use super::regime::{PENALTY_TERMS, penalty_terms};
+use super::regime::{EXACT_SCALE, PENALTY_TERMS, penalty_terms_x2};
 
 /// Largest term must beat this to be named.
 const CONTENT_UNDER: i32 = 3 * P;
@@ -53,7 +60,7 @@ impl StatusWord {
     }
 }
 
-/// The words in [`penalty_terms`] order.
+/// The words in [`regime::penalty_terms`] order.
 const WORDS: [StatusWord; PENALTY_TERMS] = [
     StatusWord::Hungry,
     StatusWord::Stuffed,
@@ -73,36 +80,60 @@ const WORDS: [StatusWord; PENALTY_TERMS] = [
     StatusWord::Poorly,
 ];
 
+// The danger lines. `danger_word` and `graded` both read these, so a danger
+// word and its graded word can never disagree.
+fn starving(s: &GameState) -> bool {
+    (s.fullness as i32) < NEED_DANGER_LO_PCT as i32 * P
+}
+fn parched(s: &GameState) -> bool {
+    (s.hydration as i32) < NEED_DANGER_LO_PCT as i32 * P
+}
+fn wasted(s: &GameState) -> bool {
+    s.booze as i32 > needs::booze_danger()
+}
+fn filthy(s: &GameState) -> bool {
+    s.dirt as i32 > DIRT_DANGER_PCT as i32 * P
+}
+fn poorly(s: &GameState) -> bool {
+    (s.health as i32) < HEALTH_DANGER_PCT as i32 * P
+}
+
 /// The first danger word, in the order fullness, hydration, booze, dirt,
-/// health. `status` and the status line both read it, so the danger lines
-/// exist once.
+/// health. `status` and the status line both read it.
 pub fn danger_word(s: &GameState) -> Option<Word> {
-    if (s.fullness as i32) < NEED_DANGER_LO_PCT as i32 * P {
+    if starving(s) {
         Some(Word::Starving)
-    } else if (s.hydration as i32) < NEED_DANGER_LO_PCT as i32 * P {
+    } else if parched(s) {
         Some(Word::Parched)
-    } else if s.booze as i32 > needs::booze_danger() {
+    } else if wasted(s) {
         Some(Word::Wasted)
-    } else if s.dirt as i32 > DIRT_DANGER_PCT as i32 * P {
+    } else if filthy(s) {
         Some(Word::Filthy)
-    } else if (s.health as i32) < HEALTH_DANGER_PCT as i32 * P {
+    } else if poorly(s) {
         Some(Word::Poorly)
     } else {
         None
     }
 }
 
+/// Index of the term that is largest on exact values, skipping `skip`; an
+/// exact tie goes to the earlier term. It must also beat `above` once
+/// truncated (the on-screen threshold lines are in truncated points).
+fn largest_term(exact: &[i32; PENALTY_TERMS], above: i32, skip: Option<usize>) -> Option<usize> {
+    let mut best: Option<usize> = None;
+    for (i, &t) in exact.iter().enumerate() {
+        if Some(i) != skip && best.is_none_or(|b| t > exact[b]) {
+            best = Some(i);
+        }
+    }
+    best.filter(|&i| exact[i] / EXACT_SCALE > above)
+}
+
 /// The status word and whether the pet is in danger (a need or the health
 /// is past its danger line). A tie goes to the earlier word.
 pub fn status(s: &GameState) -> (StatusWord, bool) {
-    let mut word = StatusWord::Content;
-    let mut best = CONTENT_UNDER;
-    for (term, w) in penalty_terms(s).into_iter().zip(WORDS) {
-        if term > best {
-            best = term;
-            word = w;
-        }
-    }
+    let word = largest_term(&penalty_terms_x2(s), CONTENT_UNDER, None)
+        .map_or(StatusWord::Content, |i| WORDS[i]);
     (word, danger_word(s).is_some())
 }
 
@@ -220,18 +251,16 @@ impl Word {
 /// crosses a fixed edge.
 fn graded(s: &GameState, w: StatusWord) -> Word {
     match w {
-        StatusWord::Hungry if (s.fullness as i32) < NEED_DANGER_LO_PCT as i32 * P => Word::Starving,
+        StatusWord::Hungry if starving(s) => Word::Starving,
         StatusWord::Hungry if (s.fullness as i32) < HUNGRY_PCT as i32 * P => Word::Hungry,
         StatusWord::Hungry => Word::Peckish,
-        StatusWord::Thirsty if (s.hydration as i32) < NEED_DANGER_LO_PCT as i32 * P => {
-            Word::Parched
-        }
+        StatusWord::Thirsty if parched(s) => Word::Parched,
         StatusWord::Thirsty => Word::Thirsty,
         StatusWord::Tired if (s.energy as i32) < EXHAUSTED_PCT as i32 * P => Word::Exhausted,
         StatusWord::Tired => Word::Sleepy,
-        StatusWord::Sloppy if s.booze as i32 > needs::booze_danger() => Word::Wasted,
+        StatusWord::Sloppy if wasted(s) => Word::Wasted,
         StatusWord::Sloppy => Word::Sloppy,
-        StatusWord::Grubby if s.dirt as i32 > DIRT_DANGER_PCT as i32 * P => Word::Filthy,
+        StatusWord::Grubby if filthy(s) => Word::Filthy,
         StatusWord::Grubby => Word::Grubby,
         StatusWord::Stuffed => Word::Stuffed,
         StatusWord::Waterlogged => Word::Waterlogged,
@@ -282,21 +311,9 @@ impl StatusLine {
 /// reads is a fixed edge, a `solver::sig` line or a timer bound, so the wake
 /// stays exact.
 pub fn status_line(s: &GameState) -> StatusLine {
-    let terms = penalty_terms(s);
-    // Largest term above `above`, earlier wins a tie, skipping `skip`.
-    let largest = |above: i32, skip: Option<usize>| {
-        let mut best = None;
-        let mut value = above;
-        for (i, &t) in terms.iter().enumerate() {
-            if Some(i) != skip && t > value {
-                value = t;
-                best = Some(i);
-            }
-        }
-        best
-    };
-    let top = largest(CONTENT_UNDER, None);
-    let next = top.and_then(|t| largest(SECOND_WORD_UNDER, Some(t)));
+    let exact = penalty_terms_x2(s);
+    let top = largest_term(&exact, CONTENT_UNDER, None);
+    let next = top.and_then(|t| largest_term(&exact, SECOND_WORD_UNDER, Some(t)));
     let prompt = if s.is_diabetic_unmedicated() {
         Some(Word::NoInsulin)
     } else if s.is_alcoholic_untreated() {
@@ -304,14 +321,15 @@ pub fn status_line(s: &GameState) -> StatusLine {
     } else {
         None
     };
-    let mut first = None;
-    let mut second = None;
+    let danger = danger_word(s);
     let candidates = [
-        danger_word(s),
+        danger,
         top.map(|i| graded(s, WORDS[i])),
         prompt,
         next.map(|i| graded(s, WORDS[i])),
     ];
+    let mut first = None;
+    let mut second = None;
     for w in candidates.into_iter().flatten() {
         if first == Some(w) {
             continue;
@@ -322,11 +340,10 @@ pub fn status_line(s: &GameState) -> StatusLine {
             second = Some(w);
         }
     }
-    let first = first.unwrap_or_else(|| info_word(s));
     StatusLine {
-        first,
+        first: first.unwrap_or_else(|| info_word(s)),
         second,
-        danger: danger_word(s).is_some(),
+        danger: danger.is_some(),
     }
 }
 
@@ -334,7 +351,7 @@ pub fn status_line(s: &GameState) -> StatusLine {
 fn info_word(s: &GameState) -> Word {
     if s.is_sleeping {
         Word::Asleep
-    } else if conditions(s).has(Condition::Sore) {
+    } else if is_sore(s) {
         Word::Sore
     } else if s.booze as i32 >= TIPSY_PCT as i32 * P {
         Word::Tipsy
@@ -343,6 +360,11 @@ fn info_word(s: &GameState) -> Word {
     } else {
         Word::Content
     }
+}
+
+/// Strain past the sore line, unless an injury already says it.
+fn is_sore(s: &GameState) -> bool {
+    s.strain as i32 > SORE_PCT as i32 * P && s.injured_min == 0
 }
 
 /// Lasting states shown on the stats view, most pressing first.
@@ -432,13 +454,9 @@ impl Conditions {
 
 /// The lasting conditions of the pet right now.
 pub fn conditions(s: &GameState) -> Conditions {
-    let injured = s.injured_min > 0;
     let bits = [
-        (Condition::Injured, injured),
-        (
-            Condition::Sore,
-            s.strain as i32 > SORE_PCT as i32 * P && !injured,
-        ),
+        (Condition::Injured, s.injured_min > 0),
+        (Condition::Sore, is_sore(s)),
         (Condition::HungOver, s.hangover_min > 0),
         (Condition::Groggy, s.groggy_min > 0),
         (Condition::WornOut, s.deprived),

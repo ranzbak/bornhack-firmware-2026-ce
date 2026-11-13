@@ -3,7 +3,7 @@
 
 Makes the same flat binary the Makefile's dfu-flash targets make (there with
 arm-none-eabi-objcopy; here with the rustup llvm-objcopy, so CI needs only the
-`llvm-tools` component). Prints the size and exits 1 above the limit.
+`llvm-tools` component). Prints the size, warns above 940 KiB and exits 1 above the limit.
 """
 import argparse
 import os
@@ -12,6 +12,8 @@ import sys
 import tempfile
 
 BYTES_PER_KIB = 1024
+# Print a warning from here up to the hard limit.
+WARN_KIB = 940
 
 
 def llvm_objcopy():
@@ -39,6 +41,8 @@ def main():
     if size > args.limit_kib * BYTES_PER_KIB:
         print("flash image is over the limit", file=sys.stderr)
         return 1
+    if kib > WARN_KIB:
+        print(f"warning: flash image is above {WARN_KIB} KiB, close to the {args.limit_kib} KiB limit")
     return 0
 
 

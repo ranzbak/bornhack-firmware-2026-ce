@@ -2146,7 +2146,7 @@ mod cooldown_countdown {
 
 mod status_wake {
     use bornhack_aegg::game::engine::needs::P;
-    use bornhack_aegg::game::engine::status::{StatusLine, StatusWord, status, status_line};
+    use bornhack_aegg::game::engine::status::{StatusLine, StatusWord, Word, status, status_line};
     use bornhack_aegg::game::engine::thresholds::{HATCHING_TICKS, MAX_SLEEP_TICKS};
     use bornhack_aegg::game::engine::{
         Action, DisplayAnim, GameState, MiniGame, PetKind, Phase, doses,
@@ -2188,6 +2188,8 @@ mod status_wake {
             obs(&c) != o
         })
     }
+
+    const NEW_CASES_FROM: usize = 14;
 
     fn cases() -> Vec<(&'static str, GameState)> {
         let mut v = vec![("fresh", pet())];
@@ -2265,8 +2267,66 @@ mod status_wake {
         v
     }
 
+    /// What kind of change ended a state's quiet stretch.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum Kind {
+        Swap,
+        Prompt,
+        Danger,
+        Info,
+        Second,
+        Other,
+    }
+    const KINDS: [Kind; 5] = [
+        Kind::Swap,
+        Kind::Prompt,
+        Kind::Danger,
+        Kind::Info,
+        Kind::Second,
+    ];
+
+    fn is_info(w: Word) -> bool {
+        matches!(
+            w,
+            Word::Asleep | Word::Sore | Word::Tipsy | Word::WellRested | Word::Content
+        )
+    }
+
+    fn is_prompt(w: Word) -> bool {
+        matches!(w, Word::NoInsulin | Word::NeedsRehab)
+    }
+
+    fn classify(a: StatusLine, b: StatusLine) -> Kind {
+        if a.first == b.second.unwrap_or(Word::Content)
+            && b.first == a.second.unwrap_or(Word::Content)
+            && a.second.is_some()
+        {
+            Kind::Swap
+        } else if [a.first, b.first]
+            .into_iter()
+            .chain(a.second)
+            .chain(b.second)
+            .any(is_prompt)
+            && a.first == b.first
+        {
+            Kind::Prompt
+        } else if a.danger != b.danger {
+            Kind::Danger
+        } else if is_info(a.first) || is_info(b.first) {
+            Kind::Info
+        } else if a.first == b.first && a.second != b.second {
+            Kind::Second
+        } else {
+            Kind::Other
+        }
+    }
+
     /// Seeded LCG states: the wake must land on the first minute the whole
-    /// view differs, including a top-two word order flip from rounding.
+    /// view differs. The states cover every kind of status line change
+    /// (second word, prompt, danger, info word, order swap), counted below so
+    /// the test proves it hit each. Swaps here come from real crossings; swaps from
+    /// rounding ties need custom thresholds and are pinned in
+    /// `tests/engine_v3_status_tie.rs`.
     #[test]
     fn wake_is_exact_on_random_states() {
         const SEED: u64 = 1;
@@ -2274,6 +2334,15 @@ mod status_wake {
         const MAX_PCT: u64 = 100;
         const MAX_TIMER_MIN: u64 = 200;
         const LOOKAHEAD_MIN: u32 = 120;
+        // One state in this many starts a play action.
+        const ACTION_ONE_IN: u64 = 20;
+        // One state in this many is calm (all needs in band).
+        const CALM_ONE_IN: u64 = 3;
+        const CALM_NEED_PCT: i32 = 60;
+        const CALM_DIRT_PCT: i32 = 10;
+        const CALM_WEIGHT_PCT: i32 = 50;
+        const CALM_BOOZE_MAX_PCT: u64 = 15;
+        const CALM_STRAIN_MAX_PCT: u64 = 50;
         let mut rng = SEED;
         let mut next = |bound: u64| {
             rng = rng
@@ -2281,25 +2350,114 @@ mod status_wake {
                 .wrapping_add(1442695040888963407);
             (rng >> 33) % (bound + 1)
         };
+        let mut seen = [0usize; KINDS.len()];
         for i in 0..STATES {
             let mut s = pet();
-            s.fullness = pct(next(MAX_PCT) as i32);
-            s.hydration = pct(next(MAX_PCT) as i32);
-            s.energy = pct(next(MAX_PCT) as i32);
-            s.fun = pct(next(MAX_PCT) as i32);
-            s.dirt = pct(next(MAX_PCT) as i32);
-            s.booze = pct(next(MAX_PCT) as i32);
-            s.strain = pct(next(MAX_PCT) as i32);
-            s.fitness = pct(next(MAX_PCT) as i32);
-            s.weight = pct(next(MAX_PCT) as i32);
+            let level = |n: &mut dyn FnMut(u64) -> u64| pct(n(MAX_PCT) as i32);
+            s.fullness = level(&mut next);
+            s.hydration = level(&mut next);
+            s.energy = level(&mut next);
+            s.fun = level(&mut next);
+            s.dirt = level(&mut next);
+            s.booze = level(&mut next);
+            s.strain = level(&mut next);
+            s.fitness = level(&mut next);
+            s.weight = level(&mut next);
+            s.health = level(&mut next);
+            s.mood = level(&mut next);
             s.is_sleeping = next(1) == 1;
+            s.deprived = next(1) == 1;
+            s.diabetic = next(1) == 1;
+            s.dependent = next(1) == 1;
             s.rested_min = next(MAX_TIMER_MIN) as u16;
             s.hangover_min = next(MAX_TIMER_MIN) as u16;
             s.injured_min = next(MAX_TIMER_MIN) as u16;
+            s.groggy_min = next(MAX_TIMER_MIN) as u16;
             s.insulin_min = next(MAX_TIMER_MIN) as u16;
+            s.rehab_min = next(MAX_TIMER_MIN) as u16;
+            if next(CALM_ONE_IN) == 0 {
+                // Everything in band: only an info word (tipsy, sore, rested) can change.
+                for need in [&mut s.fullness, &mut s.hydration, &mut s.energy, &mut s.fun] {
+                    *need = pct(CALM_NEED_PCT);
+                }
+                (s.dirt, s.weight, s.fitness, s.health) = (
+                    pct(CALM_DIRT_PCT),
+                    pct(CALM_WEIGHT_PCT),
+                    pct(CALM_NEED_PCT),
+                    pct(MAX_PCT as i32),
+                );
+                (s.booze, s.strain) = (
+                    pct(next(CALM_BOOZE_MAX_PCT) as i32),
+                    pct(next(CALM_STRAIN_MAX_PCT) as i32),
+                );
+                (s.deprived, s.diabetic, s.dependent) = (false, false, false);
+                (s.hangover_min, s.injured_min, s.groggy_min, s.rehab_min) = (0, 0, 0, 0);
+            }
+            if next(ACTION_ONE_IN) == 0 {
+                s.play();
+            }
             let t0 = s.last_update_tick;
-            let expect = first_change_min(&s).map_or(t0 + LOOKAHEAD_MIN * 6, |m| t0 + m * 6);
+            let first = first_change_min(&s);
+            let expect = if s.active_action.is_some() {
+                // A running action is its own bound: it ends mid-minute.
+                t0 + (s.action_ticks_remaining as u32).max(1)
+            } else {
+                first.map_or(t0 + LOOKAHEAD_MIN * 6, |m| t0 + m * 6)
+            };
             assert_eq!(s.next_wake_tick(), expect, "random state {i} (seed {SEED})");
+            if let (Some(m), None) = (first, s.active_action) {
+                let mut c = s.clone();
+                c.update(t0 + m * 6);
+                let kind = classify(status_line(&s), status_line(&c));
+                if let Some(k) = KINDS.iter().position(|&k| k == kind) {
+                    seen[k] += 1;
+                }
+            }
+        }
+        for (k, n) in KINDS.iter().zip(seen) {
+            assert!(n >= 1, "no random state ended on a {k:?} change");
+        }
+    }
+
+    /// Each new case must end on the status line change it is named for, not
+    /// on some other field of the view that happens to move first.
+    #[test]
+    fn the_new_cases_change_the_expected_field() {
+        // (name, line before as (first, second), line after)
+        let expected: [(&str, (Word, Option<Word>), (Word, Option<Word>)); 6] = [
+            (
+                "peckish turns hungry",
+                (Word::Peckish, None),
+                (Word::Hungry, None),
+            ),
+            (
+                "second word appears",
+                (Word::Bored, None),
+                (Word::Bored, Some(Word::Peckish)),
+            ),
+            ("tipsy fades", (Word::Tipsy, None), (Word::Content, None)),
+            ("sore fades", (Word::Sore, None), (Word::Content, None)),
+            (
+                "well rested ends",
+                (Word::WellRested, None),
+                (Word::Content, None),
+            ),
+            (
+                "prompt appears",
+                (Word::Content, None),
+                (Word::NoInsulin, None),
+            ),
+        ];
+        let new_cases = cases().into_iter().skip(NEW_CASES_FROM);
+        assert_eq!(new_cases.len(), expected.len());
+        for ((name, s), (want_name, want_before, want_after)) in new_cases.zip(expected) {
+            assert_eq!(name, want_name);
+            let m = first_change_min(&s).expect(name);
+            let mut c = s.clone();
+            c.update(s.last_update_tick + m * 6);
+            let (before, after) = (status_line(&s), status_line(&c));
+            assert_eq!((before.first, before.second), want_before, "{name}");
+            assert_eq!((after.first, after.second), want_after, "{name}");
         }
     }
 
@@ -3756,8 +3914,9 @@ mod status_line {
     #[test]
     fn a_small_second_term_is_dropped() {
         let mut s = pet();
+        // Fun 25 is a 8 P term: above the 3 P content line, under the 10 P second-word line.
         s.fullness = pct(20);
-        s.fun = pct(30);
+        s.fun = pct(25);
         assert_eq!(status_line(&s).second, None);
     }
 
@@ -3774,14 +3933,17 @@ mod status_line {
     }
 
     #[test]
-    fn prompts_take_the_second_slot() {
+    fn a_prompt_takes_the_second_slot_after_a_problem() {
         let mut s = pet();
         s.diabetic = true;
         s.insulin_min = 0;
         s.fullness = pct(20);
         let l = status_line(&s);
         assert_eq!((l.first, l.second), (Word::Hungry, Some(Word::NoInsulin)));
+    }
 
+    #[test]
+    fn a_prompt_alone_takes_the_first_slot() {
         let mut s = pet();
         s.dependent = true;
         s.rehab_min = 0;
