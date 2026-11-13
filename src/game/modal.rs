@@ -378,43 +378,17 @@ impl Item {
         matches!(self, Self::Cancel) || stats.is_some_and(|s| self.available(s))
     }
 
-    /// Time-until-ready in 10-second ticks for a disabled item.
-    /// During the in-progress action this is `action_ticks_remaining`;
-    /// Heal, Medicate (insulin window), Ozempic and Rehab otherwise show their
-    /// real remaining wait, mini-games and Battle their cooldown.
-    /// 0 = ready / not gated by a cooldown.
+    /// Time-until-ready in 10-second ticks for a disabled item: the running
+    /// action's remaining ticks for its own row, otherwise the wait the
+    /// engine itself reports (`Reason::Wait`, the same one the toast shows).
+    /// 0 = ready / not gated by a wait.
     fn cooldown_ticks(self, stats: &super::engine::PetStats) -> u32 {
-        use super::engine::Action;
-        let action_remaining = |a: Action| -> u32 {
-            if stats.active_action == Some(a) {
-                stats.action_ticks_remaining as u32
-            } else {
-                0
-            }
-        };
-        // Minutes of a timer as ticks (1 minute = 6 ticks); u32, since the
-        // 72 h rehab wait is 25920 ticks.
-        let ticks = |minutes: u16| minutes as u32 * 6;
-        match self {
-            Self::FeedFood(_) => action_remaining(Action::Feed),
-            Self::GiveMedicine => action_remaining(Action::Heal).max(ticks(stats.med_cd_min)),
-            Self::GiveMedication => action_remaining(Action::Medicate).max(ticks(
-                stats
-                    .insulin_min
-                    .saturating_sub(super::engine::thresholds::DOSE_INSULIN_WINDOW_MIN()),
-            )),
-            Self::Ozempic => action_remaining(Action::Ozempic).max(ticks(stats.ozempic_cd_min)),
-            Self::DrinkChoice(_) => action_remaining(Action::Drink),
-            Self::Rehab => action_remaining(Action::Rehab).max(ticks(stats.rehab_min)),
-            Self::ExerciseNow => action_remaining(Action::Exercise),
-            Self::Battle => stats.cooldown_battle as u32,
-            Self::PlayNow => action_remaining(Action::Play),
-            Self::OnlyPets => action_remaining(Action::OnlyPets),
-            Self::TicTacToe => stats.cooldown_tictactoe as u32,
-            Self::LightsOut => stats.cooldown_lightsout as u32,
-            Self::BlackHole => stats.cooldown_blackhole as u32,
-            Self::Nim => stats.cooldown_nim as u32,
-            Self::BornJeweled => stats.cooldown_bornjeweled as u32,
+        use super::engine::doses::Reason;
+        if self.action().is_some_and(|(a, _)| stats.active_action == Some(a)) {
+            return stats.action_ticks_remaining as u32;
+        }
+        match self.reason(stats) {
+            Reason::Wait(secs) => secs / 10,
             _ => 0,
         }
     }
@@ -698,19 +672,16 @@ fn first_selectable(len: usize, selectable: impl Fn(usize) -> bool) -> usize {
     (0..len).find(|&i| selectable(i)).unwrap_or(0)
 }
 
-/// Next row after `from` (or before it when `forward` is false) that
-/// `selectable` accepts, wrapping around the ends of the list.  Returns
-/// `from` when no other row is selectable.
-fn step_selectable(
-    len: usize,
-    from: usize,
-    forward: bool,
-    selectable: impl Fn(usize) -> bool,
-) -> usize {
-    (1..len)
-        .map(|n| if forward { (from + n) % len } else { (from + len - n) % len })
-        .find(|&i| selectable(i))
-        .unwrap_or(from)
+/// The row after `from` (or before it when `forward` is false), wrapping
+/// around the ends of a list of `len` rows.
+fn step_cursor(len: usize, from: usize, forward: bool) -> usize {
+    if len == 0 {
+        from
+    } else if forward {
+        (from + 1) % len
+    } else {
+        (from + len - 1) % len
+    }
 }
 
 /// Move the cursor one row up or down. Disabled rows are NOT skipped: the
@@ -729,7 +700,7 @@ fn move_cursor(forward: bool) {
         return;
     }
     let pos = (MODAL_POS.load(Ordering::Relaxed) as usize).min(items.len() - 1);
-    let next = step_selectable(items.len(), pos, forward, |_| true);
+    let next = step_cursor(items.len(), pos, forward);
     MODAL_POS.store(next as u8, Ordering::Relaxed);
 }
 
@@ -1168,7 +1139,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{cooldown_string, first_selectable, step_selectable};
+    use super::{cooldown_string, first_selectable, step_cursor};
 
     #[test]
     fn countdowns_are_readable_up_to_three_days() {
@@ -1196,32 +1167,12 @@ mod tests {
     }
 
     #[test]
-    fn down_skips_disabled_and_wraps() {
-        assert_eq!(step_selectable(5, 1, true, sel), 3);
-        assert_eq!(step_selectable(5, 3, true, sel), 4);
-        // Past the end: row 0 is disabled, lands on 1.
-        assert_eq!(step_selectable(5, 4, true, sel), 1);
-    }
-
-    #[test]
-    fn up_skips_disabled_and_wraps() {
-        assert_eq!(step_selectable(5, 3, false, sel), 1);
-        // Past the top: wraps to the last row.
-        assert_eq!(step_selectable(5, 1, false, sel), 4);
-    }
-
-    #[test]
-    fn stays_put_when_nothing_else_selectable() {
-        let only_last = |i: usize| i == 4;
-        assert_eq!(step_selectable(5, 4, true, only_last), 4);
-        assert_eq!(step_selectable(5, 4, false, only_last), 4);
-        assert_eq!(step_selectable(1, 0, true, |_| true), 0);
-    }
-
-    #[test]
-    fn leaves_a_disabled_row_the_cursor_is_on() {
-        // Row 2 went disabled under the cursor; moving still works.
-        assert_eq!(step_selectable(5, 2, true, sel), 3);
-        assert_eq!(step_selectable(5, 2, false, sel), 1);
+    fn the_cursor_steps_one_row_and_wraps() {
+        assert_eq!(step_cursor(5, 1, true), 2);
+        assert_eq!(step_cursor(5, 4, true), 0);
+        assert_eq!(step_cursor(5, 2, false), 1);
+        assert_eq!(step_cursor(5, 0, false), 4);
+        assert_eq!(step_cursor(1, 0, true), 0);
+        assert_eq!(step_cursor(0, 0, false), 0);
     }
 }

@@ -398,13 +398,14 @@ pub fn show_reason(why: engine::doses::Reason) {
 /// Next tick the frame loop must wake for UI-only timed state, whatever the
 /// engine says: a toast or alert is cleared by the first draw after its
 /// minimum time, and the sleep animation floor ends at a fixed tick. Without
-/// this the 2 h engine cap would leave them on screen for hours.
+/// this the 2 h engine cap would leave them on screen for hours. The battle
+/// result card is NOT here: it waits for a button press, which redraws, and
+/// polling it would wake the badge every tick for as long as it is left up.
 pub fn next_ui_deadline_tick() -> u32 {
     let now = lifecycle::now_tick();
     let overlay = TOAST.is_active()
         || DIABETES_ALERT.is_active()
-        || ALCOHOLISM_ALERT.is_active()
-        || battle_view::wants_full_refresh();
+        || ALCOHOLISM_ALERT.is_active();
     let mut next = lifecycle::sleep_anim_deadline_tick();
     if overlay {
         next = next.min(now.saturating_add(1));
@@ -872,5 +873,17 @@ mod battle_anim_tests {
         assert_eq!(battle_stage_from_elapsed(9_999), BattleStage::Result);
         assert_eq!(battle_stage_from_elapsed(10_000), BattleStage::Done);
         assert_eq!(battle_stage_from_elapsed(u32::MAX), BattleStage::Done);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_battle_result_card_needs_no_wake_loop() {
+        // The card waits for a button press; the press redraws. Polling it
+        // every tick would wake the badge for as long as it is left up.
+        super::battle_view::show_result_for_test();
+        assert!(super::battle_view::wants_full_refresh());
+        assert_eq!(super::next_ui_deadline_tick(), u32::MAX);
     }
 }

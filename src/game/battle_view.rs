@@ -68,6 +68,13 @@ pub fn wants_full_refresh() -> bool {
     ACTIVE.load(Ordering::Relaxed) && STATE.load(Ordering::Relaxed) == STATE_RESULT
 }
 
+/// Test hook: show the result card as a finished battle would.
+#[cfg(test)]
+pub(crate) fn show_result_for_test() {
+    ACTIVE.store(true, Ordering::Relaxed);
+    STATE.store(STATE_RESULT, Ordering::Relaxed);
+}
+
 /// When the result screen was shown, so the same button action that
 /// resolved the battle (or a joystick bounce right after) can't instantly
 /// dismiss it before the player sees it.
