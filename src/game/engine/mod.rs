@@ -545,7 +545,11 @@ impl GameState {
             let dt = self.segment(minutes, &mut steep);
             #[cfg(feature = "simulator")]
             ADVANCE_CALLS.with(|c| c.set(c.get() + 1));
+            #[cfg(feature = "simulator")]
+            let mood_before = self.mood;
             advance::advance(self, dt);
+            #[cfg(feature = "simulator")]
+            sim::note_segment(mood_before, self.mood, self.health, dt);
             minutes -= dt;
         }
     }

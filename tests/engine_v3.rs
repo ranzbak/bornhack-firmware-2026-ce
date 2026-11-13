@@ -2754,3 +2754,148 @@ mod fix_round_1 {
         assert_eq!(st.med_cd_min, 30);
     }
 }
+
+mod oracle {
+    use bornhack_aegg::game::engine::GameState;
+    use bornhack_aegg::game::engine::sim::{self, Driver, Outcome, Plan};
+
+    type Routine = fn(u32, u32, &GameState) -> Plan;
+
+    const ALL: [(&str, Routine); 9] = [
+        ("balanced", sim::balanced),
+        ("sporty", sim::sporty),
+        ("lazy_treats", sim::lazy_treats),
+        ("party", sim::party),
+        ("short_sleeper", sim::short_sleeper),
+        ("spam_water", sim::spam_water),
+        ("spam_wash", sim::spam_wash),
+        ("once_a_day", sim::once_a_day),
+        ("absent", sim::absent),
+    ];
+
+    fn line(name: &str, o: &Outcome, d: &Outcome) {
+        println!(
+            "{name:14} oracle alive={} mood={} end_h={} min_h={} fit={} wt={} inj={} | delta alive={} mood={} end_h={} min_h={} fit={} wt={} inj={} wakes/day={:.1}",
+            o.alive,
+            o.avg_mood_pct,
+            o.end_health_pct,
+            o.min_health_pct,
+            o.end_fitness_pct,
+            o.end_weight_pct,
+            o.injuries,
+            d.alive,
+            d.avg_mood_pct,
+            d.end_health_pct,
+            d.min_health_pct,
+            d.end_fitness_pct,
+            d.end_weight_pct,
+            d.injuries,
+            d.engine_wakes_per_day,
+        );
+    }
+
+    fn diff(a: u8, b: u8) -> i32 {
+        (a as i32 - b as i32).abs()
+    }
+
+    #[test]
+    fn delta_matches_oracle_all_routines() {
+        for (name, r) in ALL {
+            let o = sim::run_routine(&r, 30, Driver::Oracle);
+            let d = sim::run_routine(&r, 30, Driver::Delta);
+            line(name, &o, &d);
+            assert_eq!(o.alive, d.alive, "{name}: alive");
+            if !(o.alive && d.alive) {
+                continue;
+            }
+            assert!(
+                diff(o.avg_mood_pct, d.avg_mood_pct) <= 1,
+                "{name}: avg mood"
+            );
+            if name != "party" {
+                assert!(
+                    diff(o.end_health_pct, d.end_health_pct) <= 2,
+                    "{name}: end health"
+                );
+            }
+            assert!(
+                diff(o.end_fitness_pct, d.end_fitness_pct) <= 2,
+                "{name}: fitness"
+            );
+            assert_eq!(o.injuries, d.injuries, "{name}: injuries");
+        }
+    }
+
+    #[test]
+    fn fourteen_day_gap_matches_oracle() {
+        use bornhack_aegg::game::engine::thresholds::HATCHING_TICKS;
+        let mut fresh = GameState::new_egg(42, bornhack_aegg::game::engine::PetKind::DEFAULT);
+        fresh.update(HATCHING_TICKS() as u32);
+        assert!(fresh.sleep());
+        let end = fresh.last_update_tick + 14 * sim::TICKS_PER_DAY;
+        let mut delta = fresh.clone();
+        delta.update(end);
+        let mut oracle = fresh.clone();
+        let mut t = oracle.last_update_tick;
+        while t < end {
+            t += 6;
+            oracle.update(t);
+        }
+        println!(
+            "14 days: delta {:?} h={} / oracle {:?} h={}",
+            delta.phase,
+            delta.health / 655,
+            oracle.phase,
+            oracle.health / 655
+        );
+        assert_eq!(delta.phase, oracle.phase);
+        assert!((delta.health as i32 / 655 - oracle.health as i32 / 655).abs() <= 2);
+    }
+
+    #[test]
+    fn design_targets() {
+        let run = |r: Routine| sim::run_routine(&r, 30, Driver::Delta);
+        let balanced = run(sim::balanced);
+        assert!(
+            balanced.alive && balanced.avg_mood_pct >= 90,
+            "balanced {balanced:?}"
+        );
+        assert!(run(sim::sporty).alive, "sporty");
+        let lazy = run(sim::lazy_treats);
+        assert!(lazy.alive, "lazy");
+        assert!(
+            (55..=70).contains(&lazy.end_health_pct),
+            "lazy health {}",
+            lazy.end_health_pct
+        );
+        let short = run(sim::short_sleeper);
+        assert!(
+            short.alive && short.min_health_pct >= 30,
+            "short sleeper {short:?}"
+        );
+        assert!(run(sim::spam_water).alive, "spam water");
+        assert!(run(sim::spam_wash).alive, "spam wash");
+        assert!(!run(sim::once_a_day).alive, "once a day");
+        let absent = run(sim::absent);
+        assert!(!absent.alive && absent.days < 3.0, "absent {absent:?}");
+    }
+
+    #[test]
+    fn wake_budget_balanced_day() {
+        let r = sim::run_full(&sim::balanced, 30, Driver::Delta, sim::DEFAULT_SEED);
+        let o = r.outcome;
+        println!(
+            "balanced: {:.2} engine wakes/day; next_wake_tick: {} calls, avg {:.1} / max {} ADVANCE_CALLS",
+            o.engine_wakes_per_day,
+            r.wake_queries,
+            r.wake_calls_total as f64 / r.wake_queries.max(1) as f64,
+            r.wake_calls_max
+        );
+        assert!(o.alive);
+        assert!(
+            o.engine_wakes_per_day <= 20.0,
+            "{} wakes/day",
+            o.engine_wakes_per_day
+        );
+    }
+}

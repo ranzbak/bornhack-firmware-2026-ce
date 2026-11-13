@@ -1,235 +1,84 @@
-//! Game balance simulator — runs all player profiles and outputs a summary
-//! table matching the Python simulation format.
+//! BornPets v3 balance simulator: plays every routine for 30 days with the
+//! minute-stepping oracle and with the delta engine and prints both.
 //!
-//! Usage: `cargo run --bin simulate_game --features simulator`
+//! Usage: `cargo run --release --bin simulate_game --features simulator [-- --preset classic|casual]`
 //! Or:    `make simulate-game`
 
-use bornhack_aegg::game::engine::sim::{
-    self, ACT_ABOVE, bad_levels, Policy, SLEEP_ABOVE, Skip, WAKE_BELOW, night_owl_act, optimal_act,
-};
-use bornhack_aegg::game::engine::{FoodKind, GameState, Phase};
+use bornhack_aegg::game::engine::GameState;
+use bornhack_aegg::game::engine::sim::{self, Driver, Plan};
+use bornhack_aegg::game::engine::thresholds::Mode;
 
-// ---------------------------------------------------------------------------
-// Player policies (the shared logic lives in `game::engine::sim`)
-// ---------------------------------------------------------------------------
+type Routine = fn(u32, u32, &GameState) -> Plan;
 
-/// Round `tick` up to the next multiple of `interval` (strictly later).
-fn next_multiple(tick: u32, interval: u32) -> u32 {
-    tick + interval - tick % interval
-}
+const ROUTINES: [(&str, Routine); 9] = [
+    ("balanced", sim::balanced),
+    ("sporty", sim::sporty),
+    ("lazy_treats", sim::lazy_treats),
+    ("party", sim::party),
+    ("short_sleeper", sim::short_sleeper),
+    ("spam_water", sim::spam_water),
+    ("spam_wash", sim::spam_wash),
+    ("once_a_day", sim::once_a_day),
+    ("absent", sim::absent),
+];
 
-// ── Perfect: checks every tick ──────────────────────────────────────────
-
-struct PerfectPolicy;
-impl Policy for PerfectPolicy {
-    fn name(&self) -> &'static str {
-        "perfect"
-    }
-    fn act(&self, state: &mut GameState, _tick: u32) {
-        optimal_act(state, Skip::NONE);
-    }
-}
-
-// ── Perfect minus one action ────────────────────────────────────────────
-
-struct PerfectSkip {
-    label: &'static str,
-    skip: Skip,
-}
-impl Policy for PerfectSkip {
-    fn name(&self) -> &'static str {
-        self.label
-    }
-    fn act(&self, state: &mut GameState, _tick: u32) {
-        optimal_act(state, self.skip);
-    }
-}
-
-// ── Interval-based attentive ────────────────────────────────────────────
-
-struct AttentivePolicy {
-    label: &'static str,
-    interval: u32,
-}
-
-impl Policy for AttentivePolicy {
-    fn name(&self) -> &'static str {
-        self.label
-    }
-    fn act(&self, state: &mut GameState, _tick: u32) {
-        optimal_act(state, Skip::NONE);
-    }
-    fn next_check(&self, tick: u32) -> u32 {
-        next_multiple(tick, self.interval)
-    }
-}
-
-// ── Night owl: never sleeps, checks every minute ────────────────────────
-
-struct NightOwlPolicy;
-impl Policy for NightOwlPolicy {
-    fn name(&self) -> &'static str {
-        "night_owl"
-    }
-    fn act(&self, state: &mut GameState, _tick: u32) {
-        night_owl_act(state);
-    }
-    fn next_check(&self, tick: u32) -> u32 {
-        next_multiple(tick, 6)
-    }
-}
-
-// ── Absent: never interacts ─────────────────────────────────────────────
-
-struct AbsentPolicy;
-impl Policy for AbsentPolicy {
-    fn name(&self) -> &'static str {
-        "absent"
-    }
-    fn act(&self, _state: &mut GameState, _tick: u32) {}
-    fn next_check(&self, _tick: u32) -> u32 {
-        u32::MAX
-    }
-}
-
-// ── Feed and sleep only / feed, sleep, heal ─────────────────────────────
-
-/// Sleeps and wakes like the optimal player, but only treats hunger and,
-/// optionally, sickness. Checks every 15 minutes.
-struct LimitedCarePolicy {
-    label: &'static str,
-    heal: bool,
-}
-impl Policy for LimitedCarePolicy {
-    fn name(&self) -> &'static str {
-        self.label
-    }
-    fn act(&self, state: &mut GameState, _tick: u32) {
-        if state.phase != Phase::Active {
-            return;
-        }
-        let (hunger, tired, sick, _) = bad_levels(state);
-        if state.is_sleeping {
-            if tired < WAKE_BELOW {
-                state.wake();
+fn preset_from_args() -> Mode {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--preset" {
+            match args.next().as_deref() {
+                Some("classic") => return Mode::Classic,
+                Some("casual") => return Mode::Casual,
+                other => {
+                    eprintln!("--preset needs classic or casual, got {other:?}");
+                    std::process::exit(2);
+                }
             }
-            return;
-        }
-        if tired > SLEEP_ABOVE {
-            state.sleep();
-            return;
-        }
-        if hunger > ACT_ABOVE {
-            state.feed(FoodKind::Apple);
-            return;
-        }
-        if self.heal && sick > ACT_ABOVE {
-            state.heal();
         }
     }
-    fn next_check(&self, tick: u32) -> u32 {
-        next_multiple(tick, 90)
-    }
+    Mode::Classic
 }
-
-// ---------------------------------------------------------------------------
-// Report
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-/// Money is off, as in `tests/game_engine.rs`: the policies never earn HAX, so
-/// the affordability gate would starve the pet of feed/heal/play and the
-/// table would measure poverty rather than stat balance.
-const MONEY_ENABLED: bool = false;
 
 fn main() {
-    let seed = 42u64;
-    let max_days = 60u32;
-    let ticks_per_hour = 360.0f64;
-
-    let policies: Vec<Box<dyn Policy>> = vec![
-        Box::new(PerfectPolicy),
-        Box::new(PerfectSkip {
-            label: "perfect_no_feed",
-            skip: Skip { feed: true, ..Skip::NONE },
-        }),
-        Box::new(PerfectSkip {
-            label: "perfect_no_heal",
-            skip: Skip { heal: true, ..Skip::NONE },
-        }),
-        Box::new(PerfectSkip {
-            label: "perfect_no_rest",
-            skip: Skip { rest: true, ..Skip::NONE },
-        }),
-        Box::new(AttentivePolicy {
-            label: "attentive_15min",
-            interval: 90,
-        }),
-        Box::new(AttentivePolicy {
-            label: "casual_30min",
-            interval: 180,
-        }),
-        Box::new(AttentivePolicy {
-            label: "busy_1hr",
-            interval: 360,
-        }),
-        Box::new(NightOwlPolicy),
-        Box::new(AbsentPolicy),
-        Box::new(LimitedCarePolicy {
-            label: "feed_and_sleep",
-            heal: false,
-        }),
-        Box::new(LimitedCarePolicy {
-            label: "feed_sleep_heal",
-            heal: true,
-        }),
-    ];
-
+    let mode = preset_from_args();
+    sim::install_preset(mode.preset(), mode, false);
     println!(
-        "{:<22} {:>4} {:>7} {:>8} {:>7} {:>7} {:>7} {:>7} {:>7} {:>6} {:>7}",
-        "Profile",
-        "Left",
-        "Day",
-        "Ticks",
-        "Steps",
-        "Hunger",
-        "Tired",
-        "Miser",
-        "Sick",
-        "Attn#",
-        "Attn/h"
+        "preset: {}   each cell: step oracle / delta engine, 30 days\n",
+        mode.label()
     );
-    println!("{}", "─".repeat(102));
-
-    for policy in &policies {
-        let r = sim::run(policy.as_ref(), seed, max_days, MONEY_ENABLED);
-        let day_str = if r.left {
-            format!("{:.1}", r.days)
-        } else {
-            format!("{:.1}+", r.days)
+    println!(
+        "{:<14} {:>14} {:>9} {:>11} {:>11} {:>8} {:>8} {:>6} {:>8}",
+        "routine",
+        "outcome",
+        "mood %",
+        "end health",
+        "min health",
+        "fit %",
+        "weight %",
+        "inj",
+        "wakes/d"
+    );
+    for (name, r) in ROUTINES {
+        let o = sim::run_routine(&r, 30, Driver::Oracle);
+        let d = sim::run_routine(&r, 30, Driver::Delta);
+        let out = |x: &sim::Outcome| {
+            if x.alive {
+                "alive".to_string()
+            } else {
+                format!("gone d{:.1}", x.days)
+            }
         };
-        let attn_per_hour = if r.ticks > 0 {
-            r.action_count as f64 / (r.ticks as f64 / ticks_per_hour)
-        } else {
-            0.0
-        };
-
         println!(
-            "{:<22} {:>4} {:>7} {:>8} {:>7} {:>7} {:>7} {:>7} {:>7} {:>6} {:>7.2}",
-            policy.name(),
-            if r.left { "YES" } else { "no" },
-            day_str,
-            r.ticks,
-            r.steps,
-            r.hunger,
-            r.tired,
-            r.miserable,
-            r.sick,
-            r.action_count,
-            attn_per_hour,
+            "{:<14} {:>14} {:>9} {:>11} {:>11} {:>8} {:>8} {:>6} {:>8.1}",
+            name,
+            format!("{} / {}", out(&o), out(&d)),
+            format!("{}/{}", o.avg_mood_pct, d.avg_mood_pct),
+            format!("{}/{}", o.end_health_pct, d.end_health_pct),
+            format!("{}/{}", o.min_health_pct, d.min_health_pct),
+            format!("{}/{}", o.end_fitness_pct, d.end_fitness_pct),
+            format!("{}/{}", o.end_weight_pct, d.end_weight_pct),
+            format!("{}/{}", o.injuries, d.injuries),
+            d.engine_wakes_per_day,
         );
     }
 }

@@ -32,3 +32,30 @@ fn next_wake_tick_during_hatching() {
         "should wake exactly when hatching completes"
     );
 }
+
+#[test]
+fn reproducible_with_same_seed() {
+    use bornhack_aegg::game::engine::sim::{self, Driver};
+    for driver in [Driver::Oracle, Driver::Delta] {
+        let a = sim::run_full(&sim::lazy_treats, 10, driver, 7).outcome;
+        let b = sim::run_full(&sim::lazy_treats, 10, driver, 7).outcome;
+        assert_eq!(format!("{a:?}"), format!("{b:?}"));
+    }
+}
+
+/// The routines are deterministic, so a seed changes only what the egg
+/// rolls: the three traits, and through `vitality` the starting health.
+/// (The needs and the rules read no trait, so whole-percent run outcomes do
+/// not move with the seed.)
+#[test]
+fn different_seeds_produce_different_results() {
+    let (a, b) = (
+        GameState::new_egg(1, PetKind::DEFAULT),
+        GameState::new_egg(2, PetKind::DEFAULT),
+    );
+    assert_ne!(
+        (a.vitality, a.curiosity, a.resilience),
+        (b.vitality, b.curiosity, b.resilience)
+    );
+    assert_ne!(a.health, b.health, "vitality sets the starting health");
+}
