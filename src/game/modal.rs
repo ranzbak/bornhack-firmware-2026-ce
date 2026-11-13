@@ -1119,7 +1119,7 @@ where
     // the bottom of the last stat bar (which now occupies y ≤ 122).
     let footer_y = MARGIN + MODAL_H as i32 - BORDER as i32 - 6;
     let mut footer: heapless::String<32> = heapless::String::new();
-    // `*` after the name when BORNPETS.CFG overrode at least one
+    // `*` after the name when BPETS_V3.CFG overrode at least one
     // threshold field — lets the player tell at a glance that their
     // pet is running on a non-standard balance.
     let custom_mark = if super::engine::thresholds::is_custom() {

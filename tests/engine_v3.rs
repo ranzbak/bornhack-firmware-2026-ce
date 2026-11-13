@@ -2,7 +2,9 @@
 
 use bornhack_aegg::game::bornpets_cfg::{apply_overrides, is_custom_set};
 use bornhack_aegg::game::engine::needs::{Need, build_edges};
-use bornhack_aegg::game::engine::thresholds::{Mode, Thresholds, validate};
+use bornhack_aegg::game::engine::thresholds::{
+    BORNPETS_CFG_KEYS, Mode, Thresholds, cfg_template, validate,
+};
 
 fn slice(t: &bornhack_aegg::game::engine::needs::EdgeTable, n: Need) -> &[u8] {
     &t.edges[n as usize][..t.len[n as usize] as usize]
@@ -2982,5 +2984,88 @@ mod oracle {
             "{} wakes/day",
             o.engine_wakes_per_day
         );
+    }
+}
+
+#[test]
+fn template_parses_to_classic_with_no_edits() {
+    let template = cfg_template();
+    assert_eq!(
+        template,
+        include_str!("../assets/to-badge/BPETS_V3.CFG"),
+        "asset file out of date: regenerate it from cfg_template()"
+    );
+    let mut values = Thresholds::CLASSIC;
+    assert_eq!(apply_overrides(&mut values, template.as_bytes()), 0);
+    assert_eq!(values, Thresholds::CLASSIC);
+
+    for (key, _) in BORNPETS_CFG_KEYS {
+        let n = template
+            .lines()
+            .filter(|l| {
+                l.strip_prefix("# ")
+                    .is_some_and(|r| r.starts_with(&format!("{key}=")))
+            })
+            .count();
+        assert_eq!(n, 1, "key {key} appears {n} times");
+    }
+
+    // Uncomment every key line and drop the "(Casual n)" note.
+    let uncommented: String = template
+        .lines()
+        .skip(1)
+        .map(|l| {
+            let l = l.strip_prefix("# ").unwrap();
+            format!("{}\n", l.split("   (").next().unwrap())
+        })
+        .collect();
+    // Start from Casual so every row is a real edit.
+    let mut values = Thresholds::CASUAL;
+    apply_overrides(&mut values, uncommented.as_bytes());
+    assert_eq!(values, Thresholds::CLASSIC);
+}
+
+#[test]
+fn template_first_line_and_casual_notes() {
+    let template = cfg_template();
+    assert!(template.ends_with('\n') && !template.contains('\r'));
+    assert_eq!(
+        template.lines().next().unwrap(),
+        "# BornPets v3 balance. Uncomment a line to change it. The old firmware keeps using BORNPETS.CFG."
+    );
+    assert!(template.contains("# MOOD_STEP=") && template.contains("(Casual "));
+}
+
+#[test]
+fn no_v3_key_reuses_a_v1_name() {
+    const V1: &[&str] = &[
+        "HUNGER_RATE",
+        "TIRED_RATE",
+        "SLEEP_HUNGER_COST",
+        "SICK_RATE",
+        "SICK_CONDITION_RATE",
+        "SICK_CONDITION_MISERABLE_RATE",
+        "MISERABLE_INTERVAL_BASE",
+        "MISERABLE_INTERVAL_MIN",
+        "FEED_HUNGER_RELIEF",
+        "HEAL_SICK_RELIEF",
+        "PLAY_HUNGER_COST",
+        "PLAY_TIRED_COST",
+        "MINIGAME_HUNGER_COST",
+        "MINIGAME_COOLDOWN",
+        "HATCHING_TICKS",
+        "MAX_SLEEP_TICKS",
+        "WEIGHT_RATE",
+        "FEED_WEIGHT_GAIN",
+        "EXERCISE_WEIGHT_RELIEF",
+        "DIABETES_ONSET_TICKS",
+        "MEDICATE_COOLDOWN",
+    ];
+    // These keep their v1 meaning and unit.
+    const SAME_MEANING: &[&str] = &["HATCHING_TICKS", "MINIGAME_COOLDOWN", "MAX_SLEEP_TICKS"];
+    for (key, _) in BORNPETS_CFG_KEYS {
+        if V1.contains(key) {
+            assert!(SAME_MEANING.contains(key), "{key} reuses a v1 name");
+        }
     }
 }

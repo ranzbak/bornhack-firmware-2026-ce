@@ -6,7 +6,7 @@
 //! These values used to be `pub const`s.  They are now fields of a
 //! [`Thresholds`] struct held in a single boot-installed static so they
 //! can be picked from one of two presets ([`Thresholds::CLASSIC`] /
-//! [`Thresholds::CASUAL`]) or overridden by a `BORNPETS.CFG` file on
+//! [`Thresholds::CASUAL`]) or overridden by a `BPETS_V3.CFG` file on
 //! the badge's USB drive.  Each old identifier still exists as an
 //! `#[inline] pub fn FOO() -> T` accessor so consumer code reads the
 //! active value without ceremony.
@@ -36,6 +36,18 @@ macro_rules! thresholds_table {
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub struct Thresholds {
             $( pub $name: $ty, )*
+        }
+
+        impl Thresholds {
+            /// Field value by config key name (host only; feeds the
+            /// `BPETS_V3.CFG` template).
+            #[cfg(any(test, feature = "simulator"))]
+            pub fn value_of(&self, key: &str) -> Option<u32> {
+                match key {
+                    $( stringify!($name) => Some(self.$name as u32), )*
+                    _ => None,
+                }
+            }
         }
 
         $(
@@ -72,7 +84,6 @@ thresholds_table! {
     // Drink
     DRINK_DURATION: u8,
     // Drunk / alcoholism
-    DRUNK_SOBER_RATE: u16,
     DRUNK_TRIGGER: u16,
     WARNING_DRUNK: u16,
     // Rehab
@@ -346,7 +357,6 @@ impl Thresholds {
         MIN_TRAIT: 16384,
         MAX_TRAIT: 49152,
 
-
         EXERCISE_DURATION: 3,
 
         MEDICATE_DURATION: 2,
@@ -355,7 +365,6 @@ impl Thresholds {
 
         DRINK_DURATION: 2,
 
-        DRUNK_SOBER_RATE: 6,
         DRUNK_TRIGGER: 39321,
         WARNING_DRUNK: 32768,
 
@@ -627,7 +636,6 @@ impl Thresholds {
         MIN_TRAIT: 16384,
         MAX_TRAIT: 49152,
 
-
         EXERCISE_DURATION: 3,
 
         MEDICATE_DURATION: 2,
@@ -636,7 +644,6 @@ impl Thresholds {
 
         DRINK_DURATION: 2,
 
-        DRUNK_SOBER_RATE: 10,
         DRUNK_TRIGGER: 39321,
         WARNING_DRUNK: 32768,
 
@@ -944,7 +951,7 @@ static ACTIVE_MODE: AtomicBool = AtomicBool::new(false); // false=Classic, true=
 /// Install the active threshold set.  Call once, before any game tick.
 ///
 /// `custom` should be `true` whenever the values differ from the bare
-/// preset for the chosen [`Mode`] (e.g. because a `BORNPETS.CFG` file
+/// preset for the chosen [`Mode`] (e.g. because a `BPETS_V3.CFG` file
 /// overrode one or more fields).  The UI uses it to surface a `*`
 /// indicator next to the pet's name.
 pub fn install(values: Thresholds, mode: Mode, custom: bool) {
@@ -984,10 +991,10 @@ pub fn active_mode() -> Mode {
 }
 
 // ---------------------------------------------------------------------------
-// BORNPETS.CFG key set — single source of truth for the parser.
+// BPETS_V3.CFG key set — single source of truth for the parser.
 // ---------------------------------------------------------------------------
 
-/// Identifiers accepted in a `BORNPETS.CFG` file.  Each row is
+/// Identifiers accepted in a `BPETS_V3.CFG` file.  Each row is
 /// `(KEY, setter)`; the setter takes a parsed `u32` and writes the
 /// clamped value into a `Thresholds` instance.  Unknown keys are
 /// ignored by the parser, so adding a new tunable later does not break
@@ -996,7 +1003,7 @@ pub type Setter = fn(&mut Thresholds, u32);
 
 pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
     // Interval keys divide the tick counter (see interval_fires); floor to 1
-    // so a BORNPETS.CFG value of 0 can't cause a divide-by-zero.
+    // so a BPETS_V3.CFG value of 0 can't cause a divide-by-zero.
     ("MINIGAME_COOLDOWN", |t, v| {
         t.MINIGAME_COOLDOWN = clamp_u16(v)
     }),
@@ -1274,4 +1281,31 @@ pub fn validate(t: &Thresholds, preset: &Thresholds) -> Thresholds {
         r.WEIGHT_HI_PCT = preset.WEIGHT_HI_PCT;
     }
     r
+}
+
+#[cfg(any(test, feature = "simulator"))]
+pub use template::cfg_template;
+
+/// Host-only: needs `alloc`, which the badge build does not have.
+#[cfg(any(test, feature = "simulator"))]
+mod template {
+    extern crate alloc;
+    use super::{BORNPETS_CFG_KEYS, Thresholds};
+    use alloc::string::String;
+    use core::fmt::Write;
+
+    const HEAD: &str = "# BornPets v3 balance. Uncomment a line to change it. The old firmware keeps using BORNPETS.CFG.";
+
+    /// Exact text of `assets/to-badge/BPETS_V3.CFG`: every key as a
+    /// comment with its Classic value and the Casual value, no active rows.
+    pub fn cfg_template() -> String {
+        let mut out = String::from(HEAD);
+        out.push('\n');
+        for (key, _) in BORNPETS_CFG_KEYS {
+            let classic = Thresholds::CLASSIC.value_of(key).expect("key is a field");
+            let casual = Thresholds::CASUAL.value_of(key).expect("key is a field");
+            let _ = writeln!(out, "# {key}={classic}   (Casual {casual})");
+        }
+        out
+    }
 }

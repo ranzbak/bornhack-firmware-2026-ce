@@ -52,38 +52,260 @@ If neither preset is your speed you can override individual numbers via a config
 3. Create or edit `BPETS_V3.CFG` in the root with one `KEY=VALUE` per line:
 
    ```
-   # speed up hunger decay, slow down drained
-   HUNGER_RATE=4
-   DRAINED_INTERVAL=180
+   # halve the starvation damage, make the mood move faster
+   DMG_FULL_LOW_PM=20
+   MOOD_STEP=200
    ```
+
+   `BPETS_V3.CFG` already lists every key as a comment, with the Classic value and the Casual value. To use a line, remove the `# ` at the start, remove the `(Casual ...)` note at the end, and set your number.
 
 4. Eject the drive and reboot the badge.
 
-When a `BPETS_V3.CFG` is active, the pet name on the stats screen and traits screen gets a small `*` after it — so you can tell at a glance that your pet is running on a non-standard balance.
+When a `BPETS_V3.CFG` changes at least one value, the pet name on the stats screen and traits screen gets a small `*` after it — so you can tell at a glance that your pet is running on a non-standard balance. The template as shipped has no active lines, so it changes nothing.
 
-Known keys (everything else is silently ignored, so you don't have to keep your file up to date):
+Known keys (everything else is silently ignored, so you don't have to keep your file up to date). Name endings: `_PCT` is a percent of a stat, `_MIN` is minutes, `_PM` is stat units per minute (`655` = 1 %).
 
-| Key | What it does | Reasonable range |
+| Key | Classic | Casual |
 | --- | --- | --- |
-| `HUNGER_RATE` | how fast hunger fills per tick | 1 – 30 |
-| `TIRED_RATE` | how fast tired fills per tick | 1 – 30 |
-| `SLEEP_HUNGER_COST` | hunger gained per sleep tick | 0 – 6000 |
-| `DRAINED_INTERVAL` | ticks between drain bumps | 30 – 360 |
-| `DRAINED_INTERVAL_MISERABLE` | drain interval when miserable | 10 – 120 |
-| `SICK_RATE` | baseline sick decay per tick | 0 – 5 |
-| `SICK_CONDITION_RATE` | sick decay when stats are bad | 0 – 2000 |
-| `SICK_CONDITION_MISERABLE_RATE` | sick decay when miserable | 0 – 4000 |
-| `MISERABLE_INTERVAL_BASE` | base miserable interval | 120 – 600 |
-| `MISERABLE_INTERVAL_MIN` | min miserable interval (when many stats are bad) | 10 – 200 |
-| `FEED_DRAINED_RELIEF` | drained drop per Feed tick | 0 – 5000 |
-| `RELAX_DRAINED_RELIEF` | drained drop per Relax tick | 1000 – 20000 |
-| `RELAX_HUNGER_COST` | hunger gained per Relax tick | 0 – 10000 |
-| `PLAY_DRAINED_COST` | drained gained per Play tick | 0 – 3000 |
-| `MINIGAME_COOLDOWN` | ticks between mini-game stat awards | 1 – 200 |
-| `HATCHING_TICKS` | how long hatching takes (6 = 1 minute) | 1 – 200 |
-| `MAX_SLEEP_TICKS` | max ticks the engine sleeps between updates (720 = 2 h) | 30 – 1440 |
+| `MINIGAME_COOLDOWN` | 18 | 12 |
+| `HATCHING_TICKS` | 1 | 1 |
+| `MAX_SLEEP_TICKS` | 720 | 720 |
+| `FULL_LO_PCT` | 38 | 33 |
+| `FULL_HI_PCT` | 78 | 83 |
+| `WATER_LO_PCT` | 38 | 33 |
+| `WATER_HI_PCT` | 83 | 88 |
+| `ENERGY_LO_PCT` | 33 | 28 |
+| `FUN_LO_PCT` | 33 | 28 |
+| `FUN_HI_PCT` | 73 | 78 |
+| `DIRT_HI_PCT` | 58 | 63 |
+| `BOOZE_HI_PCT` | 38 | 43 |
+| `BOOZE_DANGER_PCT` | 70 | 75 |
+| `STRAIN_INJ_PCT` | 60 | 65 |
+| `FIT_LO_PCT` | 43 | 38 |
+| `WEIGHT_LO_PCT` | 38 | 33 |
+| `WEIGHT_HI_PCT` | 63 | 68 |
+| `FULL_DRAIN_AWAKE_PM` | 54 | 54 |
+| `WATER_DRAIN_AWAKE_PM` | 45 | 45 |
+| `ENERGY_DRAIN_AWAKE_PM` | 36 | 36 |
+| `FUN_DRAIN_PM` | 40 | 40 |
+| `FULL_DRAIN_ASLEEP_PM` | 30 | 30 |
+| `WATER_DRAIN_ASLEEP_PM` | 20 | 20 |
+| `ENERGY_GAIN_ASLEEP_PM` | 120 | 120 |
+| `SLEEP_FUN_FLOOR_PCT` | 40 | 40 |
+| `DIRT_GAIN_PM` | 8 | 8 |
+| `BOOZE_CLEAR_PM` | 36 | 36 |
+| `BOOZE_CLEAR_SLOW_PCT` | 67 | 67 |
+| `STRAIN_CLEAR_PM` | 80 | 80 |
+| `FIT_DECAY_HIGH_PM` | 4 | 4 |
+| `FIT_DECAY_MID_PM` | 2 | 2 |
+| `FIT_DECAY_LOW_PM` | 1 | 1 |
+| `FIT_DECAY_HIGH_ABOVE_PCT` | 50 | 50 |
+| `FIT_DECAY_MID_ABOVE_PCT` | 25 | 25 |
+| `FIT_DECAY_HEAVY_PCT` | 150 | 150 |
+| `WEIGHT_PULL_HEAVY_PM` | 3 | 3 |
+| `WEIGHT_PULL_PM` | 1 | 1 |
+| `WEIGHT_BELLY_PM` | 3 | 3 |
+| `ENERGY_MULT_UNFIT_PCT` | 125 | 125 |
+| `ENERGY_MULT_FIT_PCT` | 90 | 90 |
+| `ENERGY_FIT_GOOD_PCT` | 70 | 70 |
+| `ENERGY_MULT_DRUNK_PCT` | 150 | 150 |
+| `ENERGY_MULT_WIRED_PCT` | 150 | 150 |
+| `ENERGY_MULT_HANGOVER_PCT` | 125 | 125 |
+| `ENERGY_MULT_WEIGHT_PCT` | 115 | 115 |
+| `ENERGY_CAP_DEPRIVED_PCT` | 70 | 70 |
+| `THIRST_MULT_BASE_PCT` | 100 | 100 |
+| `THIRST_MULT_LOW_PCT` | 110 | 110 |
+| `THIRST_MULT_MID_PCT` | 125 | 125 |
+| `THIRST_MULT_HIGH_PCT` | 140 | 140 |
+| `THIRST_BOOZE_LOW_PCT` | 15 | 15 |
+| `THIRST_BOOZE_MID_PCT` | 40 | 40 |
+| `THIRST_BOOZE_HIGH_PCT` | 70 | 70 |
+| `SLEEP_QUALITY_POOR_PM` | 600 | 600 |
+| `SLEEP_QUALITY_GOOD_PM` | 1000 | 1000 |
+| `UNSETTLED_BOOZE_PCT` | 30 | 30 |
+| `UNSETTLED_FULL_LO_PCT` | 25 | 25 |
+| `UNSETTLED_FULL_HI_PCT` | 85 | 85 |
+| `UNSETTLED_WATER_LO_PCT` | 25 | 25 |
+| `UNSETTLED_WATER_HI_PCT` | 90 | 90 |
+| `MOOD_STEP` | 120 | 120 |
+| `MOOD_PEN_INJURED_PCT` | 20 | 20 |
+| `MOOD_PEN_GROGGY_PCT` | 10 | 10 |
+| `MOOD_PEN_HANGOVER_PCT` | 15 | 15 |
+| `MOOD_PEN_DEPRIVED_PCT` | 10 | 10 |
+| `MOOD_PEN_REHAB_PCT` | 20 | 20 |
+| `MOOD_PEN_CRAVING_PCT` | 15 | 15 |
+| `MOOD_CRAVING_BOOZE_PCT` | 10 | 10 |
+| `MOOD_HEALTH_FLOOR_PCT` | 50 | 50 |
+| `CEILING_FIT_STEP1_PCT` | 25 | 25 |
+| `CEILING_FIT_STEP2_PCT` | 50 | 50 |
+| `CEILING_FIT_STEP3_PCT` | 70 | 70 |
+| `CEILING_STEP0_PCT` | 55 | 55 |
+| `CEILING_STEP1_PCT` | 65 | 65 |
+| `CEILING_STEP2_PCT` | 80 | 80 |
+| `CEILING_STEP3_PCT` | 100 | 100 |
+| `CEILING_DIABETIC_PCT` | 20 | 20 |
+| `DMG_NEED_LOW_PCT` | 15 | 15 |
+| `DMG_NEED_HIGH_PCT` | 95 | 95 |
+| `DMG_ENERGY_PCT` | 10 | 10 |
+| `DMG_ENERGY_HEALTH_PCT` | 30 | 30 |
+| `DMG_MOOD_PCT` | 20 | 20 |
+| `DMG_DIRT_PCT` | 85 | 85 |
+| `DMG_WEIGHT_HIGH_PCT` | 80 | 80 |
+| `DMG_WEIGHT_LOW_PCT` | 20 | 20 |
+| `DMG_FULL_LOW_PM` | 40 | 20 |
+| `DMG_FULL_HIGH_PM` | 8 | 4 |
+| `DMG_WATER_LOW_PM` | 40 | 20 |
+| `DMG_WATER_HIGH_PM` | 8 | 4 |
+| `DMG_ENERGY_PM` | 8 | 4 |
+| `DMG_BOOZE_PM` | 40 | 20 |
+| `DMG_MOOD_PM` | 10 | 5 |
+| `DMG_DIRT_PM` | 10 | 5 |
+| `DMG_WEIGHT_HIGH_PM` | 2 | 1 |
+| `DMG_WEIGHT_LOW_PM` | 10 | 5 |
+| `REC_GOOD_PM` | 14 | 14 |
+| `REC_FAIR_PM` | 5 | 5 |
+| `REC_GOOD_MOOD_PCT` | 60 | 60 |
+| `REC_FAIR_MOOD_PCT` | 40 | 40 |
+| `REC_DEPRIVED_PCT` | 50 | 50 |
+| `DEPENDENCE_ONSET_MIN` | 1200 | 1200 |
+| `DEPENDENCE_RELAPSE_MIN` | 400 | 400 |
+| `DIABETES_ONSET_MIN` | 4320 | 4320 |
+| `DIABETES_REVERSAL_MIN` | 10080 | 10080 |
+| `HANGOVER_MIN` | 480 | 480 |
+| `RECOVERING_MIN` | 10080 | 10080 |
+| `SELF_WAKE_MIN` | 720 | 720 |
+| `OVERSLEEP_WAKE_MIN` | 300 | 300 |
+| `GROGGY_LINE_MIN` | 240 | 240 |
+| `GROGGY_MIN` | 120 | 120 |
+| `GROGGY_ENERGY_PCT` | 10 | 10 |
+| `GROGGY_FIT_PCT` | 2 | 2 |
+| `RESTED_MIN` | 960 | 960 |
+| `GOOD_SLEEP_LINE_MIN` | 300 | 300 |
+| `NIGHT_SHORT_MIN` | 360 | 360 |
+| `NIGHT_GOOD_MIN` | 390 | 390 |
+| `DEPRIVED_NIGHTS` | 3 | 3 |
+| `CLEARING_NIGHTS` | 2 | 2 |
+| `GRUMPY_PCT` | 10 | 10 |
+| `GRUMPY_ENERGY_PCT` | 50 | 50 |
+| `COLLAPSE_DAMAGE` | 1965 | 982 |
+| `COLLAPSE_HEALTH_FLOOR_PCT` | 33 | 33 |
+| `LEAVING_MIN` | 720 | 720 |
+| `BOOZE_CLEAR_PCT` | 15 | 15 |
+| `DIABETES_WEIGHT_HI_PCT` | 80 | 80 |
+| `DIABETES_WEIGHT_LO_PCT` | 65 | 65 |
+| `REVERSAL_FIT_PCT` | 60 | 60 |
+| `HANGOVER_ASLEEP_MULT` | 2 | 2 |
+| `HEALTH_EXCESS_DECAY_PM` | 3 | 3 |
+| `CARE_GOOD_MOOD_PCT` | 60 | 60 |
+| `OVERSLEEP_RESET_PCT` | 85 | 85 |
+| `DOSE_SALAD_FULL_PCT` | 20 | 20 |
+| `DOSE_APPLE_FULL_PCT` | 25 | 25 |
+| `DOSE_FRIKANDEL_FULL_PCT` | 35 | 35 |
+| `DOSE_PIZZA_FULL_PCT` | 40 | 40 |
+| `DOSE_CAKE_FULL_PCT` | 10 | 10 |
+| `DOSE_SALAD_DIRT_PCT` | 10 | 10 |
+| `DOSE_APPLE_DIRT_PCT` | 10 | 10 |
+| `DOSE_FRIKANDEL_DIRT_PCT` | 10 | 10 |
+| `DOSE_PIZZA_DIRT_PCT` | 10 | 10 |
+| `DOSE_CAKE_DIRT_PCT` | 5 | 5 |
+| `DOSE_SALAD_WEIGHT_PM` | 0 | 0 |
+| `DOSE_APPLE_WEIGHT_PM` | 5 | 5 |
+| `DOSE_FRIKANDEL_WEIGHT_PM` | 20 | 20 |
+| `DOSE_PIZZA_WEIGHT_PM` | 20 | 20 |
+| `DOSE_CAKE_WEIGHT_PM` | 30 | 30 |
+| `DOSE_FRIKANDEL_MOOD_PCT` | 6 | 6 |
+| `DOSE_PIZZA_MOOD_PCT` | 8 | 8 |
+| `DOSE_CAKE_MOOD_PCT` | 15 | 15 |
+| `DOSE_HEALTHY_WATER_PCT` | 8 | 8 |
+| `DOSE_SALAD_FIT_PCT` | 1 | 1 |
+| `DOSE_JUNK_REPEAT_DIV` | 3 | 3 |
+| `DOSE_JUNK_MIN` | 180 | 180 |
+| `DOSE_FULL_CAP_PCT` | 120 | 120 |
+| `DOSE_EXCESS_ENERGY_DIV` | 2 | 2 |
+| `DOSE_EXCESS_WEIGHT_DIV` | 4 | 4 |
+| `DOSE_WATER_MAX_PCT` | 30 | 30 |
+| `DOSE_WATER_BELLY_PCT` | 2 | 2 |
+| `DOSE_WATER_BELLY_MIN_PCT` | 15 | 15 |
+| `DOSE_WATER_BOOZE_PCT` | 5 | 5 |
+| `DOSE_WATER_HANGOVER_MIN` | 60 | 60 |
+| `DOSE_WATER_GROGGY_MIN` | 30 | 30 |
+| `DOSE_COLA_WATER_PCT` | 20 | 20 |
+| `DOSE_COLA_FULL_PCT` | 2 | 2 |
+| `DOSE_COLA_ENERGY_PCT` | 8 | 8 |
+| `DOSE_COLA_MOOD_PCT` | 3 | 3 |
+| `DOSE_COLA_WEIGHT_PCT` | 1 | 1 |
+| `DOSE_BEER_WATER_PCT` | 20 | 20 |
+| `DOSE_BEER_BELLY_PCT` | 2 | 2 |
+| `DOSE_BEER_BOOZE_PCT` | 15 | 15 |
+| `DOSE_BEER_MOOD_PCT` | 12 | 12 |
+| `DOSE_WINE_WATER_PCT` | 8 | 8 |
+| `DOSE_WINE_BELLY_PCT` | 1 | 1 |
+| `DOSE_WINE_BOOZE_PCT` | 20 | 20 |
+| `DOSE_WINE_MOOD_PCT` | 15 | 15 |
+| `DOSE_WHISKEY_WATER_PCT` | 0 | 0 |
+| `DOSE_WHISKEY_BELLY_PCT` | 0 | 0 |
+| `DOSE_WHISKEY_BOOZE_PCT` | 30 | 30 |
+| `DOSE_WHISKEY_MOOD_PCT` | 20 | 20 |
+| `DOSE_BEER_WEIGHT_PCT` | 1 | 1 |
+| `DOSE_ALCOHOL_ENERGY_PCT` | 5 | 5 |
+| `DOSE_ALCOHOL_FUN_PCT` | 5 | 5 |
+| `DOSE_TIRED_BOOZE_PCT` | 150 | 150 |
+| `DOSE_DEPENDENT_DIV` | 2 | 2 |
+| `DOSE_RELAPSE_MOOD_PCT` | 20 | 20 |
+| `DOSE_PLAY_FUN_PCT` | 25 | 25 |
+| `DOSE_PLAY_ENERGY_PCT` | 5 | 5 |
+| `DOSE_PLAY_FULL_PCT` | 3 | 3 |
+| `DOSE_PLAY_WATER_PCT` | 4 | 4 |
+| `DOSE_PLAY_FIT_PCT` | 2 | 2 |
+| `DOSE_PLAY_DIRT_PCT` | 3 | 3 |
+| `DOSE_PLAY_GROGGY_MIN` | 60 | 60 |
+| `DOSE_TIRED_FUN_MULT` | 2 | 2 |
+| `DOSE_MINI_FUN_BASE_PCT` | 10 | 10 |
+| `DOSE_MINI_FUN_GRADE_PCT` | 7 | 7 |
+| `DOSE_MINI_ENERGY_PCT` | 3 | 3 |
+| `DOSE_EXERCISE_STRAIN_PCT` | 35 | 35 |
+| `DOSE_STRAIN_NEED_PCT` | 150 | 150 |
+| `DOSE_STRAIN_RESTED_PCT` | 70 | 70 |
+| `DOSE_STRAIN_FIT_PCT` | 85 | 85 |
+| `DOSE_STRAIN_FIT_MIN_PCT` | 70 | 70 |
+| `DOSE_STRAIN_HEAVY_PCT` | 120 | 120 |
+| `DOSE_STRAIN_DEPRIVED_PCT` | 125 | 125 |
+| `DOSE_EXERCISE_ENERGY_PCT` | 10 | 10 |
+| `DOSE_EXERCISE_FULL_PCT` | 8 | 8 |
+| `DOSE_EXERCISE_WATER_PCT` | 12 | 12 |
+| `DOSE_EXERCISE_FUN_PCT` | 10 | 10 |
+| `DOSE_EXERCISE_BOOZE_PCT` | 5 | 5 |
+| `DOSE_EXERCISE_DIRT_PCT` | 12 | 12 |
+| `DOSE_EXERCISE_WEIGHT_PCT` | 3 | 3 |
+| `DOSE_EXERCISE_HANGOVER_MIN` | 120 | 120 |
+| `DOSE_EXERCISE_FIT_PCT` | 12 | 12 |
+| `DOSE_INJURY_MIN` | 1440 | 1440 |
+| `DOSE_INJURY_HEALTH_PCT` | 5 | 5 |
+| `DOSE_WASH_DIRT_PCT` | 70 | 70 |
+| `DOSE_RELAX_FUN_PCT` | 25 | 25 |
+| `DOSE_RELAX_STRAIN_PCT` | 15 | 15 |
+| `DOSE_RELAX_ENERGY_PCT` | 3 | 3 |
+| `DOSE_RELAX_FIT_PCT` | 1 | 1 |
+| `DOSE_MED_CD_MIN` | 240 | 240 |
+| `DOSE_HEAL_INJURY_MIN` | 720 | 720 |
+| `DOSE_MED_BOOZE_PCT` | 10 | 10 |
+| `DOSE_HEAL_HEALTHY_PCT` | 80 | 80 |
+| `DOSE_HEAL_HEALTH_PCT` | 10 | 10 |
+| `DOSE_INSULIN_WINDOW_MIN` | 120 | 120 |
+| `DOSE_INSULIN_MIN` | 480 | 480 |
+| `DOSE_OZEMPIC_WEIGHT_PCT` | 15 | 15 |
+| `DOSE_OZEMPIC_FIT_PCT` | 5 | 5 |
+| `DOSE_OZEMPIC_MIN` | 1440 | 1440 |
+| `DOSE_OZEMPIC_CD_MIN` | 2880 | 2880 |
+| `DOSE_REHAB_MIN` | 4320 | 4320 |
+| `DOSE_NIGHT_ENERGY_PCT` | 50 | 50 |
+| `DOSE_WORK_ENERGY_PCT` | 15 | 15 |
+| `DOSE_WORK_FUN_PCT` | 10 | 10 |
+| `DOSE_WORK_MOOD_PCT` | 5 | 5 |
+| `DOSE_FRIEND_BIG_FUN_PCT` | 15 | 15 |
+| `DOSE_FRIEND_SMALL_FUN_PCT` | 5 | 5 |
 
-Stat scale: `655 ≈ 1 %`, `65535 = 100 %`. Time scale: `1 tick = 10 seconds` (so 360 ticks = 1 hour). Values are clamped to sensible ranges (interval keys are floored to 1 so the engine can't divide by zero). Unknown keys are logged and skipped.
+Stat scale: `655 ≈ 1 %`, `65535 = 100 %`. Time scale: `1 tick = 10 seconds` (so 360 ticks = 1 hour). Values are clamped to sensible ranges. If a pair of band edges ends up in the wrong order, that pair falls back to the preset. Unknown keys are logged and skipped.
 
 To go back to a preset, delete `BPETS_V3.CFG` from the drive and reboot.
 
@@ -95,11 +317,10 @@ A few gotchas:
 - **The parser is silent.** Unknown keys are skipped, and a value that
   isn't a plain whole number (no units, decimals or minus sign) drops
   the whole line without any error on screen.
-- **The "Reasonable range" column is advice, not a limit.** Values are
-  only clamped to the raw integer type — `HUNGER_RATE=1000` really does
-  make hunger fill ~300× faster and your pet will be starving before
-  you've unplugged the cable. If a wild value wrecked your pet, delete
-  the file and reboot to fall back to the preset.
+- **Wild values are allowed.** Values are only clamped to the raw
+  integer type, so a very large drain rate really will starve your pet
+  before you've unplugged the cable. If a wild value wrecked your pet,
+  delete the file and reboot to fall back to the preset.
 
 ## Custom pets: `PETS.CFG`
 

@@ -413,7 +413,7 @@ async fn main(spawner: Spawner) {
 
     // ── BornPets balance — install the active threshold set before any
     //    game tick runs.  Mode comes from the KV `game.mode` setting
-    //    (defaults to Classic on a fresh badge); `BORNPETS.CFG` on the
+    //    (defaults to Classic on a fresh badge); `BPETS_V3.CFG` on the
     //    USB-MSC partition, if present, overrides individual fields on
     //    top of the preset.
     #[cfg(feature = "game")]

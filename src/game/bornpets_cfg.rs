@@ -1,4 +1,4 @@
-//! Read `BORNPETS.CFG` from the USB-MSC FAT12 partition and apply its
+//! Read `BPETS_V3.CFG` from the USB-MSC FAT12 partition and apply its
 //! overrides on top of the preset selected via the on-badge menu.
 //!
 //! File format — one `KEY=VALUE` per line, `#` introduces a comment.
@@ -19,10 +19,15 @@
 use crate::game::engine::thresholds;
 use crate::game::engine::thresholds::{BORNPETS_CFG_KEYS, Mode, Thresholds};
 
+/// The v3 balance file.  The old firmware keeps its own `BORNPETS.CFG`,
+/// which v3 never reads, writes or deletes.
+#[cfg(feature = "embassy-core")]
+const CFG_FILE: &str = "BPETS_V3.CFG";
+
 #[cfg(feature = "embassy-core")]
 const READ_BUF_LEN: usize = 2048;
 
-/// Pick the active preset, optionally overlay `BORNPETS.CFG`, install
+/// Pick the active preset, optionally overlay `BPETS_V3.CFG`, install
 /// the result into the threshold accessor.  Returns the [`Mode`] used
 /// and whether at least one valid override row was applied.
 #[cfg(feature = "embassy-core")]
@@ -32,7 +37,7 @@ pub async fn load_and_install(mode: Mode) -> (Mode, bool) {
     let mut values = mode.preset();
 
     let mut buf = [0u8; READ_BUF_LEN];
-    let Ok(n) = fat12::read_named("BORNPETS.CFG", &mut buf).await else {
+    let Ok(n) = fat12::read_named(CFG_FILE, &mut buf).await else {
         thresholds::install(values, mode, false);
         return (mode, false);
     };
@@ -40,7 +45,8 @@ pub async fn load_and_install(mode: Mode) -> (Mode, bool) {
     let applied = apply_overrides(&mut values, &buf[..n]);
     let values = thresholds::validate(&values, &mode.preset());
     defmt::info!(
-        "BORNPETS.CFG: applied {} override(s) on top of {}",
+        "{=str}: applied {} override(s) on top of {}",
+        CFG_FILE,
         applied,
         mode.label()
     );
@@ -68,7 +74,7 @@ pub fn apply_overrides(values: &mut Thresholds, data: &[u8]) -> u32 {
         };
         let Some(value_num) = crate::cfg_text::parse_dec_u32(value) else {
             #[cfg(feature = "embassy-core")]
-            defmt::warn!("BORNPETS.CFG: cannot parse value for key");
+            defmt::warn!("BPETS_V3.CFG: cannot parse value for key");
             continue;
         };
 
@@ -83,7 +89,7 @@ pub fn apply_overrides(values: &mut Thresholds, data: &[u8]) -> u32 {
         }
         if !handled {
             #[cfg(feature = "embassy-core")]
-            defmt::info!("BORNPETS.CFG: unknown key, ignored");
+            defmt::info!("BPETS_V3.CFG: unknown key, ignored");
         }
     }
 

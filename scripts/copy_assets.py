@@ -22,6 +22,7 @@ Usage
 
     scripts/copy_assets.py            # watch forever
     scripts/copy_assets.py --once     # exit after the first success
+    scripts/copy_assets.py --update   # add missing files to provisioned badges
 
 Requirements
 ------------
@@ -66,6 +67,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ASSETS_DIR = REPO_ROOT / "assets" / "to-badge"
 VOLUME_PATTERN = re.compile(r"^CYBR[0-9A-F]{4}$")
+CONFIG_NAME = "BPETS_V3.CFG"
 IGNORED_ENTRIES = {".Trash-1000", ".trash", "System Volume Information"}
 
 
@@ -157,6 +159,25 @@ def copy_assets_to(mount_point, *, label, quiet):
     return files_copied > 0
 
 
+def update_assets_to(mount_point, assets_dir):
+    """Copy only the asset files that are missing on the volume.
+
+    Existing files are never overwritten: ``BPETS_V3.CFG`` may have been
+    edited, and ``PETS.CFG`` and the first PCX files differ per badge.
+    ``BORNPETS.CFG`` (the old firmware's config) is not in the assets and
+    is never touched.  FAT names are case-insensitive, so compare folded.
+    """
+    present = {e.name.lower() for e in mount_point.iterdir()}
+    added = []
+    for src in sorted(assets_dir.iterdir()):
+        if not src.is_file() or src.name.lower() in present:
+            continue
+        shutil.copy2(src, mount_point / src.name)
+        added.append(src.name)
+    subprocess.run(["sync"], check=False)
+    return {"added": added}
+
+
 # Lock guarding stdout — multiple worker threads print interleaved
 # otherwise, which makes terminal output unreadable.
 _PRINT_LOCK = threading.Lock()
@@ -167,7 +188,7 @@ def _say(*args):
         print(*args, flush=True)
 
 
-def process_device(devnode, label, *, quiet):
+def process_device(devnode, label, *, quiet, update=False):
     """Full mount → copy → sync → unmount cycle for one block device.
 
     Thread-safe: each worker thread takes its own devnode, runs its
@@ -178,6 +199,17 @@ def process_device(devnode, label, *, quiet):
     mount_point = mount_via_udisks(devnode)
     if mount_point is None:
         return False
+    if update:
+        if not VOLUME_PATTERN.match(label):
+            _say(f"SKIP  {mount_point}  (label {label!r} is not CYBR*)")
+            unmount_via_udisks(devnode)
+            return False
+        added = update_assets_to(mount_point, ASSETS_DIR)["added"]
+        _say(f"  [{label}] → added {len(added)} missing file(s)"
+             + (": " + ", ".join(added) if added and not quiet else ""))
+        unmount_via_udisks(devnode)
+        _say(f"DONE  {label}  ✓  \a")
+        return True
     if not is_volume_empty(mount_point):
         _say(f"SKIP  {mount_point}  (not empty — already provisioned?)")
         unmount_via_udisks(devnode)
@@ -219,7 +251,7 @@ def initial_sweep_parallel(submit):
         submit(f"/dev/{name}", label)
 
 
-def watch_udev(quiet, once, max_workers):
+def watch_udev(quiet, once, max_workers, update=False):
     """Block on udev block-device add events; dispatch each CYBR* to a
     thread-pool worker so multiple badges plugged into a hub process
     in parallel (USB bus + host filesystems are I/O-bound, GIL is
@@ -248,7 +280,7 @@ def watch_udev(quiet, once, max_workers):
 
     def submit(devnode, label):
         def worker():
-            ok = process_device(devnode, label, quiet=quiet)
+            ok = process_device(devnode, label, quiet=quiet, update=update)
             if ok:
                 with success_lock:
                     success_count[0] += 1
@@ -303,7 +335,7 @@ def candidate_mount_roots():
     yield Path("/media")
 
 
-def watch_inotify_fallback(quiet, once, max_workers):
+def watch_inotify_fallback(quiet, once, max_workers, update=False):
     """If udev monitoring fails, fall back to watching mount-point dirs.
 
     This catches volumes the desktop env auto-mounts, but won't see
@@ -343,7 +375,7 @@ def watch_inotify_fallback(quiet, once, max_workers):
 
     def submit(devnode, label):
         def worker():
-            ok = process_device(devnode, label, quiet=quiet)
+            ok = process_device(devnode, label, quiet=quiet, update=update)
             if ok and once:
                 done_event.set()
         pool.submit(worker)
@@ -398,6 +430,9 @@ def main():
                         help="Exit after the first successful copy.")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress per-file progress output.")
+    parser.add_argument("--update", action="store_true",
+                        help="Update mode: accept non-empty CYBR* volumes and copy "
+                             "only the files missing on them.  Never overwrites.")
     parser.add_argument("--fallback", action="store_true",
                         help="Force the inotify mount-point fallback (debug).")
     parser.add_argument("-j", "--jobs", type=int, default=8,
@@ -417,15 +452,15 @@ def main():
     try:
         if args.fallback:
             watch_inotify_fallback(quiet=args.quiet, once=args.once,
-                                   max_workers=args.jobs)
+                                   max_workers=args.jobs, update=args.update)
         else:
             try:
                 watch_udev(quiet=args.quiet, once=args.once,
-                           max_workers=args.jobs)
+                           max_workers=args.jobs, update=args.update)
             except (RuntimeError, FileNotFoundError) as e:
                 print(f"WARN  udev unavailable: {e}", file=sys.stderr)
                 watch_inotify_fallback(quiet=args.quiet, once=args.once,
-                                       max_workers=args.jobs)
+                                       max_workers=args.jobs, update=args.update)
     except KeyboardInterrupt:
         print("\nBye.")
 
