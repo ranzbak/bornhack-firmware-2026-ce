@@ -1145,7 +1145,8 @@ mod zone_check {
             s.mood = 0;
             seen.insert(sig(&s));
         }
-        assert!(seen.len() >= 7, "health zones: {}", seen.len());
+        // 0 | 1..24 | 25..29 | 30..32 | 33..44 | 45..49 | 50..59 (below the ceiling 80 at fitness 55)
+        assert_eq!(seen.len(), 7, "health zones");
         let (mut a, mut b) = (calm(), calm());
         a.is_sleeping = true;
         b.diabetic = true;
@@ -1154,6 +1155,47 @@ mod zone_check {
         let mut c = calm();
         c.health = 65535;
         assert_ne!(sig(&c), sig(&calm()), "above vs below the ceiling");
+    }
+
+    #[test]
+    fn mood_meeting_a_falling_target_does_not_hide_a_line() {
+        // Mood climbs at MOOD_STEP below a falling target, meets it, follows it
+        // down: crosses a line and comes back with equal end signatures.
+        let mut s = calm();
+        s.fullness = pct(30);
+        s.health = pct(35);
+        s.mood = pct(45);
+        equivalent("roundtrip", &s, 300);
+        for m0 in [41, 43, 57, 59, 61, 21, 23, 37, 39] {
+            for (full, health) in [(30, 35), (30, 20), (36, 40), (37, 45)] {
+                let mut s = calm();
+                s.fullness = pct(full);
+                s.health = pct(health);
+                s.mood = pct(m0);
+                equivalent(&format!("full {full} health {health} mood {m0}"), &s, 300);
+            }
+        }
+    }
+
+    #[test]
+    fn target_clamped_at_zero_is_a_zone() {
+        let mut s = calm();
+        s.fullness = pct(97);
+        s.hydration = (MAX as f32 * 0.997) as u16;
+        s.fun = pct(86);
+        s.booze = pct(37);
+        s.mood = 0;
+        equivalent("target at 0", &s, 132);
+    }
+
+    #[test]
+    fn calm_pet_over_half_a_day_costs_few_advances() {
+        let s = calm();
+        let mut f = s.clone();
+        bornhack_aegg::game::engine::ADVANCE_CALLS.with(|c| c.set(0));
+        f.update(720 * 6);
+        let n = bornhack_aegg::game::engine::ADVANCE_CALLS.with(|c| c.get());
+        assert!(n <= 200, "{n} advance calls");
     }
 
     #[test]

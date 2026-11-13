@@ -28,6 +28,12 @@ pub use drink::DrinkKind;
 pub use food::FoodKind;
 pub use to_display::DisplayAnim;
 
+/// Test hook: `advance` calls made by `update` (trials included).
+#[cfg(feature = "simulator")]
+thread_local! {
+    pub static ADVANCE_CALLS: core::cell::Cell<u32> = const { core::cell::Cell::new(0) };
+}
+
 /// Engine ticks per simulated minute.
 const TICKS_PER_MINUTE: u32 = 6;
 
@@ -540,21 +546,33 @@ impl GameState {
         while minutes > 0 {
             let mut dt = solver::seg_len(self, minutes).clamp(1, minutes);
             // Mood and health crossing a line of their own is not bounded by
-            // the solver: halve the segment while a trial advance changes the
-            // signature. At most log2(dt) trials, each a closed-form step on a
-            // copy, so a long gap on the badge still costs a handful of steps.
+            // the solver: shrink the segment until a trial advance on a copy
+            // keeps the signature AND mood cannot have met its target midway
+            // (it started on it, or moved the full step all the way), since
+            // meeting a falling target turns mood round and can cross a line
+            // and return with equal end signatures (R22a). At most log2(dt)
+            // trials, each a closed-form step, so a long gap on the badge
+            // still costs a handful of steps, not one per minute.
             let before = solver::sig(self);
+            let (m0, t0) = (self.mood as i32, regime::mood_target(self));
             while dt > 1 {
                 let mut trial = self.clone();
                 advance::advance(&mut trial, dt);
-                // A target moving faster than mood can follow also needs
-                // shorter segments (R22).
-                let drift = (regime::mood_target(&trial) - regime::mood_target(self)).unsigned_abs();
-                if solver::sig(&trial) == before && drift <= thresholds::MOOD_STEP() as u32 * dt {
+                #[cfg(feature = "simulator")]
+                ADVANCE_CALLS.with(|c| c.set(c.get() + 1));
+                let (m1, t1) = (trial.mood as i32, regime::mood_target(&trial));
+                // Full step all the way, and the target (linear inside a
+                // segment) stayed on the far side of mood at both ends, so it
+                // was never met midway.
+                let full_step = (m1 - m0).unsigned_abs() == thresholds::MOOD_STEP() as u32 * dt
+                    && if m1 > m0 { t0 >= m0 && t1 >= m1 } else { t0 <= m0 && t1 <= m1 };
+                if solver::sig(&trial) == before && (m0 == t0 || full_step) {
                     break;
                 }
                 dt = dt.div_ceil(2);
             }
+            #[cfg(feature = "simulator")]
+            ADVANCE_CALLS.with(|c| c.set(c.get() + 1));
             advance::advance(self, dt);
             minutes -= dt;
         }

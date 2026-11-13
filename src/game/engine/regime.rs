@@ -152,6 +152,12 @@ pub fn rates(s: &GameState) -> [i32; NEEDS] {
 /// its band. The 3/2 and 1/2 weights are structure (how much a need hurts
 /// relative to its distance), not balance, so they stay literals.
 pub fn mood_target(s: &GameState) -> i32 {
+    needs::clamp_level(MAX - mood_penalty(s))
+}
+
+/// Total mood penalty before the clamp to the level range; `>= MAX` means the
+/// target sits at 0 (a kink the segment solver tracks through `sig`).
+pub fn mood_penalty(s: &GameState) -> i32 {
     let gap = |x: i32| x.max(0);
     let awake = !s.is_sleeping;
     let (full, water, energy, fun) = (s.fullness as i32, s.hydration as i32, s.energy as i32, s.fun as i32);
@@ -184,7 +190,7 @@ pub fn mood_target(s: &GameState) -> i32 {
             t::MOOD_PEN_CRAVING_PCT(),
         )
     };
-    needs::clamp_level(MAX - pen)
+    pen
 }
 
 /// Highest health the pet can recover to: steps up with fitness; an

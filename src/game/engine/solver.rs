@@ -9,7 +9,7 @@
 
 use super::advance::{LEAVING_SCALE, SLOW_SCALE};
 use super::needs::{self, MAX, NEEDS, Need, P};
-use super::regime::{energy_cap, health_ceiling, rates};
+use super::regime::{energy_cap, health_ceiling, mood_penalty, rates};
 use super::thresholds as t;
 use super::{GameState, Phase};
 
@@ -270,7 +270,8 @@ pub fn seg_len(s: &GameState, max: u32) -> u32 {
 /// - `MOOD_HEALTH_FLOOR_PCT`: `mood_target` term `floor - health`;
 /// - `sign(health - health_ceiling)`: recovery up to the ceiling, decay above.
 ///
-/// Flags: asleep, gone, dependent, diabetic, hangover, deprived.
+/// Flags: asleep, gone, dependent, diabetic, hangover, deprived, and "target
+/// clamped at 0" (`mood_penalty >= MAX`, a kink in `mood_target`).
 pub fn sig(s: &GameState) -> u32 {
     let (mood, health) = (s.mood as i32, s.health as i32);
     let mood_lines = [
@@ -295,6 +296,7 @@ pub fn sig(s: &GameState) -> u32 {
         s.hangover_min > 0,
         s.deprived,
         health == 0,
+        mood_penalty(s) >= MAX,
     ];
     let mut bits = 0u32;
     let mut push = |on: bool| bits = bits << 1 | on as u32;
