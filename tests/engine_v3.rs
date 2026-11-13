@@ -1359,3 +1359,233 @@ mod rounding_margin {
         assert_eq!(bad, 0, "{bad} of {cand} near-step states differ");
     }
 }
+
+mod doses_food_drink {
+    use bornhack_aegg::game::engine::needs::P;
+    use bornhack_aegg::game::engine::thresholds::{DRINK_DURATION, FEED_DURATION, HATCHING_TICKS};
+    use bornhack_aegg::game::engine::{Action, DrinkKind, FoodKind, GameState, PetKind, Phase};
+
+    fn pct(v: i32) -> i32 {
+        v * P
+    }
+
+    fn pet() -> GameState {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        assert_eq!(s.phase, Phase::Active);
+        s.is_sleeping = false;
+        s.tick_rem = 0;
+        s.mood = pct(50) as u16;
+        s.energy = pct(90) as u16;
+        s.fullness = pct(50) as u16;
+        s.hydration = pct(50) as u16;
+        s.weight = pct(50) as u16;
+        s.dirt = pct(10) as u16;
+        s.fitness = pct(50) as u16;
+        s.fun = pct(50) as u16;
+        s
+    }
+
+    /// Let the running action's animation run out, exactly.
+    fn finish(s: &mut GameState, ticks: u8) {
+        let now = s.last_update_tick + ticks as u32;
+        s.update(now);
+        assert_eq!(s.active_action, None);
+    }
+
+    fn eat(s: &mut GameState, f: FoodKind) {
+        assert!(s.feed(f));
+        finish(s, FEED_DURATION());
+    }
+
+    fn sip(s: &mut GameState, d: DrinkKind) {
+        assert!(s.drink(d));
+        finish(s, DRINK_DURATION());
+    }
+
+    #[test]
+    fn overeating_becomes_food_coma_and_weight() {
+        let mut s = pet();
+        s.fullness = pct(80) as u16;
+        eat(&mut s, FoodKind::Pizza);
+        // 80 + 40 = 120 % counts in full, the stored level is capped.
+        assert_eq!(s.fullness, 65535);
+        let excess = pct(120) - pct(78);
+        assert_eq!(s.energy as i32, pct(90) - excess / 2);
+        assert_eq!(s.weight as i32, pct(52) + excess / 4);
+        assert_eq!(s.dirt as i32, pct(20));
+        assert_eq!(s.mood as i32, pct(58));
+        assert_eq!(s.junk_min, 180);
+    }
+
+    #[test]
+    fn meal_inside_the_band_has_no_coma() {
+        let mut s = pet();
+        eat(&mut s, FoodKind::Salad);
+        assert_eq!(s.fullness as i32, pct(70));
+        assert_eq!(s.energy as i32, pct(90));
+        assert_eq!(s.hydration as i32, pct(58));
+        assert_eq!(s.fitness as i32, pct(51));
+        assert_eq!(s.junk_min, 0, "healthy food is not a treat");
+        assert_eq!(s.mood as i32, pct(50));
+    }
+
+    #[test]
+    fn water_refused_above_85_and_never_past_90() {
+        let mut s = pet();
+        s.hydration = pct(86) as u16;
+        assert!(!s.drink(DrinkKind::Water));
+        assert_eq!(s.active_action, None);
+
+        let mut s = pet();
+        s.hydration = pct(85) as u16;
+        sip(&mut s, DrinkKind::Water);
+        assert_eq!(s.hydration as i32, pct(90), "only 5 taken");
+        assert_eq!(s.fullness as i32, pct(50), "under 15 taken: no belly");
+
+        let mut s = pet();
+        s.hydration = pct(70) as u16;
+        s.booze = pct(20) as u16;
+        s.hangover_min = 100;
+        s.groggy_min = 20;
+        sip(&mut s, DrinkKind::Water);
+        assert_eq!(s.hydration as i32, pct(90));
+        assert_eq!(s.fullness as i32, pct(52));
+        assert_eq!(s.booze as i32, pct(15));
+        assert_eq!(s.hangover_min, 40);
+        assert_eq!(s.groggy_min, 0);
+
+        let mut s = pet();
+        s.hydration = pct(30) as u16;
+        sip(&mut s, DrinkKind::Water);
+        assert_eq!(s.hydration as i32, pct(60), "at most 30 per glass");
+    }
+
+    #[test]
+    fn second_treat_within_three_hours_gives_a_third() {
+        let mut s = pet();
+        eat(&mut s, FoodKind::Frikandel);
+        assert_eq!(s.mood as i32, pct(56));
+        eat(&mut s, FoodKind::Pizza);
+        assert_eq!(s.mood as i32, pct(58), "8 / 3 = 2");
+        assert_eq!(s.junk_min, 180);
+    }
+
+    #[test]
+    fn treat_on_ozempic_gives_no_mood_but_starts_the_window() {
+        let mut s = pet();
+        s.ozempic_min = 100;
+        eat(&mut s, FoodKind::Cake);
+        assert_eq!(s.mood as i32, pct(50));
+        assert_eq!(s.junk_min, 180);
+        assert_eq!(s.weight as i32, pct(53));
+    }
+
+    #[test]
+    fn beer_on_a_tired_pet_adds_22_booze() {
+        let mut s = pet();
+        s.energy = pct(20) as u16;
+        sip(&mut s, DrinkKind::Beer);
+        assert_eq!(s.booze as i32 / P, 22); // 15 * 3 / 2
+        assert_eq!(s.hydration as i32, pct(70));
+        assert_eq!(s.fullness as i32, pct(52));
+        assert_eq!(s.weight as i32, pct(51));
+
+        let mut s = pet();
+        sip(&mut s, DrinkKind::Beer);
+        assert_eq!(s.booze as i32, pct(15));
+        assert_eq!(s.mood as i32, pct(62));
+        assert_eq!(s.energy as i32, pct(95));
+        assert_eq!(s.fun as i32, pct(55));
+    }
+
+    #[test]
+    fn drunk_pet_gets_less_out_of_a_drink_and_a_dependent_one_half() {
+        let mut s = pet();
+        s.booze = pct(50) as u16;
+        sip(&mut s, DrinkKind::Whiskey);
+        assert_eq!(s.mood as i32, pct(50) + 20 * P * 50 / 100);
+
+        let mut s = pet();
+        s.dependent = true;
+        sip(&mut s, DrinkKind::Wine);
+        assert_eq!(s.mood as i32, pct(50) + 15 * P * 50 / 100);
+    }
+
+    #[test]
+    fn beer_during_rehab_is_a_relapse() {
+        let mut s = pet();
+        s.rehab_min = 1000;
+        sip(&mut s, DrinkKind::Beer);
+        assert_eq!(s.rehab_min, 0);
+        assert_eq!(s.mood as i32, pct(50 - 20 + 12));
+    }
+
+    #[test]
+    fn cola_is_a_sugar_rush() {
+        let mut s = pet();
+        s.energy = pct(60) as u16;
+        sip(&mut s, DrinkKind::Cola);
+        assert_eq!(s.hydration as i32, pct(70));
+        assert_eq!(s.fullness as i32, pct(52));
+        assert_eq!(s.energy as i32, pct(68));
+        assert_eq!(s.mood as i32, pct(53));
+        assert_eq!(s.weight as i32, pct(51));
+        assert_eq!(s.booze, 0);
+    }
+
+    #[test]
+    fn care_action_wakes_a_sleeping_pet_grumpy_under_50() {
+        let mut s = pet();
+        s.is_sleeping = true;
+        s.energy = pct(30) as u16;
+        assert!(s.feed(FoodKind::Apple));
+        assert!(!s.is_sleeping);
+        assert_eq!(s.mood as i32, pct(40), "grumpy: -10");
+
+        let mut s = pet();
+        s.is_sleeping = true;
+        s.energy = pct(60) as u16;
+        assert!(s.feed(FoodKind::Apple));
+        assert!(!s.is_sleeping);
+        assert_eq!(s.mood as i32, pct(50), "rested enough: not grumpy");
+    }
+
+    #[test]
+    fn refused_action_costs_no_hax() {
+        let mut s = pet();
+        s.is_sleeping = true;
+        s.hydration = pct(90) as u16;
+        s.money_enabled = true;
+        s.money = 100;
+        assert!(!s.drink(DrinkKind::Water));
+        assert_eq!(s.money, 100);
+        assert!(s.is_sleeping, "a refused action does not wake the pet");
+        assert_eq!(s.active_action, None);
+    }
+
+    #[test]
+    fn idle_remainder_is_not_spent_on_an_action() {
+        let mut s = pet();
+        s.tick_rem = 5;
+        let (full0, water0) = (s.fullness, s.hydration);
+        assert!(s.feed(FoodKind::Apple));
+        assert_eq!(s.active_action, Some(Action::Feed));
+        let now = s.last_update_tick + FEED_DURATION() as u32;
+        s.update(now);
+        assert_eq!(s.active_action, None, "dose applied on the last tick");
+        assert_eq!(s.tick_rem, 5);
+        assert_eq!(s.fullness as i32, full0 as i32 + pct(25), "no needs aged");
+        assert_eq!(s.hydration as i32, water0 as i32 + pct(8));
+    }
+
+    #[test]
+    fn ticks_after_the_action_age_the_pet_from_the_remainder() {
+        let mut s = pet();
+        s.tick_rem = 5;
+        assert!(s.feed(FoodKind::Apple));
+        let now = s.last_update_tick + FEED_DURATION() as u32 + 1;
+        s.update(now);
+        assert_eq!(s.tick_rem, 0, "5 + 1 = one whole minute");
+    }
+}

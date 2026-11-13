@@ -1,12 +1,4 @@
-//! Drink choices for the Drink action.
-//!
-//! Same shape as `FoodKind`: each drink scales the baseline
-//! `DRINK_DRUNK_GAIN` / `DRINK_WEIGHT_GAIN` thresholds by a percentage.
-//! `Beer` sits at 100% across the board —
-//! the reference point the others scale against. `Water` and `Cola`
-//! are non-alcoholic (0% drunk gain); the alcoholic drinks scale up
-//! from there, feeding the same overweight/diabetes-style mechanic:
-//! staying drunk for a sustained period leads to permanent alcoholism.
+//! Drink choices for the Drink action. What each drink does is in `doses`.
 
 /// Which drink the player picked for the current Drink action.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -38,33 +30,10 @@ impl DrinkKind {
         }
     }
 
-    /// Whether this drink raises `drunk` at all (Water/Cola never do —
-    /// see `multipliers()`). Used to pick an accurate post-drink toast
-    /// instead of always showing "+drunk".
+    /// Whether this drink raises `booze` at all (Water/Cola never do). Used
+    /// to pick an accurate post-drink toast.
     pub fn is_alcoholic(self) -> bool {
         !matches!(self, DrinkKind::Water | DrinkKind::Cola)
-    }
-
-    /// (drunk_gain_pct, weight_gain_pct) — applied as `base * pct / 100`
-    /// against the DRINK_* thresholds.
-    fn multipliers(self) -> (u32, u32) {
-        match self {
-            DrinkKind::Water => (0, 0),
-            DrinkKind::Cola => (0, 80),
-            DrinkKind::Beer => (100, 100),
-            DrinkKind::Wine => (150, 70),
-            DrinkKind::Whiskey => (250, 30),
-        }
-    }
-
-    pub fn scale_drunk_gain(self, base: u16) -> u16 {
-        let (pct, _) = self.multipliers();
-        ((base as u32 * pct) / 100).min(u16::MAX as u32) as u16
-    }
-
-    pub fn scale_weight_gain(self, base: u16) -> u16 {
-        let (_, pct) = self.multipliers();
-        ((base as u32 * pct) / 100).min(u16::MAX as u32) as u16
     }
 
     /// HAX price to buy this drink. Only Water is "healthy" (pricier).
@@ -98,17 +67,5 @@ mod tests {
         assert!(DrinkKind::Beer.is_alcoholic());
         assert!(DrinkKind::Wine.is_alcoholic());
         assert!(DrinkKind::Whiskey.is_alcoholic());
-    }
-
-    #[test]
-    fn is_alcoholic_matches_zero_drunk_gain() {
-        for drink in DrinkKind::ALL {
-            let raises_drunk = drink.scale_drunk_gain(1000) > 0;
-            assert_eq!(
-                drink.is_alcoholic(),
-                raises_drunk,
-                "{drink:?}: is_alcoholic() disagrees with scale_drunk_gain()"
-            );
-        }
     }
 }

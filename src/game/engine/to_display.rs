@@ -112,6 +112,8 @@ impl GameState {
                 Action::Rehab => DisplayAnim::Rehab,
                 Action::Drink => DisplayAnim::Drinking,
                 Action::OnlyPets => DisplayAnim::OnlyPets,
+                // Placeholder until Task 9b gives Wash and Relax their own animations.
+                Action::Wash | Action::Relax => DisplayAnim::Playing,
             };
         }
         if self.is_sleeping {

@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! # make food fill more, halve the starvation damage
-//! FEED_HUNGER_RELIEF=4000
+//! MOOD_STEP=40
 //! DMG_FULL_LOW_PM=20
 //! ```
 //!
@@ -99,18 +99,18 @@ mod tests {
         let mut t = Thresholds::CLASSIC;
         let n = apply_overrides(
             &mut t,
-            b"# comment\nFEED_HUNGER_RELIEF = 4000\nUNKNOWN = 99\nDMG_FULL_LOW_PM=2\n",
+            b"# comment\nMOOD_STEP = 40\nUNKNOWN = 99\nDMG_FULL_LOW_PM=2\n",
         );
         assert_eq!(n, 2);
-        assert_eq!(t.FEED_HUNGER_RELIEF, 4000);
+        assert_eq!(t.MOOD_STEP, 40);
         assert_eq!(t.DMG_FULL_LOW_PM, 2);
     }
 
     #[test]
     fn clamps_u16_overflow() {
         let mut t = Thresholds::CLASSIC;
-        apply_overrides(&mut t, b"FEED_HUNGER_RELIEF=999999\n");
-        assert_eq!(t.FEED_HUNGER_RELIEF, u16::MAX);
+        apply_overrides(&mut t, b"MOOD_STEP=999999\n");
+        assert_eq!(t.MOOD_STEP, u16::MAX);
     }
 
     #[test]

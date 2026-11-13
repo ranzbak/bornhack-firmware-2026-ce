@@ -12,6 +12,7 @@
 
 pub mod advance;
 pub mod anim_files;
+pub mod doses;
 pub mod drink;
 pub mod food;
 pub mod needs;
@@ -155,6 +156,10 @@ pub enum Action {
     /// "Only pets" work/hobby action — earns HAX. Only reachable when
     /// `money_enabled`. See `GameState::only_pets`.
     OnlyPets,
+    /// Bath: takes the dirt off (dose in Task 9b).
+    Wash,
+    /// Lie back: trades fun for calm (dose in Task 9b).
+    Relax,
 }
 
 impl Action {
@@ -166,10 +171,9 @@ impl Action {
     /// silently discarding an in-progress Exercise/Medicate/Ozempic/
     /// Drink/Rehab action on every reboot that landed mid-action.
     ///
-    /// `2` is a deliberate gap — it used to be `Relax`, removed along
-    /// with the `drained` stat it existed to relieve. Left unassigned
-    /// (rather than renumbering Play onward) so old persisted bytes for
-    /// the other actions keep meaning across the removal.
+    /// `2` is `Relax` again: the byte it had before it was removed with the
+    /// `drained` stat, so old persisted bytes keep meaning. `Wash` is new
+    /// and takes the next free byte, `10`.
     #[allow(dead_code)] // used again by the v3 save format (task 11)
     fn to_u8(self) -> u8 {
         match self {
@@ -182,6 +186,8 @@ impl Action {
             Action::Drink => 7,
             Action::Rehab => 8,
             Action::OnlyPets => 9,
+            Action::Wash => 10,
+            Action::Relax => 2,
         }
     }
 
@@ -190,7 +196,7 @@ impl Action {
         match v {
             0 => Some(Action::Feed),
             1 => Some(Action::Heal),
-            2 => None, // formerly Relax — see `to_u8`.
+            2 => Some(Action::Relax),
             3 => Some(Action::Play),
             4 => Some(Action::Exercise),
             5 => Some(Action::Medicate),
@@ -198,6 +204,7 @@ impl Action {
             7 => Some(Action::Drink),
             8 => Some(Action::Rehab),
             9 => Some(Action::OnlyPets),
+            10 => Some(Action::Wash),
             _ => None,
         }
     }
@@ -315,9 +322,8 @@ pub struct GameState {
     // Action state.
     pub active_action: Option<Action>,
     /// Which food is being eaten during an in-progress `Action::Feed`.
-    /// Transient (not persisted) — only meaningful mid-action; defaults
-    /// to `FoodKind::Apple`-equivalent multipliers if `None` (e.g. a
-    /// reboot mid-feed for the remaining tick or two of that action).
+    /// Transient (not persisted) — only meaningful mid-action; if `None`
+    /// when the action ends (a reboot mid-feed) the meal is lost.
     pub active_food: Option<FoodKind>,
     /// Which drink is being drunk during an in-progress `Action::Drink`.
     /// Same transient/not-persisted treatment as `active_food`.
@@ -535,12 +541,13 @@ impl GameState {
             Phase::Leaving | Phase::Active => {}
         }
 
-        // A running action eats its ticks first (v2 effects land in a later
-        // task); without one nothing is consumed.
-        let mut ticks = total_delta + self.tick_rem as u32;
+        // A running action eats the fresh ticks first and does not age the
+        // needs; the sub-minute remainder is never spent on it.
+        let mut ticks = total_delta;
         if self.active_action.is_some() {
             ticks = self.consume_action_ticks(ticks);
         }
+        ticks += self.tick_rem as u32;
         let mut minutes = ticks / TICKS_PER_MINUTE;
         self.tick_rem = (ticks % TICKS_PER_MINUTE) as u8;
         // Minutes still to step singly after a runaway target was seen.
@@ -605,8 +612,18 @@ impl GameState {
     /// Consume action ticks from delta, applying action effects.
     /// Returns remaining delta after action ticks are consumed.
     fn consume_action_ticks(&mut self, delta: u32) -> u32 {
-        let _ = delta;
-        todo!("BornPets v2 plan 1: v2 action effects (later task)")
+        let used = delta.min(self.action_ticks_remaining as u32);
+        self.action_ticks_remaining -= used as u8;
+        if self.action_ticks_remaining == 0 {
+            if let Some(action) = self.active_action.take() {
+                // A refusal leaves the pet untouched; the starters already
+                // turned those away, so only a changed state lands here.
+                let _ = doses::apply(self, action);
+            }
+            self.active_food = None;
+            self.active_drink = None;
+        }
+        delta - used
     }
 }
 
@@ -620,31 +637,26 @@ impl GameState {
         self.phase == Phase::Active || self.phase == Phase::Leaving
     }
 
-    /// Shared gate for every timed action starter: the pet must be alive and
-    /// awake, no action running, and this action's cooldown expired. Then,
-    /// when money is enabled, the optional `price` is charged (only after
-    /// every other check passed, so a rejected action never costs HAX; an
-    /// unaffordable one is rejected outright, see `spend_money`). On success
-    /// the action and its duration are set. Callers with extra state
-    /// (`active_food`, `active_drink`) set it after a `true` return.
-    fn start_action(
-        &mut self,
-        action: Action,
-        cooldown: u16,
-        price: Option<u32>,
-        duration: u8,
-    ) -> bool {
-        if !self.is_alive() || self.is_sleeping {
+    /// Shared gate for every timed action starter: the pet must be alive
+    /// with no action running, and the optional `price` affordable when money
+    /// is enabled. Callers turn their `doses::refusal` away before calling.
+    /// Only then is a sleeping pet woken (grumpy, by the player) and the
+    /// price charged, so a rejected action costs nothing and wakes nobody.
+    /// On success the action and its duration are set. Callers with extra
+    /// state (`active_food`, `active_drink`) set it after a `true` return.
+    fn start_action(&mut self, action: Action, price: Option<u32>, duration: u8) -> bool {
+        if !self.is_alive() || self.active_action.is_some() {
             return false;
         }
-        if self.active_action.is_some() || cooldown > 0 {
-            return false;
-        }
+        let price = price.filter(|_| self.money_enabled);
         if let Some(price) = price
-            && self.money_enabled
-            && !self.spend_money(price)
+            && !self.can_afford(price)
         {
             return false; // can't afford — action rejected
+        }
+        advance::wake(self, true);
+        if let Some(price) = price {
+            self.spend_money(price);
         }
         self.active_action = Some(action);
         self.action_ticks_remaining = duration;
@@ -655,7 +667,7 @@ impl GameState {
     /// available.
     pub fn feed(&mut self, food: FoodKind) -> bool {
         let price = food.hax_price(self.hard_mode);
-        if !self.start_action(Action::Feed, 0, Some(price), FEED_DURATION()) {
+        if !self.start_action(Action::Feed, Some(price), FEED_DURATION()) {
             return false;
         }
         self.active_food = Some(food);
@@ -664,37 +676,25 @@ impl GameState {
 
     /// Start the heal action (Aspirine costs HAX).
     pub fn heal(&mut self) -> bool {
-        self.start_action(
-            Action::Heal,
-            0,
-            Some(ASPIRINE_HAX_COST),
-            HEAL_DURATION(),
-        )
+        self.start_action(Action::Heal, Some(ASPIRINE_HAX_COST), HEAL_DURATION())
     }
 
     /// Start the play action.
     pub fn play(&mut self) -> bool {
-        self.start_action(
-            Action::Play,
-            0,
-            Some(PLAY_HAX_COST),
-            PLAY_DURATION(),
-        )
+        self.start_action(Action::Play, Some(PLAY_HAX_COST), PLAY_DURATION())
     }
 
     /// Send the pet to "Only pets" to earn HAX. Timed action like Play.
     pub fn only_pets(&mut self) -> bool {
-        self.start_action(Action::OnlyPets, self.cooldown_onlypets, None, PLAY_DURATION())
+        if self.cooldown_onlypets > 0 {
+            return false;
+        }
+        self.start_action(Action::OnlyPets, None, PLAY_DURATION())
     }
 
     /// Start the exercise action — the primary relief valve for `weight`.
     pub fn exercise(&mut self) -> bool {
-        self.start_action(
-            Action::Exercise,
-            0,
-            None,
-            EXERCISE_DURATION(),
-        )
+        self.start_action(Action::Exercise, None, EXERCISE_DURATION())
     }
 
     /// Administer diabetes medication.  Only meaningful once `diabetic`
@@ -702,12 +702,11 @@ impl GameState {
     /// protection window during which the diabetes sick-penalty is
     /// suppressed.
     pub fn medicate(&mut self) -> bool {
-        if !self.diabetic {
+        if !self.diabetic || self.med_cd_min > 0 {
             return false;
         }
         self.start_action(
             Action::Medicate,
-            self.med_cd_min,
             Some(medication_price(self.hard_mode)),
             MEDICATE_DURATION(),
         )
@@ -717,9 +716,11 @@ impl GameState {
     /// treatment than Exercise. Unlike `medicate()`, this is *not*
     /// gated on being diabetic — any pet can take it.
     pub fn ozempic(&mut self) -> bool {
+        if self.ozempic_cd_min > 0 {
+            return false;
+        }
         self.start_action(
             Action::Ozempic,
-            self.ozempic_cd_min,
             Some(medication_price(self.hard_mode)),
             OZEMPIC_DURATION(),
         )
@@ -728,12 +729,10 @@ impl GameState {
     /// Start the drink action with the chosen drink.  Returns false if
     /// not available.
     pub fn drink(&mut self, drink: DrinkKind) -> bool {
-        if !self.start_action(
-            Action::Drink,
-            0,
-            Some(drink.hax_price()),
-            DRINK_DURATION(),
-        ) {
+        if doses::refusal(self, Action::Drink, Some(drink)).is_some() {
+            return false;
+        }
+        if !self.start_action(Action::Drink, Some(drink.hax_price()), DRINK_DURATION()) {
             return false;
         }
         self.active_drink = Some(drink);
@@ -743,12 +742,11 @@ impl GameState {
     /// Administer rehab treatment for alcoholism.  Only meaningful once
     /// `alcoholic` is set — mirrors `medicate()`.
     pub fn rehab(&mut self) -> bool {
-        if !self.dependent {
+        if !self.dependent || self.rehab_min > 0 {
             return false;
         }
         self.start_action(
             Action::Rehab,
-            self.rehab_min,
             Some(rehab_price(self.hard_mode)),
             REHAB_DURATION(),
         )
