@@ -97,3 +97,54 @@ fn new_egg_starts_inside_every_band() {
     assert!((s.dirt as i32) < dirt_hi(), "dirt {}", s.dirt);
     assert!(s.fitness as i32 >= fit_lo(), "fitness {}", s.fitness);
 }
+
+mod regime_rates {
+    use bornhack_aegg::game::engine::needs::{MAX, P};
+    use bornhack_aegg::game::engine::regime::{energy_cap, rates, sleep_quality_pm, thirst_pct};
+    use bornhack_aegg::game::engine::{GameState, PetKind};
+
+    fn egg() -> GameState {
+        GameState::new_egg(1, PetKind(0))
+    }
+
+    #[test]
+    fn awake_rates_in_band() {
+        let mut s = egg();
+        s.is_sleeping = false;
+        assert_eq!(rates(&s), [-54, -45, -36, -40, 8, -36, -80, -4, -1]);
+        assert_eq!(thirst_pct(&s), 100);
+        assert_eq!(energy_cap(&s), MAX);
+    }
+
+    #[test]
+    fn hung_over_sluggish_pet_drains_faster() {
+        let mut s = egg();
+        s.is_sleeping = false;
+        s.fitness = (30 * P) as u16;
+        s.hangover_min = 10;
+        assert_eq!(rates(&s)[2], -36 * 1250 / 1000 * 125 / 100);
+        assert_eq!(rates(&s)[2], -56);
+    }
+
+    #[test]
+    fn unsettled_sleep_recovers_at_600() {
+        let mut s = egg();
+        s.is_sleeping = true;
+        s.energy = (20 * P) as u16;
+        assert_eq!(sleep_quality_pm(&s), 1000);
+        assert_eq!(rates(&s)[2], 120);
+        s.booze = (35 * P) as u16;
+        assert_eq!(sleep_quality_pm(&s), 600);
+        assert_eq!(rates(&s)[2], 72);
+    }
+
+    #[test]
+    fn deprived_pet_stops_recovering_at_70() {
+        let mut s = egg();
+        s.is_sleeping = true;
+        s.deprived = true;
+        s.energy = (70 * P) as u16;
+        assert_eq!(energy_cap(&s), 70 * P);
+        assert_eq!(rates(&s)[2], 0);
+    }
+}

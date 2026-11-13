@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! # speed up hunger decay, slow down sickness
-//! HUNGER_RATE=4
+//! FEED_HUNGER_RELIEF=4000
 //! SICK_RATE=2
 //! ```
 //!
@@ -99,18 +99,18 @@ mod tests {
         let mut t = Thresholds::CLASSIC;
         let n = apply_overrides(
             &mut t,
-            b"# comment\nHUNGER_RATE = 4\nUNKNOWN = 99\nSICK_RATE=2\n",
+            b"# comment\nFEED_HUNGER_RELIEF = 4000\nUNKNOWN = 99\nSICK_RATE=2\n",
         );
         assert_eq!(n, 2);
-        assert_eq!(t.HUNGER_RATE, 4);
+        assert_eq!(t.FEED_HUNGER_RELIEF, 4000);
         assert_eq!(t.SICK_RATE, 2);
     }
 
     #[test]
     fn clamps_u16_overflow() {
         let mut t = Thresholds::CLASSIC;
-        apply_overrides(&mut t, b"HUNGER_RATE=999999\n");
-        assert_eq!(t.HUNGER_RATE, u16::MAX);
+        apply_overrides(&mut t, b"FEED_HUNGER_RELIEF=999999\n");
+        assert_eq!(t.FEED_HUNGER_RELIEF, u16::MAX);
     }
 
     #[test]
