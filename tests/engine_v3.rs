@@ -4322,29 +4322,32 @@ mod causes {
     }
 
 
-    /// First warning of really sleeping `s` to its self-wake.
+    /// First warning of really sleeping `s` until rested, then waking it.
     fn real_night(s: &GameState) -> Option<Cause> {
         let mut c = s.clone();
         c.take_causes();
         assert!(c.sleep());
-        c.update(c.last_update_tick + 800 * 6);
-        assert!(!c.is_sleeping);
+        while c.is_sleeping && c.oversleep_min == 0 {
+            let next = c.next_wake_tick().max(c.last_update_tick + 1);
+            c.update(next);
+        }
+        let _ = c.wake();
         first_warning(&c.take_causes())
     }
 
     #[test]
-    fn preview_sleep_is_the_real_night() {
+    fn preview_sleep_is_the_night_slept_until_rested() {
         let night = Some(Cause::BadNight(Unsettled::Drinks));
         // (energy %, booze %, station rest, what the real night warns)
         let cases = [
-            (5, 35, false, None),
-            (30, 35, false, Some(Cause::Groggy)),
+            (30, 0, false, None),
+            (5, 0, false, None),
+            (30, 35, false, None),
             (5, 50, false, night),
             (30, 50, false, night),
             (95, 0, false, Some(Cause::Groggy)),
+            (85, 0, false, Some(Cause::Groggy)),
             (95, 0, true, None),
-            (5, 0, false, None),
-            (30, 0, false, Some(Cause::Groggy)),
         ];
         for (energy, booze, rest, want) in cases {
             let mut s = pet();
@@ -4354,7 +4357,13 @@ mod causes {
                 s.station_rest();
             }
             let tag = format!("energy {energy} booze {booze} rest {rest}");
-            assert_eq!(real_night(&s), want, "the real night: {tag}");
+            let mut real = real_night(&s);
+            // A pet that starts rested oversleeps from the start: that is
+            // the Groggy the preview reports (the dose-free wake gives none).
+            if real.is_none() && energy >= 85 && !s.no_groggy {
+                real = Some(Cause::Groggy);
+            }
+            assert_eq!(real, want, "the real night: {tag}");
             let before = s.clone();
             assert_eq!(s.preview_sleep(), want, "the preview: {tag}");
             assert_eq!(s, before, "{tag}");

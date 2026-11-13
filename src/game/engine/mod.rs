@@ -851,11 +851,15 @@ impl GameState {
         c.causes.iter().copied().find(|cause| cause.is_warning())
     }
 
-    /// First warning cause of the night the pet would have if put to bed now
-    /// and left alone until it wakes itself. Runs the real starter on a clone
-    /// and drives it with the engine's own next-wake computation (closed-form
-    /// segments, no fixed-step polling); `None` when sleep is refused or the
-    /// night is fine.
+    /// First warning cause of a night slept until rested: the pet is put to
+    /// bed through the real starter on a clone, driven by the engine's own
+    /// next-wake computation (event boundaries, no fixed step) until it wakes
+    /// itself or is rested (`oversleep_min > 0`), then woken the way the
+    /// player's Wake-up does. Oversleeping itself is Wake-up's business
+    /// (`preview_wake`), so `Groggy` shows only for a pet that is not tired
+    /// (energy at bedtime at or above `ENERGY_HI_EDGE_PCT`) and has no
+    /// station rest (`no_groggy`). `None` when sleep is refused or the night
+    /// is fine. The run is bounded by `PREVIEW_NIGHT_MAX_WAKES`.
     pub fn preview_sleep(&self) -> Option<causes::Cause> {
         if self.sleep_refusal().is_some() {
             return None;
@@ -866,13 +870,18 @@ impl GameState {
             return None;
         }
         for _ in 0..PREVIEW_NIGHT_MAX_WAKES {
-            if !c.is_sleeping {
+            if !c.is_sleeping || c.oversleep_min > 0 {
                 break;
             }
             let next = c.next_wake_tick().max(c.last_update_tick + 1);
             c.update(next);
         }
-        c.causes.iter().copied().find(|cause| cause.is_warning())
+        let _ = doses::wake_up(&mut c);
+        let warned = c.causes.iter().copied().find(|cause| cause.is_warning());
+        let rested_at_bedtime = self.energy as i32 >= needs::ENERGY_HI_EDGE_PCT as i32 * needs::P;
+        warned.or_else(|| {
+            (rested_at_bedtime && !self.no_groggy).then_some(causes::Cause::Groggy)
+        })
     }
 
     /// First warning cause that waking the pet now would produce; `None` when
