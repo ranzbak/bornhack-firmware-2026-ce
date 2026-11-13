@@ -172,7 +172,16 @@ def update_assets_to(mount_point, assets_dir):
     for src in sorted(assets_dir.iterdir()):
         if not src.is_file() or src.name.lower() in present:
             continue
-        shutil.copy2(src, mount_point / src.name)
+        # Exclusive create: a file that shows up after the listing is
+        # never overwritten.
+        dst = mount_point / src.name
+        try:
+            with open(src, "rb") as fin, open(dst, "xb") as fout:
+                shutil.copyfileobj(fin, fout)
+        except FileExistsError:
+            continue
+        shutil.copystat(src, dst)
+        present.add(src.name.lower())
         added.append(src.name)
     subprocess.run(["sync"], check=False)
     return {"added": added}

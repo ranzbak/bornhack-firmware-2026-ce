@@ -62,6 +62,28 @@ class CopyAssetsTest(unittest.TestCase):
         names = [p.name for p in self.vol.iterdir() if p.name.lower() == "pets.cfg"]
         self.assertEqual(names, ["pets.cfg"])
 
+    def test_update_survives_file_created_after_listing(self):
+        real_iterdir = Path.iterdir
+        racer = self.assets / "010000.PCX"
+
+        def racing_iterdir(path):
+            entries = list(real_iterdir(path))
+            if path == self.vol:
+                # The badge writes the file after we listed the volume.
+                (self.vol / racer.name).write_bytes(b"raced")
+            return iter(entries)
+
+        with mock.patch.object(Path, "iterdir", racing_iterdir):
+            result = self.update()
+        self.assertEqual((self.vol / "010000.PCX").read_bytes(), b"raced")
+        self.assertNotIn("010000.PCX", result["added"])
+
+    def test_update_case_variants_in_assets_do_not_overwrite(self):
+        (self.assets / "extra.pcx").write_bytes(b"lower")
+        (self.assets / "EXTRA.PCX").write_bytes(b"upper")
+        result = self.update()
+        self.assertEqual(len([n for n in result["added"] if n.lower() == "extra.pcx"]), 1)
+
     def test_factory_mode_unchanged(self):
         with mock.patch.object(copy_assets, "ASSETS_DIR", self.assets):
             ok = copy_assets.copy_assets_to(self.vol, label="T", quiet=True)

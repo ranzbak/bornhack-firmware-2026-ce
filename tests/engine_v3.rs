@@ -3010,15 +3010,14 @@ fn template_parses_to_classic_with_no_edits() {
         assert_eq!(n, 1, "key {key} appears {n} times");
     }
 
-    // Uncomment every key line and drop the "(Casual n)" note.
+    // Uncomment every key line the way a player does: strip only the
+    // leading "# ".  The "# Casual n" note stays and must not matter.
     let uncommented: String = template
         .lines()
         .skip(1)
-        .map(|l| {
-            let l = l.strip_prefix("# ").unwrap();
-            format!("{}\n", l.split("   (").next().unwrap())
-        })
+        .map(|l| format!("{}\n", l.strip_prefix("# ").unwrap()))
         .collect();
+    assert!(uncommented.contains("# Casual "));
     // Start from Casual so every row is a real edit.
     let mut values = Thresholds::CASUAL;
     apply_overrides(&mut values, uncommented.as_bytes());
@@ -3033,7 +3032,7 @@ fn template_first_line_and_casual_notes() {
         template.lines().next().unwrap(),
         "# BornPets v3 balance. Uncomment a line to change it. The old firmware keeps using BORNPETS.CFG."
     );
-    assert!(template.contains("# MOOD_STEP=") && template.contains("(Casual "));
+    assert!(template.contains("# MOOD_STEP=") && template.contains("# Casual "));
 }
 
 #[test]
@@ -3066,6 +3065,34 @@ fn no_v3_key_reuses_a_v1_name() {
     for (key, _) in BORNPETS_CFG_KEYS {
         if V1.contains(key) {
             assert!(SAME_MEANING.contains(key), "{key} reuses a v1 name");
+        }
+    }
+}
+
+#[test]
+fn every_cfg_key_sets_its_own_field() {
+    for (key, _) in BORNPETS_CFG_KEYS {
+        let before = Thresholds::CLASSIC;
+        let classic = before.value_of(key).unwrap();
+        // classic+1 may be clamped (e.g. a percent at its top); then use -1.
+        let mut hit = None;
+        for sentinel in [classic + 1, classic.wrapping_sub(1)] {
+            let mut t = before;
+            apply_overrides(&mut t, format!("{key}={sentinel}\n").as_bytes());
+            if t.value_of(key) == Some(sentinel) {
+                hit = Some(t);
+                break;
+            }
+        }
+        let t = hit.unwrap_or_else(|| panic!("{key}: setter clamps both classic+-1"));
+        for (other, _) in BORNPETS_CFG_KEYS {
+            if other != key {
+                assert_eq!(
+                    t.value_of(other),
+                    before.value_of(other),
+                    "setting {key} changed {other}"
+                );
+            }
         }
     }
 }

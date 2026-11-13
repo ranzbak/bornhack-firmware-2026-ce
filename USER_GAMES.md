@@ -57,7 +57,7 @@ If neither preset is your speed you can override individual numbers via a config
    MOOD_STEP=200
    ```
 
-   `BPETS_V3.CFG` already lists every key as a comment, with the Classic value and the Casual value. To use a line, remove the `# ` at the start, remove the `(Casual ...)` note at the end, and set your number.
+   `BPETS_V3.CFG` already lists every key as a comment, with the Classic value and the Casual value. To use a line, remove the `# ` at the start and set your number. The `# Casual ...` note at the end is a comment and can stay.
 
 4. Eject the drive and reboot the badge.
 

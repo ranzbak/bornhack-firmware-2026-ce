@@ -1304,7 +1304,7 @@ mod template {
         for (key, _) in BORNPETS_CFG_KEYS {
             let classic = Thresholds::CLASSIC.value_of(key).expect("key is a field");
             let casual = Thresholds::CASUAL.value_of(key).expect("key is a field");
-            let _ = writeln!(out, "# {key}={classic}   (Casual {casual})");
+            let _ = writeln!(out, "# {key}={classic}   # Casual {casual}");
         }
         out
     }

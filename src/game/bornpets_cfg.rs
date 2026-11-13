@@ -20,7 +20,8 @@ use crate::game::engine::thresholds;
 use crate::game::engine::thresholds::{BORNPETS_CFG_KEYS, Mode, Thresholds};
 
 /// The v3 balance file.  The old firmware keeps its own `BORNPETS.CFG`,
-/// which v3 never reads, writes or deletes.
+/// which v3 never reads, writes or deletes.  The defmt log literals below
+/// must match this name (defmt needs literals); keep them in sync.
 #[cfg(feature = "embassy-core")]
 const CFG_FILE: &str = "BPETS_V3.CFG";
 
