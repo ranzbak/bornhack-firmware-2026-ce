@@ -518,7 +518,10 @@ impl Item {
         use super::lifecycle;
         match self {
             Self::Cancel => close(),
-            Self::ViewStats => STATS_VIEW.store(true, Ordering::Relaxed),
+            Self::ViewStats => {
+                STATS_VIEW.store(true, Ordering::Relaxed);
+                super::note_live_view_drawn();
+            }
             Self::RolledStats => {
                 super::traits_view::open();
                 close();
@@ -1059,6 +1062,7 @@ where
 {
     use super::lifecycle;
     use super::stat_bar::draw_stat_bar;
+    super::note_live_view_drawn();
     use crate::RED;
 
     // Get fresh stats (triggers an update if needed).

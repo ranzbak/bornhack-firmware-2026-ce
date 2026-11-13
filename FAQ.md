@@ -32,7 +32,7 @@ their own:
 | **My QR**, **Name**, **Token**, **Calendar** | No — drawn once, then idle until you press a button | **Lowest** |
 | Messages / Channels / Contacts | Only when relevant mesh traffic arrives | Low |
 | **Main**, **Watch** | Once a minute (to update the clock) | Medium |
-| **BornPet** | One frame per 5 min when idle, plus events and actions | Medium |
+| **BornPet** | One frame per 5 min when idle, plus events and actions | Low |
 
 **Battery tip:** to make a charge last as long as possible, leave the badge on
 **My QR** or **Name**. They sit completely idle — no periodic refresh, no LED

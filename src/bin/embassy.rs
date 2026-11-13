@@ -721,6 +721,10 @@ struct AnimState {
     // left the counter.
     #[cfg(feature = "game")]
     last_anim_id: u8,
+    // Absolute deadline of the next idle frame; survives loop re-entries and
+    // redraws so minute ticks and wakes cannot push it back.
+    #[cfg(feature = "game")]
+    pacer: bornhack_aegg::game::pacing::FramePacer,
 }
 
 #[cfg(any(feature = "ssd1675-driver", feature = "ssd1680-driver"))]
@@ -731,6 +735,8 @@ impl AnimState {
             sprite_frame: 0,
             #[cfg(feature = "game")]
             last_anim_id: 0xFF,
+            #[cfg(feature = "game")]
+            pacer: bornhack_aegg::game::pacing::FramePacer::new(),
         }
     }
 
@@ -740,6 +746,7 @@ impl AnimState {
     fn advance_sprite(&mut self, sprite_advance: bool) {
         #[cfg(feature = "game")]
         if sprite_advance {
+            self.pacer.on_frame();
             let anim = bornhack_aegg::game::lifecycle::display_anim();
             let kind = bornhack_aegg::game::lifecycle::pet_kind();
             let count = bornhack_aegg::game::engine::anim_files::frame_count(kind, anim);
@@ -957,7 +964,7 @@ async fn display_loop(
 
         let sprite_advance = if partial_idle {
             last_screen = active_screen;
-            wait_display_event(button_rcvr, active_screen, true).await
+            wait_display_event(button_rcvr, active_screen, &mut anim_state, true).await
         } else {
             match select(
                 async {
@@ -1043,7 +1050,7 @@ async fn display_loop(
                 // next `update_partial` resets the controller and re-drives
                 // (see display.rs recovery). Simple case: everything interrupts;
                 // ghosting corner-cases handled later.
-                wait_display_event(button_rcvr, active_screen, true),
+                wait_display_event(button_rcvr, active_screen, &mut anim_state, true),
             )
             .await
             {
@@ -1051,7 +1058,7 @@ async fn display_loop(
                     // Refresh finished uninterrupted.  Commit the screen-
                     // transition tracker, then wait the frame timer.
                     last_screen = active_screen;
-                    wait_display_event(button_rcvr, active_screen, true).await
+                    wait_display_event(button_rcvr, active_screen, &mut anim_state, true).await
                 }
                 // Interrupted mid-refresh.  Propagate the waiter's verdict:
                 // sprite-timer fire → advance the frame (true); button/signal
@@ -1159,7 +1166,7 @@ async fn display_loop_1680<D>(
         // does not.
         let sprite_advance = match select(
             display.refresh(mode),
-            wait_display_event(button_rcvr, active_screen, false),
+            wait_display_event(button_rcvr, active_screen, &mut anim_state, false),
         )
         .await
         {
@@ -1178,7 +1185,7 @@ async fn display_loop_1680<D>(
                     core::future::pending::<core::convert::Infallible>().await
                 };
                 match select(
-                    wait_display_event(button_rcvr, active_screen, true),
+                    wait_display_event(button_rcvr, active_screen, &mut anim_state, true),
                     idle_power_off,
                 )
                 .await
@@ -1444,6 +1451,7 @@ async fn wait_display_event(
         2,
     >,
     active_screen: u8,
+    anim_state: &mut AnimState,
     // When false the sprite frame timer is suppressed (treated as `pending`)
     // so this waiter only returns on real interrupts (buttons/signals). Used
     // while a refresh is in flight so the frame timer can't cancel it.
@@ -1451,6 +1459,8 @@ async fn wait_display_event(
 ) -> bool {
     use embassy_futures::select::{Either, Either3, select, select3};
 
+    #[cfg(not(feature = "game"))]
+    let _ = &anim_state;
     #[cfg(feature = "game")]
     let sprite_active = allow_sprite
         && active_screen == bornhack_aegg::SCREEN_GAME
@@ -1460,33 +1470,46 @@ async fn wait_display_event(
     let _ = allow_sprite;
 
     loop {
+        // Idle animations advance one frame per 5 minutes; hatching and
+        // actions spread their frames over their duration. The frame
+        // deadline is absolute (FramePacer), recomputed on every pass, and
+        // the wait always ends at the engine wake or UI deadline too. Pure
+        // reads of the game only: nothing here updates the engine.
+        #[cfg(feature = "game")]
+        let sprite_plan = if sprite_active {
+            use bornhack_aegg::game::{lifecycle, pacing};
+            let anim = lifecycle::display_anim();
+            let kind = lifecycle::pet_kind();
+            let frame_count =
+                bornhack_aegg::game::engine::anim_files::frame_count(kind, anim) as u32;
+            let frame_secs = pacing::frame_interval_secs(
+                anim,
+                frame_count,
+                lifecycle::action_ticks_remaining(),
+            );
+            let wake_secs = pacing::wake_secs(
+                lifecycle::next_wake_tick(),
+                bornhack_aegg::game::next_ui_deadline_tick(),
+                lifecycle::now_tick(),
+            );
+            let anim_id = bornhack_aegg::game::engine::anim_files::anim_id_for(anim);
+            Some(anim_state.pacer.wait(
+                embassy_time::Instant::now().as_secs(),
+                anim_id,
+                frame_secs,
+                wake_secs,
+            ))
+        } else {
+            None
+        };
         #[cfg(feature = "game")]
         let sprite_tick = async {
-            if sprite_active {
-                // Idle animations advance one frame per 5 minutes; hatching
-                // and actions spread their frames over their duration. The
-                // wait always ends at the engine wake or UI deadline too.
-                // Pure reads only: this future never updates the engine.
-                use bornhack_aegg::game::{lifecycle, pacing};
-                let anim = lifecycle::display_anim();
-                let kind = lifecycle::pet_kind();
-                let frame_count =
-                    bornhack_aegg::game::engine::anim_files::frame_count(kind, anim) as u32;
-                let frame_secs = pacing::frame_interval_secs(
-                    anim,
-                    frame_count,
-                    lifecycle::action_ticks_remaining(),
-                );
-                let wake_secs = pacing::wake_secs(
-                    lifecycle::next_wake_tick(),
-                    bornhack_aegg::game::next_ui_deadline_tick(),
-                    lifecycle::now_tick(),
-                );
-                let (wait_secs, frame_due) = pacing::sprite_wait(frame_secs, wake_secs);
-                Timer::after_secs(wait_secs).await;
-                frame_due
-            } else {
-                core::future::pending::<bool>().await
+            match sprite_plan {
+                Some((wait_secs, frame_due)) => {
+                    Timer::after_secs(wait_secs).await;
+                    frame_due
+                }
+                None => core::future::pending::<bool>().await,
             }
         };
         #[cfg(not(feature = "game"))]
@@ -1532,7 +1555,7 @@ async fn wait_display_event(
             )
             .await
             {
-                Either::Second(Either4::First(frame_due)) => return frame_due, // sprite timer (false: wake)
+                Either::Second(Either4::First(frame_due)) => return frame_due, // sprite timer; false = wake
                 Either::First(Either3::First(_))   => return false, // button / toast
                 Either::First(Either3::Second(_))  => return false, // BLE pairing
                 Either::First(Either3::Third(_))                    // minute tick
@@ -1564,7 +1587,7 @@ async fn wait_display_event(
         )
         .await
         {
-            Either::Second(frame_due)          => return frame_due, // sprite timer (false: wake)
+            Either::Second(frame_due)          => return frame_due, // sprite timer; false = wake
             Either::First(Either3::First(_))   => return false, // button / toast
             Either::First(Either3::Second(_))  => return false, // BLE pairing
             Either::First(Either3::Third(_))                    // minute tick

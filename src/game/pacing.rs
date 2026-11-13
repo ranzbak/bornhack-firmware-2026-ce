@@ -17,7 +17,8 @@ pub const IDLE_FRAME_TICKS: u32 = (IDLE_FRAME_SECS / SECS_PER_TICK) as u32;
 /// Shortest time between two frames of a fast animation.
 pub const MIN_FRAME_SECS: u64 = 2;
 
-/// Hatching and the action animations are "fast"; everything else (Idle,
+/// The action animations are "fast" (hatching is fast too, see
+/// [`frame_interval_secs`]); everything else (Idle,
 /// Happy, Warning*, Critical*, Sleeping, Leaving, Gone, Hibernating) is idle.
 pub fn is_action_anim(anim: DisplayAnim) -> bool {
     matches!(
@@ -61,6 +62,58 @@ pub fn sprite_wait(frame_secs: Option<u64>, wake_secs: u64) -> (u64, bool) {
     match frame_secs {
         Some(f) if f <= wake_secs => (f, true),
         _ => (wake_secs, false),
+    }
+}
+
+/// The absolute deadline of the current animation frame. It lives in the
+/// display loop state, so a loop re-entry (minute tick, mesh signal), an
+/// engine wake or a toast redraw cannot push the frame back: only a frame
+/// advance ([`FramePacer::on_frame`]) or an animation change restarts it.
+pub struct FramePacer {
+    anim_id: u8,
+    /// Uptime second the current frame is due, once armed.
+    due_at: Option<u64>,
+}
+
+impl Default for FramePacer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FramePacer {
+    pub const fn new() -> Self {
+        Self {
+            anim_id: 0xFF,
+            due_at: None,
+        }
+    }
+
+    /// How long to wait from `now_secs` (uptime), and whether the wait ends
+    /// on a frame (`true`) or on a wake (`false`, redraw without advancing).
+    /// Arms the deadline on first use and keeps it until `on_frame`.
+    pub fn wait(
+        &mut self,
+        now_secs: u64,
+        anim_id: u8,
+        frame_secs: Option<u64>,
+        wake_secs: u64,
+    ) -> (u64, bool) {
+        if anim_id != self.anim_id {
+            self.anim_id = anim_id;
+            self.due_at = None;
+        }
+        let Some(interval) = frame_secs else {
+            self.due_at = None;
+            return sprite_wait(None, wake_secs);
+        };
+        let due = *self.due_at.get_or_insert(now_secs.saturating_add(interval));
+        sprite_wait(Some(due.saturating_sub(now_secs)), wake_secs)
+    }
+
+    /// The frame advanced: the next one is due a full interval later.
+    pub fn on_frame(&mut self) {
+        self.due_at = None;
     }
 }
 
@@ -129,10 +182,99 @@ mod tests {
 
     #[test]
     fn only_actions_and_hatching_are_fast() {
-        assert!(is_action_anim(DisplayAnim::Rehab));
-        assert!(is_action_anim(DisplayAnim::OnlyPets));
-        assert!(!is_action_anim(DisplayAnim::Sleeping));
-        assert!(!is_action_anim(DisplayAnim::Hibernating));
-        assert!(!is_action_anim(DisplayAnim::Idle));
+        use DisplayAnim::*;
+        let fast = [
+            Feeding, Healing, Playing, Exercising, Medicating, Drinking, Ozempic, Rehab, OnlyPets,
+        ];
+        let all = [
+            Gone,
+            Hibernating,
+            Hatching {
+                ticks_remaining: 12,
+            },
+            Feeding,
+            Healing,
+            Playing,
+            Sleeping,
+            Exercising,
+            Medicating,
+            Drinking,
+            Ozempic,
+            Rehab,
+            OnlyPets,
+            Leaving { maxed_count: 1 },
+            CriticalSick,
+            CriticalTired,
+            CriticalHungry,
+            WarningSick,
+            WarningTired,
+            WarningHungry,
+            WarningMiserable,
+            Happy,
+            Idle,
+        ];
+        for a in all {
+            assert_eq!(is_action_anim(a), fast.contains(&a), "{a:?}");
+            let want = if is_action_anim(a) || matches!(a, Hatching { .. }) {
+                30
+            } else {
+                300
+            };
+            assert_eq!(frame_interval_secs(a, 4, 12), Some(want), "{a:?}");
+        }
+    }
+
+    #[test]
+    fn an_action_end_before_the_frame_ends_the_wait() {
+        assert_eq!(sprite_wait(Some(20), 10), (10, false));
+        let mut p = FramePacer::new();
+        assert_eq!(p.wait(0, 1, Some(20), 10), (10, false));
+    }
+
+    #[test]
+    fn reentry_and_wakes_do_not_push_the_frame_back() {
+        let mut p = FramePacer::new();
+        assert_eq!(p.wait(1000, 1, Some(300), 7200), (300, true));
+        // a minute tick re-enters the loop 60 s later; an engine wake at 120 s
+        assert_eq!(p.wait(1060, 1, Some(300), 7200), (240, true));
+        assert_eq!(p.wait(1120, 1, Some(300), 60), (60, false));
+        assert_eq!(p.wait(1180, 1, Some(300), 7200), (120, true));
+    }
+
+    #[test]
+    fn a_frame_advance_restarts_the_deadline() {
+        let mut p = FramePacer::new();
+        assert_eq!(p.wait(0, 1, Some(300), 7200), (300, true));
+        p.on_frame();
+        assert_eq!(p.wait(300, 1, Some(300), 7200), (300, true));
+    }
+
+    #[test]
+    fn an_anim_change_restarts_the_deadline() {
+        let mut p = FramePacer::new();
+        assert_eq!(p.wait(0, 1, Some(300), 7200), (300, true));
+        assert_eq!(p.wait(100, 2, Some(300), 7200), (300, true));
+        assert_eq!(
+            p.wait(150, 2, None, 50),
+            (50, false),
+            "single frame: no deadline"
+        );
+    }
+
+    #[test]
+    fn a_day_of_minute_ticks_is_288_idle_frames() {
+        let mut p = FramePacer::new();
+        let (mut now, mut frames) = (0u64, 0u32);
+        while now < 86_400 {
+            // every pass the minute tick (60 s) can cut the wait short
+            let (w, due) = p.wait(now, 1, Some(IDLE_FRAME_SECS), 7200);
+            let step = w.min(60);
+            now += step;
+            if due && step == w {
+                p.on_frame();
+                frames += 1;
+            }
+        }
+        assert_eq!(frames, 288);
     }
 }

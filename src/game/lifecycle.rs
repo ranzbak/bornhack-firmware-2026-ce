@@ -394,11 +394,15 @@ pub fn cycle() -> Option<PetStats> {
 }
 
 /// Ticks left in the running action (cheap read, no update; 0 when none or
-/// before a game exists). The display waiter uses it to pace action frames
+/// before a game exists). Counted from the last engine update, so it stays
+/// fresh between passes. The display waiter uses it to pace action frames
 /// without calling [`cycle`], which updates the engine.
 pub fn action_ticks_remaining() -> u8 {
     let state = unsafe { (*GAME.get()).as_ref() };
-    state.map_or(0, |s| s.action_ticks_remaining)
+    state.map_or(0, |s| {
+        let end = s.last_update_tick.saturating_add(s.action_ticks_remaining as u32);
+        end.saturating_sub(now_tick()).min(s.action_ticks_remaining as u32) as u8
+    })
 }
 
 /// The status line under the pet (cheap read, no update, like
@@ -566,10 +570,8 @@ fn check_alcoholism_onset(state: &super::engine::GameState) {
 
 /// Tick at which the sleep animation should stop being shown.  When
 /// the player taps Sleep, the engine may auto-wake within a single
-/// tick (10 s) if `tired` was already low — too short for the 4-frame
-/// sleep animation to cycle visibly.  We pin a display floor of 4
-/// ticks (40 s = full animation cycle) here so the user always sees
-/// the sleep loop after invoking the action.
+/// tick (10 s) if `tired` was already low.  We pin a display floor of 4
+/// ticks here, which keeps the sleeping pose on screen for 40 s.
 static SLEEP_ANIM_UNTIL_TICK: AtomicU32 = AtomicU32::new(0);
 
 /// Get the current display animation (cheap, no update).

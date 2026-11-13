@@ -417,6 +417,15 @@ pub(crate) fn last_reason_for_test() -> engine::doses::Reason {
 /// True while a view whose numbers drift by themselves is on screen. Such a
 /// view is refreshed at least once per idle frame (display pacing, not
 /// engine polling).
+/// Tick the live view was last drawn (or opened); its refresh deadline is
+/// anchored here so minute ticks cannot slide it forward.
+static LIVE_DRAWN_TICK: AtomicU32 = AtomicU32::new(0);
+
+/// Record that a live view was just drawn.
+pub(crate) fn note_live_view_drawn() {
+    LIVE_DRAWN_TICK.store(lifecycle::now_tick(), Ordering::Relaxed);
+}
+
 pub fn live_view_open() -> bool {
     modal::live_modal_view_open()
 }
@@ -437,7 +446,8 @@ pub fn next_ui_deadline_tick() -> u32 {
         next = next.min(now.saturating_add(1));
     }
     if live_view_open() {
-        next = next.min(now.saturating_add(pacing::IDLE_FRAME_TICKS));
+        let drawn = LIVE_DRAWN_TICK.load(Ordering::Relaxed);
+        next = next.min(drawn.saturating_add(pacing::IDLE_FRAME_TICKS));
     }
     next
 }
@@ -631,6 +641,9 @@ where
         // The free-running clock keeps ticking — we just subtract.
         static LAST_ANIM_ID: AtomicU8 = AtomicU8::new(0xFF);
         static ANIM_START_MS: AtomicU64 = AtomicU64::new(0);
+        // Frame interval fixed when the animation starts, so a shrinking
+        // action/hatching countdown cannot make the frame index jump or wrap.
+        static ANIM_INTERVAL_MS: AtomicU64 = AtomicU64::new(u64::MAX);
 
         if !lifecycle::is_started() {
             sprite_loader::blit_pcx_sim(display, &anim_files::start_screen_filename(), 0, 0, false);
@@ -644,16 +657,18 @@ where
                 if LAST_ANIM_ID.load(Ordering::Relaxed) != id {
                     LAST_ANIM_ID.store(id, Ordering::Relaxed);
                     ANIM_START_MS.store(elapsed_ms, Ordering::Relaxed);
+                    let interval = pacing::frame_interval_secs(
+                        anim,
+                        count as u32,
+                        lifecycle::action_ticks_remaining(),
+                    )
+                    .map_or(u64::MAX, |s| s.saturating_mul(1000));
+                    ANIM_INTERVAL_MS.store(interval, Ordering::Relaxed);
                 }
                 let delta_ms = elapsed_ms.saturating_sub(ANIM_START_MS.load(Ordering::Relaxed));
                 // Same pace as the firmware waiter (`pacing`): idle frames
                 // every 5 minutes, actions and hatching at full speed.
-                let interval_ms = pacing::frame_interval_secs(
-                    anim,
-                    count as u32,
-                    lifecycle::action_ticks_remaining(),
-                )
-                .map_or(u64::MAX, |s| s.saturating_mul(1000));
+                let interval_ms = ANIM_INTERVAL_MS.load(Ordering::Relaxed);
                 let raw = (delta_ms / interval_ms).min(u32::MAX as u64) as u32;
                 let frame = anim_files::clamp_or_wrap(raw, count, anim);
                 let name = anim_files::anim_filename(kind, anim, frame);
@@ -1122,13 +1137,19 @@ mod tests {
         crate::game::lifecycle::set_state_for_test(Some(s));
         assert_eq!(super::next_ui_deadline_tick(), u32::MAX);
         super::modal::open(super::modal::ModalKind::Stats);
-        assert_eq!(super::next_ui_deadline_tick(), u32::MAX, "menu list has no drifting numbers");
+        assert_eq!(
+            super::next_ui_deadline_tick(),
+            u32::MAX,
+            "menu list has no drifting numbers"
+        );
         super::modal::activate(); // first row: View stats
         assert!(super::live_view_open());
-        let now = super::lifecycle::now_tick();
-        let d = super::next_ui_deadline_tick();
-        assert!(d <= now + super::pacing::IDLE_FRAME_TICKS, "deadline {d} now {now}");
-        assert!(d > now, "an idle frame, not a tight poll");
+        // The deadline is anchored to the last draw, never to `now`: time
+        // passing without a redraw (minute ticks) must not move it.
+        super::LIVE_DRAWN_TICK.store(1000, core::sync::atomic::Ordering::Relaxed);
+        let anchored = 1000 + super::pacing::IDLE_FRAME_TICKS;
+        assert_eq!(super::next_ui_deadline_tick(), anchored);
+        assert_eq!(super::next_ui_deadline_tick(), anchored);
         super::modal::close();
         assert!(!super::live_view_open());
         assert_eq!(super::next_ui_deadline_tick(), u32::MAX);
