@@ -1193,6 +1193,7 @@ mod tests {
 
     #[test]
     fn wash_row_follows_the_engine_refusal() {
+        let _guard = crate::game::UI_STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         use crate::game::engine::doses::{Reason, Refusal};
         lifecycle::start_new_game(PetKind(0), false, false);
         lifecycle::with_state(|s| {
@@ -1209,10 +1210,12 @@ mod tests {
             true
         });
         assert!(Item::Wash.available(&lifecycle::cycle().unwrap()));
+        crate::game::clear_ui_state_for_test();
     }
 
     #[test]
     fn a_day_through_the_menu() {
+        let _guard = crate::game::UI_STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         lifecycle::start_new_game(PetKind(0), false, false);
         lifecycle::with_state(|s| {
             s.phase = Phase::Active;
@@ -1247,6 +1250,7 @@ mod tests {
         assert!(!st().is_sleeping);
         ok(Item::Relax);
         assert!(st().active_action.is_none());
+        crate::game::clear_ui_state_for_test();
     }
 
     /// Rows 0 and 2 disabled, like a Play list with Battle and a

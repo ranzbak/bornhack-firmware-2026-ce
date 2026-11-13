@@ -880,10 +880,23 @@ mod battle_anim_tests {
     }
 }
 
+/// Tests that drive the game-global UI state (toasts, sleep-animation floor,
+/// the pet) take this lock so they cannot see each other's changes.
+#[cfg(test)]
+pub(crate) static UI_STATE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Drop the toast and the sleep-animation floor a test left behind.
+#[cfg(test)]
+pub(crate) fn clear_ui_state_for_test() {
+    TOAST.clear();
+    lifecycle::clear_sleep_anim_for_test();
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
     fn the_battle_result_card_needs_no_wake_loop() {
+        let _guard = super::UI_STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // The card waits for a button press; the press redraws. Polling it
         // every tick would wake the badge for as long as it is left up.
         super::battle_view::show_result_for_test();

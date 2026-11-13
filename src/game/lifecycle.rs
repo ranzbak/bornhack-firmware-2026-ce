@@ -500,6 +500,11 @@ pub fn sleep_anim_deadline_tick() -> u32 {
     if now_tick() < until { until } else { u32::MAX }
 }
 
+#[cfg(test)]
+pub(super) fn clear_sleep_anim_for_test() {
+    SLEEP_ANIM_UNTIL_TICK.store(0, Ordering::Relaxed);
+}
+
 /// Get the tick at which the engine wants to be woken next.
 pub fn next_wake_tick() -> u32 {
     let state = unsafe { (*GAME.get()).as_ref() };
