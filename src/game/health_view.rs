@@ -143,7 +143,7 @@ where
 
         // Placeholder condition icon at the right edge — red when the bad
         // state is active, black otherwise. Diabetic (row 0) keeps its
-        // main-screen NEEDS MEDS banner and gets no icon here.
+        // main-screen "no insulin" status word and gets no icon here.
         let icon_color = if *is_bad { RED } else { crate::BLACK };
         match i {
             1 => icon_scale(display, Point::new(ICON_X, y - 1), icon_color)?,

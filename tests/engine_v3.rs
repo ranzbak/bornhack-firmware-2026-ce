@@ -2174,7 +2174,7 @@ mod status_wake {
             s.is_sleeping,
             s.phase,
             s.active_action,
-            s.banner_bits(),
+            s.onset_bits(),
         )
     }
 
@@ -2224,11 +2224,11 @@ mod status_wake {
         let mut s = pet();
         s.diabetic = true;
         s.insulin_min = 45;
-        v.push(("insulin runs out: NEEDS MEDS", s));
+        v.push(("insulin runs out: no insulin", s));
         let mut s = pet();
         s.dependent = true;
         s.rehab_min = 50;
-        v.push(("rehab runs out: NEEDS REHAB", s));
+        v.push(("rehab runs out: needs rehab", s));
         let mut s = pet();
         s.weight = pct(62);
         s.fitness = pct(60);
@@ -2462,24 +2462,24 @@ mod status_wake {
     }
 
     #[test]
-    fn banner_flips_are_wake_points() {
+    fn onset_flips_are_wake_points() {
         let mut flips = 0;
         for (name, s) in cases() {
             let mut c = s.clone();
-            let b0 = c.banner_bits();
+            let b0 = c.onset_bits();
             let t0 = c.last_update_tick;
             if let Some(m) = (1..=120u32).find(|m| {
                 c.update(t0 + m * 6);
-                c.banner_bits() != b0
+                c.onset_bits() != b0
             }) {
                 flips += 1;
                 assert!(
                     s.next_wake_tick() <= t0 + m * 6,
-                    "{name}: banner flips at +{m}"
+                    "{name}: onset flips at +{m}"
                 );
             }
         }
-        assert!(flips >= 5, "only {flips} banner cases flipped");
+        assert!(flips >= 3, "only {flips} onset cases flipped");
     }
 
     #[test]
@@ -2846,7 +2846,7 @@ mod fix_round_1 {
     use bornhack_aegg::game::bornpets_cfg::apply_overrides;
     use bornhack_aegg::game::engine::doses::{Reason, Refusal, fmt_wait};
     use bornhack_aegg::game::engine::needs::P;
-    use bornhack_aegg::game::engine::status::{StatusWord, status};
+    use bornhack_aegg::game::engine::status::{StatusLine, StatusWord, Word, status};
     use bornhack_aegg::game::engine::thresholds::{HATCHING_TICKS, Thresholds};
     use bornhack_aegg::game::engine::{
         Action, DisplayAnim, DrinkKind, GameState, MiniGame, PetKind, Phase,
@@ -2987,31 +2987,37 @@ mod fix_round_1 {
 
     #[test]
     fn only_danger_and_real_problems_buzz() {
-        for w in [
-            StatusWord::Hungry,
-            StatusWord::Thirsty,
-            StatusWord::Tired,
-            StatusWord::Groggy,
-            StatusWord::HungOver,
-            StatusWord::Injured,
-            StatusWord::Poorly,
-        ] {
-            assert!(w.alerts(), "{w:?}");
+        let buzzers = [
+            Word::Hungry,
+            Word::Starving,
+            Word::Thirsty,
+            Word::Parched,
+            Word::Exhausted,
+            Word::Wasted,
+            Word::Filthy,
+            Word::HungOver,
+            Word::Injured,
+            Word::Groggy,
+            Word::Poorly,
+        ];
+        for w in Word::ALL {
+            assert_eq!(w.alerts(), buzzers.contains(&w), "{w:?}");
         }
-        for w in [
-            StatusWord::Content,
-            StatusWord::Bored,
-            StatusWord::Wired,
-            StatusWord::Sloppy,
-            StatusWord::Grubby,
-            StatusWord::Stuffed,
-            StatusWord::Waterlogged,
-            StatusWord::Overweight,
-            StatusWord::Underweight,
-            StatusWord::Unfit,
-        ] {
-            assert!(!w.alerts(), "{w:?}");
-        }
+        let line = |first, danger| StatusLine {
+            first,
+            second: None,
+            danger,
+        };
+        assert!(line(Word::Hungry, false).alerts());
+        assert!(!line(Word::Peckish, false).alerts());
+        assert!(!line(Word::Sleepy, false).alerts());
+        // A second word never buzzes by itself.
+        let second = StatusLine {
+            first: Word::Bored,
+            second: Some(Word::Hungry),
+            danger: false,
+        };
+        assert!(!second.alerts());
     }
 
     #[test]
@@ -3649,7 +3655,7 @@ mod debug_menu {
 
     #[test]
     fn debug_info_worst_case_fits_the_toast() {
-        // 7 px font: 11 columns end at x = 79, left of the banners at x = 80.
+        // 7 px font: the toast budget is 15 columns; these lines stay within 11.
         // Four lines of 13 px fit the 77 px pet area.
         let worst = DebugInfo {
             status: StatusWord::Underweight,

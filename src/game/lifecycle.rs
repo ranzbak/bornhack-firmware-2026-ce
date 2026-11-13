@@ -293,8 +293,7 @@ pub fn on_wall_clock_set(now_unix: u32) {
         let applied = boot_catch_up_minutes(s, &CATCH_UP_DONE, saved, now_unix, uptime_s);
         if applied.is_some_and(|m| m > 0) {
             // The pet jumped ahead: wake the display loop so the screen, the
-            // status word and the banners show it now, not at the next
-            // scheduled wake.
+            // status line show it now, not at the next scheduled wake.
             crate::TOAST_SIGNAL.signal(());
         }
     }
@@ -394,38 +393,20 @@ pub fn cycle() -> Option<PetStats> {
     Some(stats)
 }
 
-/// Read-only accessor: is the pet diabetic with medication currently
-/// lapsed? Drives the persistent on-screen "needs meds" banner (see
-/// `game::mod::draw_screen_game`) — kept separate from `DisplayAnim`
-/// since there's no sprite art for a dedicated diabetic animation, and
-/// swapping the pet's whole display out for it made the pet disappear
-/// entirely whenever the condition was active.
-pub fn is_diabetic_unmedicated() -> bool {
-    let state = unsafe { (*GAME.get()).as_ref() };
-    state.is_some_and(|s| s.is_diabetic_unmedicated())
+/// The status line under the pet (cheap read, no update, like
+/// [`display_anim`]). `None` before a game exists.
+pub fn status_line() -> Option<super::engine::status::StatusLine> {
+    let state = unsafe { (*GAME.get()).as_ref() }?;
+    Some(super::engine::status::status_line(state))
 }
 
-/// Alcoholic and the rehab-protection window has lapsed — drives the
-/// persistent "NEEDS REHAB" banner, the twin of
-/// [`is_diabetic_unmedicated`].
-pub fn is_alcoholic_untreated() -> bool {
-    let state = unsafe { (*GAME.get()).as_ref() };
-    state.is_some_and(|s| s.is_alcoholic_untreated())
-}
-
-/// Weight has crossed the warning band but the pet is not yet diabetic —
-/// drives the pre-permanence "OVERWEIGHT" banner so the multi-day slide
-/// toward diabetes is visible and winnable rather than a silent surprise.
-pub fn is_overweight_warning() -> bool {
-    let state = unsafe { (*GAME.get()).as_ref() };
-    state.is_some_and(|s| s.is_overweight_warning())
-}
-
-/// Drunkenness has crossed the warning band but the pet is not yet
-/// alcoholic — the drink-arc twin of [`is_overweight_warning`].
-pub fn is_drunk_warning() -> bool {
-    let state = unsafe { (*GAME.get()).as_ref() };
-    state.is_some_and(|s| s.is_drunk_warning())
+/// Install (or clear) the game state for a test. The caller holds
+/// `game::lock_test_state`.
+#[cfg(test)]
+pub(super) fn set_state_for_test(state: Option<GameState>) {
+    unsafe {
+        *GAME.get() = state;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -471,7 +452,7 @@ static REALM_DIRTY: AtomicBool = AtomicBool::new(false);
 
 fn current_severity(state: &GameState) -> Severity {
     use super::engine::Phase;
-    use super::engine::status::status;
+    use super::engine::status::status_line;
 
     if state.phase == Phase::Gone {
         return Severity::Gone;
@@ -479,13 +460,16 @@ fn current_severity(state: &GameState) -> Severity {
     if state.phase == Phase::Leaving {
         return Severity::Leaving;
     }
-    // Severity is derived from the status word (not the display animation)
+    // Severity is derived from the status line (not the display animation)
     // so that active-action animations — Feeding/Healing/etc — don't
     // "mask" an existing warning and suppress the alert when the action ends.
-    match status(state) {
-        (_, true) => Severity::Severe,
-        (word, false) if word.alerts() => Severity::Warning,
-        (_, false) => Severity::Neutral,
+    let line = status_line(state);
+    if line.danger {
+        Severity::Severe
+    } else if line.alerts() {
+        Severity::Warning
+    } else {
+        Severity::Neutral
     }
 }
 
@@ -1062,6 +1046,7 @@ mod tests {
         Severity, apply_boot_catch_up, boot_catch_up_minutes, catch_up_minutes, current_severity, deferred_catch_up_minutes,
         event_at, forget_boot_gap, onset_alert_due, saved_unix_to_write,
     };
+    use crate::game::engine::status::{Word, status_line};
     use crate::game::engine::needs::P;
     use crate::game::engine::{GameState, PetKind, Phase};
     use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -1085,13 +1070,89 @@ mod tests {
     #[test]
     fn real_problems_warn_and_danger_is_severe() {
         let mut s = pet();
-        s.fullness = (30 * P) as u16; // Hungry
+        s.fullness = (20 * P) as u16; // Hungry
         assert!(current_severity(&s) == Severity::Warning);
         s.fullness = (10 * P) as u16;
         assert!(current_severity(&s) == Severity::Severe);
         let mut s = pet();
         s.dirt = (95 * P) as u16; // Grubby but in danger
         assert!(current_severity(&s) == Severity::Severe);
+    }
+
+    #[test]
+    fn band_edge_grades_never_buzz() {
+        // "peckish" and "sleepy" are information, not an alarm (spec 5.7).
+        let mut s = pet();
+        s.fullness = (30 * P) as u16;
+        assert_eq!(status_line(&s).first, Word::Peckish);
+        assert!(current_severity(&s) == Severity::Neutral);
+        let mut s = pet();
+        s.energy = (30 * P) as u16;
+        assert_eq!(status_line(&s).first, Word::Sleepy);
+        assert!(current_severity(&s) == Severity::Neutral);
+    }
+
+    #[test]
+    fn graded_problems_buzz() {
+        let mut s = pet();
+        s.hydration = (20 * P) as u16;
+        assert_eq!(status_line(&s).first, Word::Thirsty);
+        assert!(current_severity(&s) == Severity::Warning);
+        let mut s = pet();
+        s.energy = (5 * P) as u16;
+        assert_eq!(status_line(&s).first, Word::Exhausted);
+        assert!(current_severity(&s) == Severity::Warning);
+    }
+
+    #[test]
+    fn every_danger_word_is_severe() {
+        for (name, s) in [
+            (
+                "starving",
+                {
+                    let mut s = pet();
+                    s.fullness = (5 * P) as u16;
+                    s
+                },
+            ),
+            (
+                "parched",
+                {
+                    let mut s = pet();
+                    s.hydration = (5 * P) as u16;
+                    s
+                },
+            ),
+            (
+                "wasted",
+                {
+                    let mut s = pet();
+                    s.booze = (95 * P) as u16;
+                    s
+                },
+            ),
+            (
+                "filthy",
+                {
+                    let mut s = pet();
+                    s.dirt = (95 * P) as u16;
+                    s
+                },
+            ),
+            (
+                "poorly",
+                {
+                    let mut s = pet();
+                    s.health = (5 * P) as u16;
+                    s
+                },
+            ),
+        ] {
+            let line = status_line(&s);
+            assert!(line.danger, "{name}");
+            assert!(line.alerts(), "{name}");
+            assert!(current_severity(&s) == Severity::Severe, "{name}");
+        }
     }
 
     #[test]

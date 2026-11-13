@@ -43,23 +43,6 @@ pub enum StatusWord {
     Poorly,
 }
 
-impl StatusWord {
-    /// Whether this word, even without danger, is worth a buzz. The
-    /// "miserable" words still animate but stay quiet.
-    pub fn alerts(self) -> bool {
-        matches!(
-            self,
-            StatusWord::Hungry
-                | StatusWord::Thirsty
-                | StatusWord::Tired
-                | StatusWord::Groggy
-                | StatusWord::HungOver
-                | StatusWord::Injured
-                | StatusWord::Poorly
-        )
-    }
-}
-
 /// The words in [`regime::penalty_terms`] order.
 const WORDS: [StatusWord; PENALTY_TERMS] = [
     StatusWord::Hungry,
@@ -212,6 +195,26 @@ impl Word {
         Word::Content,
     ];
 
+    /// Whether this word is worth a buzz: the danger words and the graded
+    /// problems that are a real alarm. The band-edge grades (peckish, sleepy)
+    /// and the "miserable" words stay quiet (spec 5.7).
+    pub fn alerts(self) -> bool {
+        matches!(
+            self,
+            Word::Hungry
+                | Word::Starving
+                | Word::Thirsty
+                | Word::Parched
+                | Word::Exhausted
+                | Word::Wasted
+                | Word::Filthy
+                | Word::HungOver
+                | Word::Injured
+                | Word::Groggy
+                | Word::Poorly
+        )
+    }
+
     pub fn text(self) -> &'static str {
         match self {
             Word::Peckish => "peckish",
@@ -287,6 +290,12 @@ pub struct StatusLine {
 }
 
 impl StatusLine {
+    /// Whether the line is worth a buzz: in danger, or the first word is a
+    /// real alarm. The one rule the severity buzzer reads.
+    pub fn alerts(&self) -> bool {
+        self.danger || self.first.alerts()
+    }
+
     /// "a, b" when it fits one line, else "a\nb".
     pub fn text(&self) -> String<32> {
         let mut out = String::new();

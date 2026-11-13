@@ -84,8 +84,8 @@ impl StatusWord {
 }
 
 impl DebugInfo {
-    /// Short lines for the toast (7x13 font, so 11 columns stay left of the
-    /// condition banners at x = 80): the word, a flag line (`!` danger, `zz`
+    /// Short lines for the toast (7x13 font; the toast budget is 15 columns,
+    /// the lines stay within 11): the word, a flag line (`!` danger, `zz`
     /// asleep, `nt` night) when any is set, mood / target, then health and the
     /// wait to the next wake in the countdown format ("w23m", "w2h05").
     pub fn line(&self) -> heapless::String<48> {

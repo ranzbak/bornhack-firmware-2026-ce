@@ -21,6 +21,8 @@ Your pet has four decaying stats. Anything above 100% is bad — that's "starvin
 | Drained     | **Play** or mini-game | Most important — also resets "miserable"       |
 | Tired       | **Rest**         | Or **Hibernate** for long sleeps                    |
 
+The **status line** under the pet names the one or two things that need you most ("hungry, bored"; "no insulin" and "needs rehab" when medication or rehab has lapsed; "content" when all is well). It turns red only in a health danger zone, and the badge buzzes only for danger or a real alarm. The corner banners of earlier versions are gone.
+
 ### Controls
 
 | Key            | Action                                       |

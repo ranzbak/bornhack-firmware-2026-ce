@@ -721,39 +721,22 @@ impl GameState {
         self.start_action(Action::OnlyPets, None, PLAY_DURATION())
     }
 
-    /// Diabetic with the insulin window run out ("NEEDS MEDS").
+    /// Diabetic with the insulin window run out ("no insulin").
     pub fn is_diabetic_unmedicated(&self) -> bool {
         self.diabetic && self.insulin_min == 0
     }
 
-    /// Alcoholic and the rehab-protection window has lapsed ("NEEDS REHAB").
+    /// Alcoholic and the rehab-protection window has lapsed ("needs rehab").
     pub fn is_alcoholic_untreated(&self) -> bool {
         self.dependent && self.rehab_min == 0
     }
 
-    /// Weight is past the warning band and the pet is not yet diabetic
-    /// ("OVERWEIGHT"): the slide toward diabetes is visible and winnable.
-    pub fn is_overweight_warning(&self) -> bool {
-        !self.diabetic && self.weight as i32 > needs::weight_hi()
-    }
-
-    /// Booze is past the warning band and the pet is not yet alcoholic
-    /// ("DRUNK"), the twin of [`Self::is_overweight_warning`].
-    pub fn is_drunk_warning(&self) -> bool {
-        !self.dependent && self.booze as i32 > needs::booze_hi()
-    }
-
-    /// Everything the banners and the onset takeovers read, one bit each.
-    /// Part of the wake view: each flips at a segment or timer bound (the
-    /// insulin and rehab timers, the weight and booze band edges, the onset
-    /// counters), so the wake stays exact.
-    pub fn banner_bits(&self) -> u8 {
-        (self.is_diabetic_unmedicated() as u8)
-            | (self.is_alcoholic_untreated() as u8) << 1
-            | (self.is_overweight_warning() as u8) << 2
-            | (self.is_drunk_warning() as u8) << 3
-            | (self.diabetic as u8) << 4
-            | (self.dependent as u8) << 5
+    /// What the onset takeovers read, one bit each: bit 0 diabetic, bit 1
+    /// dependent. Part of the wake view: each flips at a counter bound, so
+    /// the wake stays exact. (The "no insulin" and "needs rehab" prompts are
+    /// in the status line.)
+    pub fn onset_bits(&self) -> u8 {
+        (self.diabetic as u8) | (self.dependent as u8) << 1
     }
 
     /// Start a bath.
@@ -968,7 +951,7 @@ impl GameState {
             self.is_sleeping,
             self.phase,
             self.active_action,
-            self.banner_bits(),
+            self.onset_bits(),
         )
     }
 

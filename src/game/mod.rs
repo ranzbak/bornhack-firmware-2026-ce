@@ -40,6 +40,8 @@ pub mod sprite_loader;
 pub mod stat_bar;
 pub mod station;
 pub mod tictactoe;
+#[cfg(test)]
+mod test_canvas;
 pub mod timed_flag;
 pub mod traits_view;
 // ── Action feedback toast ────────────────────────────────────────────────────
@@ -389,10 +391,7 @@ pub fn status_wants_full_refresh() -> bool {
         || DIABETES_ALERT.is_active()
         || ALCOHOLISM_ALERT.is_active()
         || lifecycle::display_anim() == engine::DisplayAnim::Gone
-        || lifecycle::is_diabetic_unmedicated()
-        || lifecycle::is_alcoholic_untreated()
-        || lifecycle::is_overweight_warning()
-        || lifecycle::is_drunk_warning()
+        || lifecycle::status_line().is_some_and(|l| l.danger)
         || battle_view::wants_full_refresh()
 }
 
@@ -451,12 +450,61 @@ const BOT_CY: i32 = 131;
 const SEP_TOP: i32 = 34;
 /// Y of the separator above the bottom icon row.
 const SEP_BOT: i32 = 111;
+/// Status line: x of the centre of every line (panel is 152 px wide).
+const STATUS_CENTER_X: i32 = 76;
+/// Status line: y of the bottom row of the last line, two px above the
+/// separator.
+const STATUS_BASE_Y: i32 = SEP_BOT - 2;
+/// Status line: height of one text line (FONT_7X13_BOLD).
+const STATUS_LINE_H: i32 = 13;
+/// Status line: width of one column (FONT_7X13_BOLD).
+const STATUS_CHAR_W: i32 = 7;
+/// Status line: extra white backing width, split evenly left and right.
+const STATUS_BACKING_PAD: i32 = 4;
 
 /// First display row of the pet/sprite area.
 pub const PET_AREA_TOP: usize = SEP_TOP as usize + 1;
 
 // ── Public entry point
 // ────────────────────────────────────────────────────────
+
+/// Draw the status line at the bottom of the pet area: bottom-centred, bold
+/// black (bold red in danger), each line on a white backing of its own width
+/// plus [`STATUS_BACKING_PAD`] so it reads over the sprite. A second line sits
+/// above the first.
+pub fn draw_status_line<D>(
+    display: &mut D,
+    line: &engine::status::StatusLine,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    let text = line.text();
+    let style = if line.danger {
+        crate::ui::TEXT_BOLD_RED
+    } else {
+        crate::ui::TEXT_BOLD_BLACK
+    };
+    let count = text.split('\n').count() as i32;
+    for (i, row) in text.split('\n').enumerate() {
+        let base = STATUS_BASE_Y - (count - 1 - i as i32) * STATUS_LINE_H;
+        let w = row.chars().count() as i32 * STATUS_CHAR_W + STATUS_BACKING_PAD;
+        Rectangle::new(
+            Point::new(STATUS_CENTER_X - w / 2, base - (STATUS_LINE_H - 1)),
+            Size::new(w as u32, STATUS_LINE_H as u32),
+        )
+        .into_styled(PrimitiveStyle::with_fill(crate::WHITE))
+        .draw(display)?;
+        crate::ui::draw_text(
+            display,
+            row,
+            Point::new(STATUS_CENTER_X, base),
+            style,
+            crate::ui::CENTERED_BOTTOM,
+        )?;
+    }
+    Ok(())
+}
 
 /// Render the BornPets game screen.
 ///
@@ -723,40 +771,12 @@ where
         TOAST.clear_if_elapsed(TOAST_MIN_VISIBLE_MS);
     }
 
-    // Persistent condition banners, stacked top-right and drawn on the
-    // opposite side from the toast (top-left) so they can't collide.
-    // Each is red and stays visible while its condition holds — unlike
-    // the flash-then-fade toast. No dedicated sprite art for these
-    // states; see the note in `engine::to_display` for why.  Active
-    // ongoing-damage banners come first, then the pre-permanence
-    // warnings that let the player course-correct before it's too late.
+    // The status line replaces the old corner banners. A hibernating pet is
+    // frozen, so it says nothing.
+    if !lifecycle::is_hibernating()
+        && let Some(line) = lifecycle::status_line()
     {
-        
-        
-        use embedded_graphics::text::{Text};
-        let style = crate::ui::TOP_RIGHT;
-        let font = crate::ui::TEXT_BOLD_RED;
-        let banners = [
-            (lifecycle::is_diabetic_unmedicated(), "NEEDS MEDS"),
-            (lifecycle::is_alcoholic_untreated(), "NEEDS REHAB"),
-            (lifecycle::is_overweight_warning(), "OVERWEIGHT"),
-            (lifecycle::is_drunk_warning(), "DRUNK"),
-        ];
-        // When money mode is on, the HAX balance sits at y=33 (~13px tall)
-        // in the same top-right corner, so start the banner stack below it
-        // to avoid overlapping the balance readout.
-        let mut banner_y = if lifecycle::money_enabled() {
-            47
-        } else {
-            SEP_TOP + 2
-        };
-        for (active, text) in banners {
-            if active {
-                Text::with_text_style(text, Point::new(150, banner_y), font, style)
-                    .draw(display)?;
-                banner_y += 14;
-            }
-        }
+        draw_status_line(display, &line)?;
     }
 
     modal::draw_modal(display)?;
@@ -948,6 +968,80 @@ mod tests {
                 "{text}: wider than the longest toast (Inspire bonus!)"
             );
         }
+    }
+
+    use super::test_canvas::Canvas;
+    use super::{SEP_BOT, draw_status_line};
+    use crate::game::engine::status::{StatusLine, Word};
+    use crate::{BLACK, RED};
+    use embedded_graphics::prelude::*;
+    use embedded_graphics::primitives::Rectangle;
+
+    fn rows(y0: i32, y1: i32) -> Rectangle {
+        Rectangle::new(Point::new(0, y0), Size::new(152, (y1 - y0 + 1) as u32))
+    }
+
+    #[test]
+    fn status_line_draws_at_the_pets_feet() {
+        let mut c = Canvas::new();
+        let line = StatusLine {
+            first: Word::Hungry,
+            second: None,
+            danger: false,
+        };
+        draw_status_line(&mut c, &line).unwrap();
+        assert!(c.any(rows(96, 110), BLACK));
+        assert!(!c.any(rows(0, 83), BLACK));
+        assert!(!c.any(rows(0, 151), RED));
+        assert!(!c.any(rows(SEP_BOT, 151), BLACK));
+    }
+
+    #[test]
+    fn danger_line_is_red() {
+        let mut c = Canvas::new();
+        let line = StatusLine {
+            first: Word::Starving,
+            second: None,
+            danger: true,
+        };
+        draw_status_line(&mut c, &line).unwrap();
+        assert!(c.any(rows(96, 110), RED));
+        assert!(!c.any(rows(0, 151), BLACK));
+    }
+
+    #[test]
+    fn two_long_words_take_two_lines_inside_the_pet_area() {
+        let mut c = Canvas::new();
+        let line = StatusLine {
+            first: Word::Waterlogged,
+            second: Some(Word::Underweight),
+            danger: false,
+        };
+        assert_eq!(line.text().as_str(), "waterlogged\nunderweight");
+        draw_status_line(&mut c, &line).unwrap();
+        assert!(c.any(rows(83, 95), BLACK));
+        assert!(c.any(rows(96, 109), BLACK));
+        assert!(!c.any(rows(0, 81), BLACK));
+        assert!(!c.any(rows(SEP_BOT, 151), BLACK));
+    }
+
+    #[test]
+    fn full_refresh_follows_danger_not_banners() {
+        use crate::game::engine::needs::P;
+        use crate::game::engine::{GameState, PetKind, Phase};
+        let _guard = super::lock_test_state();
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.phase = Phase::Active;
+        // 75 % weight was the old OVERWEIGHT banner: no longer a red message.
+        s.weight = (75 * P) as u16;
+        crate::game::lifecycle::set_state_for_test(Some(s.clone()));
+        assert!(!super::status_wants_full_refresh());
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.phase = Phase::Active;
+        s.fullness = (10 * P) as u16;
+        crate::game::lifecycle::set_state_for_test(Some(s));
+        assert!(super::status_wants_full_refresh());
+        crate::game::lifecycle::set_state_for_test(None);
     }
 
     #[test]

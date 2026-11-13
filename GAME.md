@@ -34,7 +34,7 @@ power, your pet will be right where you left it.
  ├───────────────────────────────────────┤
  │                                       │
  │            [pet / egg]                │  pet area (animation)
- │                                       │
+ │            hungry, bored              │  status line (feet of the pet)
  ├───────────────────────────────────────┤
  │   [Feed]  [Heal]  [Play]  [Rest]      │  bottom icon row
  └───────────────────────────────────────┘
@@ -42,6 +42,27 @@ power, your pet will be right where you left it.
 
 Use **Up/Down** to switch between icon rows and **Left/Right** to select
 an icon. Press **Fire** to open the action menu for the selected icon.
+
+**The status line.** Under the pet, one or two words say what it needs
+most, on a white strip so they read over the picture. It is drawn in
+black, and in **red** only when the pet is in a health danger zone
+(starving, parched, wasted, filthy or poorly). Two words share a line
+("hungry, bored") or take two lines when they are too long. The words:
+
+- **needs:** `peckish`, `hungry`, `starving`, `stuffed`, `thirsty`,
+  `parched`, `waterlogged`, `sleepy`, `exhausted`, `bored`, `wired`,
+  `tipsy`, `sloppy`, `wasted`, `grubby`, `filthy`, `overweight`,
+  `underweight`, `unfit`, `hung over`, `sore`, `injured`, `groggy`,
+  `poorly`;
+- **prompts:** `no insulin` (diabetic and the medication has lapsed) and
+  `needs rehab` (dependent and the rehab protection has lapsed);
+- **when nothing is wrong:** `asleep`, `well rested`, `content`.
+
+The old corner banners (NEEDS MEDS, NEEDS REHAB, OVERWEIGHT, DRUNK) are
+gone: they are now the words `no insulin`, `needs rehab`, `overweight`
+and `sloppy`. The badge buzzes only for a danger word or a real alarm
+(`hungry`, `thirsty`, `exhausted`, `groggy`, `hung over`, `injured`,
+`poorly`), never for `peckish` or `sleepy`.
 
 ## Stats
 
@@ -207,10 +228,10 @@ treatment — usable any time, not just once diabetic — but on a much
 longer cooldown than Exercise, so it's a once-in-a-while boost rather
 than a routine option.
 
-Whenever medication has lapsed, a persistent **"NEEDS MEDS"** banner
-shows in the corner of the pet screen until you re-dose — the pet itself
-keeps showing its normal animation underneath, the banner doesn't
-replace it.
+Whenever medication has lapsed, the status line under the pet says
+**"no insulin"** until you re-dose — the pet itself keeps showing its
+normal animation above it. A dependent pet whose rehab has lapsed shows
+**"needs rehab"** the same way.
 
 ## Friends & the SHDW Channel
 

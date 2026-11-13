@@ -133,9 +133,9 @@ impl GameState {
         // weight critical/warning tiers below), and swapping the pet's
         // whole display out for a debug-text-only screen made the pet
         // disappear entirely whenever the condition was active. It's
-        // surfaced instead as a persistent on-screen banner drawn
-        // alongside whatever the pet's normal animation is — see
-        // `lifecycle::is_diabetic_unmedicated()` / `game::mod` render.
+        // surfaced instead as the "no insulin" prompt word on the status
+        // line, drawn under whatever the pet's normal animation is — see
+        // `status::status_line` and `game::draw_status_line`.
 
         // ── Groups 4 to 6: the status word ──────────────────────────
         let (word, danger) = status(self);
