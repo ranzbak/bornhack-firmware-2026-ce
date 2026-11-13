@@ -271,7 +271,7 @@ pub fn cycle() -> Option<PetStats> {
 /// entirely whenever the condition was active.
 pub fn is_diabetic_unmedicated() -> bool {
     let state = unsafe { (*GAME.get()).as_ref() };
-    state.is_some_and(|s| s.diabetic && s.cooldown_medicate == 0)
+    state.is_some_and(|s| s.diabetic && s.insulin_min == 0)
 }
 
 /// Alcoholic and the rehab-protection window has lapsed — drives the
@@ -279,24 +279,24 @@ pub fn is_diabetic_unmedicated() -> bool {
 /// [`is_diabetic_unmedicated`].
 pub fn is_alcoholic_untreated() -> bool {
     let state = unsafe { (*GAME.get()).as_ref() };
-    state.is_some_and(|s| s.alcoholic && s.cooldown_rehab == 0)
+    state.is_some_and(|s| s.dependent && s.rehab_min == 0)
 }
 
 /// Weight has crossed the warning band but the pet is not yet diabetic —
 /// drives the pre-permanence "OVERWEIGHT" banner so the multi-day slide
 /// toward diabetes is visible and winnable rather than a silent surprise.
 pub fn is_overweight_warning() -> bool {
-    use super::engine::thresholds::WARNING_WEIGHT;
+    use super::engine::needs;
     let state = unsafe { (*GAME.get()).as_ref() };
-    state.is_some_and(|s| !s.diabetic && s.weight > WARNING_WEIGHT())
+    state.is_some_and(|s| !s.diabetic && s.weight as i32 > needs::weight_hi())
 }
 
 /// Drunkenness has crossed the warning band but the pet is not yet
 /// alcoholic — the drink-arc twin of [`is_overweight_warning`].
 pub fn is_drunk_warning() -> bool {
-    use super::engine::thresholds::WARNING_DRUNK;
+    use super::engine::needs;
     let state = unsafe { (*GAME.get()).as_ref() };
-    state.is_some_and(|s| !s.alcoholic && s.drunk > WARNING_DRUNK())
+    state.is_some_and(|s| !s.dependent && s.booze as i32 > needs::booze_hi())
 }
 
 // ---------------------------------------------------------------------------
@@ -343,9 +343,16 @@ static REALM_DIRTY: AtomicBool = AtomicBool::new(false);
 fn current_severity(state: &GameState) -> Severity {
     use super::engine::Phase;
     use super::engine::thresholds::{
-        SICK_TRIGGER_HUNGER, SICK_TRIGGER_TIRED, WARNING_HUNGER, WARNING_MISERABLE, WARNING_SICK,
-        WARNING_TIRED,
+        SICK_TRIGGER_HUNGER, SICK_TRIGGER_TIRED, STAT_MAX, WARNING_HUNGER, WARNING_MISERABLE,
+        WARNING_SICK, WARNING_TIRED,
     };
+    // v1 thresholds are bad-high; the v3 levels are good-high, so invert.
+    let (hunger, tired, sick, miserable) = (
+        STAT_MAX() - state.fullness,
+        STAT_MAX() - state.energy,
+        STAT_MAX() - state.health,
+        STAT_MAX() - state.mood,
+    );
 
     if state.phase == Phase::Gone {
         return Severity::Gone;
@@ -357,16 +364,16 @@ fn current_severity(state: &GameState) -> Severity {
     // animation) so that active-action animations — Feeding/Healing/etc
     // — don't "mask" an existing warning and suppress the alert when
     // the action ends.
-    let severe = state.sick > SICK_TRIGGER_TIRED()
-        || state.tired > SICK_TRIGGER_TIRED()
-        || state.hunger > SICK_TRIGGER_HUNGER();
+    let severe = sick > SICK_TRIGGER_TIRED()
+        || tired > SICK_TRIGGER_TIRED()
+        || hunger > SICK_TRIGGER_HUNGER();
     if severe {
         return Severity::Severe;
     }
-    let warning = state.sick > WARNING_SICK()
-        || state.tired > WARNING_TIRED()
-        || state.hunger > WARNING_HUNGER()
-        || state.miserable > WARNING_MISERABLE();
+    let warning = sick > WARNING_SICK()
+        || tired > WARNING_TIRED()
+        || hunger > WARNING_HUNGER()
+        || miserable > WARNING_MISERABLE();
     if warning {
         return Severity::Warning;
     }
@@ -433,7 +440,7 @@ fn check_diabetes_onset(state: &super::engine::GameState) {
 /// mirrors diabetes in the engine (permanent flag + coupled sick
 /// penalty) but previously landed with no announcement at all.
 fn check_alcoholism_onset(state: &super::engine::GameState) {
-    let now = state.alcoholic;
+    let now = state.dependent;
     let prev = WAS_ALCOHOLIC.swap(now, Ordering::Relaxed);
     if now && !prev {
         let muted = crate::GAME_MUTE.load(Ordering::Relaxed);

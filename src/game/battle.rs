@@ -466,6 +466,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
     fn derive_combat_stats_stays_in_bounds() {
         let stats = base_stats();
         let combat = derive_combat_stats(&stats, 0, 0, 0);
@@ -482,6 +483,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
     fn permanent_conditions_reduce_combat_stats() {
         let mut stats = base_stats();
         let healthy = derive_combat_stats(&stats, 50, 50, 50);

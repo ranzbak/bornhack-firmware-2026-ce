@@ -3,6 +3,7 @@
 //!
 //! Host-only (`simulator` feature); nothing here is linked into firmware.
 
+use super::thresholds::STAT_MAX;
 use super::{FoodKind, GameState, PetKind, Phase};
 
 /// Wake a sleeping pet once `tired` drops below this (about 20 %).
@@ -35,6 +36,16 @@ impl Skip {
     };
 }
 
+/// v1-style bad-high levels (hunger, tired, sick, miserable) of `state`.
+pub fn bad_levels(state: &GameState) -> (u16, u16, u16, u16) {
+    (
+        STAT_MAX() - state.fullness,
+        STAT_MAX() - state.energy,
+        STAT_MAX() - state.health,
+        STAT_MAX() - state.mood,
+    )
+}
+
 /// The optimal player: sleep/wake on `tired`, then feed > heal > play, then
 /// proactive feeding. `skip` removes branches for the "perfect minus one
 /// action" profiles (`rest` = never sleeps, wakes at once).
@@ -42,31 +53,33 @@ pub fn optimal_act(state: &mut GameState, skip: Skip) {
     if state.phase != Phase::Active {
         return;
     }
+    // v1 thresholds are bad-high; v3 levels are good-high, so invert.
+    let (hunger, tired, sick, miserable) = bad_levels(state);
 
     if state.is_sleeping {
-        if skip.rest || state.tired < WAKE_BELOW {
+        if skip.rest || tired < WAKE_BELOW {
             state.wake();
         }
         return;
     }
 
-    if !skip.rest && state.tired > SLEEP_ABOVE {
+    if !skip.rest && tired > SLEEP_ABOVE {
         state.sleep();
         return;
     }
-    if !skip.feed && state.hunger > ACT_ABOVE {
+    if !skip.feed && hunger > ACT_ABOVE {
         state.feed(FoodKind::Apple);
         return;
     }
-    if !skip.heal && state.sick > ACT_ABOVE {
+    if !skip.heal && sick > ACT_ABOVE {
         state.heal();
         return;
     }
-    if !skip.play && state.miserable > ACT_ABOVE {
+    if !skip.play && miserable > ACT_ABOVE {
         state.play();
         return;
     }
-    if !skip.feed && state.hunger > PROACTIVE_FEED_ABOVE {
+    if !skip.feed && hunger > PROACTIVE_FEED_ABOVE {
         state.feed(FoodKind::Apple);
     }
 }
@@ -77,19 +90,21 @@ pub fn night_owl_act(state: &mut GameState) {
     if state.phase != Phase::Active {
         return;
     }
+    // v1 thresholds are bad-high; v3 levels are good-high, so invert.
+    let (hunger, _, sick, miserable) = bad_levels(state);
     if state.is_sleeping {
         state.wake();
         return;
     }
-    if state.hunger > ACT_ABOVE {
+    if hunger > ACT_ABOVE {
         state.feed(FoodKind::Apple);
         return;
     }
-    if state.sick > ACT_ABOVE {
+    if sick > ACT_ABOVE {
         state.heal();
         return;
     }
-    if state.miserable > ACT_ABOVE {
+    if miserable > ACT_ABOVE {
         state.play();
     }
 }
@@ -161,10 +176,10 @@ pub fn run(policy: &dyn Policy, seed: u64, max_days: u32, money: bool) -> RunRes
         days: state.age_ticks as f64 / TICKS_PER_DAY as f64,
         ticks: state.age_ticks,
         steps,
-        hunger: state.hunger,
-        tired: state.tired,
-        miserable: state.miserable,
-        sick: state.sick,
+        hunger: STAT_MAX() - state.fullness,
+        tired: STAT_MAX() - state.energy,
+        miserable: STAT_MAX() - state.mood,
+        sick: STAT_MAX() - state.health,
         action_count,
     }
 }

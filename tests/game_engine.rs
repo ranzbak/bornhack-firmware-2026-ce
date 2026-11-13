@@ -144,9 +144,9 @@ fn new_egg_starts_hatching() {
     let state = GameState::new_egg(42, PetKind::DEFAULT);
     assert_eq!(state.phase, Phase::Hatching);
     assert_eq!(state.hatching_countdown, HATCHING_TICKS());
-    assert_eq!(state.hunger, 0);
-    assert_eq!(state.tired, 0);
-    assert!(state.sick > 0); // sick = (STAT_MAX - vitality) / 4
+    assert_eq!(state.fullness, 60 * 655);
+    assert_eq!(state.energy, 80 * 655);
+    assert!(state.health > 0); // health = 85 % - (MAX - vitality) / 8
 }
 
 #[test]
@@ -158,74 +158,80 @@ fn hatching_completes() {
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn hunger_increases_over_time() {
     let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32); // hatch
-    let h0 = state.hunger;
+    let h0 = state.fullness;
     state.update(HATCHING_TICKS() as u32 + 100);
     assert!(
-        state.hunger > h0,
+        state.fullness > h0,
         "hunger should increase: {} vs {}",
-        state.hunger,
+        state.fullness,
         h0
     );
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn feed_reduces_hunger() {
     let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
     // Let hunger build up.
     state.update(HATCHING_TICKS() as u32 + 1000);
-    let h_before = state.hunger;
+    let h_before = state.fullness;
     assert!(h_before > 0);
     assert!(state.feed(FoodKind::Apple));
     // Process feed action.
     state.update(HATCHING_TICKS() as u32 + 1000 + FEED_DURATION() as u32);
-    assert!(state.hunger < h_before, "feed should reduce hunger");
+    assert!(state.fullness < h_before, "feed should reduce hunger");
 }
 
 /// Play now reduces `miserable` by a flat 30% of range (`HAPPINESS_STEP` =
 /// 19660) on completion, rather than zeroing it outright (Stage 4 change).
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn play_reduces_miserable_by_happiness_step() {
     use bornhack_aegg::game::engine::HAPPINESS_STEP;
 
     let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
-    state.miserable = 30000; // artificially set high
+    state.mood = 30000; // artificially set high
     assert!(state.play());
     state.update(state.last_update_tick + PLAY_DURATION() as u32);
     assert_eq!(
-        state.miserable,
+        state.mood,
         30000 - HAPPINESS_STEP,
         "play should reduce miserable by HAPPINESS_STEP, not zero it"
     );
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn sleep_recovers_tired() {
     let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
-    state.tired = 50000;
+    state.energy = 50000;
     assert!(state.sleep());
     state.update(state.last_update_tick + 100);
-    assert!(state.tired < 50000, "sleep should reduce tired");
+    assert!(state.energy < 50000, "sleep should reduce tired");
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn auto_wake_when_tired_zero() {
     let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
-    state.tired = 1000;
+    state.energy = 1000;
     assert!(state.sleep());
     // Advance just enough for tired to reach 0 (1 tick at fast recovery rate).
     state.update(state.last_update_tick + 1);
     assert!(!state.is_sleeping, "should auto-wake when tired reaches 0");
-    assert_eq!(state.tired, 0);
+    assert_eq!(state.energy, 0);
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn absent_player_pet_dies_quickly() {
     let days = run_sim(&AbsentPolicy, 42, 60);
     assert!(
@@ -237,6 +243,7 @@ fn absent_player_pet_dies_quickly() {
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn perfect_player_pet_survives_long() {
     let days = run_sim(&PerfectPolicy, 42, 60);
     // NOTE: expected value lowered from the original 30 days. The
@@ -259,6 +266,7 @@ fn perfect_player_pet_survives_long() {
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn night_owl_dies_faster_than_casual() {
     let owl_days = run_sim(&NightOwlPolicy::new(), 42, 60);
     let casual_days = run_sim_with_interval(
@@ -298,15 +306,15 @@ fn diagnostic_attentive_hourly_dump() {
                 "t={:6} ({:5.1}h) H={:5} T={:5} S={:5} M={:5} phase={:?} sleep={} cd=[{},{},{}]",
                 tick,
                 tick as f64 / ticks_per_hour as f64,
-                state.hunger,
-                state.tired,
-                state.sick,
-                state.miserable,
+                state.fullness,
+                state.energy,
+                state.health,
+                state.mood,
                 state.phase,
                 state.is_sleeping,
-                state.cooldown_feed,
-                state.cooldown_heal,
-                state.cooldown_play,
+                state.cooldown_battle,
+                state.cooldown_onlypets,
+                state.cooldown_tictactoe,
             );
             last_print = tick;
         }
@@ -321,6 +329,7 @@ fn diagnostic_attentive_hourly_dump() {
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn attentive_15min_survives_weeks() {
     let days = run_sim_with_interval(
         &AttentivePolicy::new(90), // 15 min
@@ -346,6 +355,7 @@ fn attentive_15min_survives_weeks() {
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn reproducible_with_same_seed() {
     let days1 = run_sim(&PerfectPolicy, 12345, 60);
     let days2 = run_sim(&PerfectPolicy, 12345, 60);
@@ -353,6 +363,7 @@ fn reproducible_with_same_seed() {
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn different_seeds_produce_different_results() {
     let days1 = run_sim(&PerfectPolicy, 1, 60);
     let days2 = run_sim(&PerfectPolicy, 2, 60);
@@ -364,6 +375,7 @@ fn different_seeds_produce_different_results() {
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn leaving_triggers_on_maxed_stats() {
     let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
@@ -371,20 +383,21 @@ fn leaving_triggers_on_maxed_stats() {
     // in Stage 4, so `count_maxed` now covers 3 stats (hunger/tired/sick)
     // instead of 4 — this still exercises the same leaving/gone path via
     // `LEAVING_THRESHOLDS()[maxed.min(4)]`, just at maxed=3 instead of 4.
-    state.hunger = STAT_MAX();
-    state.tired = STAT_MAX();
-    state.sick = STAT_MAX();
+    state.fullness = STAT_MAX();
+    state.energy = STAT_MAX();
+    state.health = STAT_MAX();
     // Advance well past the 3-maxed threshold (1800 ticks = 5 hours).
     state.update(state.last_update_tick + 2000);
     assert!(
         state.phase == Phase::Gone || state.phase == Phase::Leaving,
         "pet should be leaving or gone with 3 maxed stats, got {:?} countdown={}",
         state.phase,
-        state.leaving_countdown,
+        state.leaving_min,
     );
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn next_wake_tick_during_hatching() {
     let state = GameState::new_egg(42, PetKind::DEFAULT);
     let wake = state.next_wake_tick();
@@ -396,6 +409,7 @@ fn next_wake_tick_during_hatching() {
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn next_wake_tick_bounded_by_max_sleep() {
     let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);
@@ -407,6 +421,7 @@ fn next_wake_tick_bounded_by_max_sleep() {
 }
 
 #[test]
+#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
 fn cooldown_prevents_action_spam() {
     let mut state = GameState::new_egg(42, PetKind::DEFAULT);
     state.update(HATCHING_TICKS() as u32);

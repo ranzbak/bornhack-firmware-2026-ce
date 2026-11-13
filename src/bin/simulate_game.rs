@@ -5,7 +5,7 @@
 //! Or:    `make simulate-game`
 
 use bornhack_aegg::game::engine::sim::{
-    self, ACT_ABOVE, Policy, SLEEP_ABOVE, Skip, WAKE_BELOW, night_owl_act, optimal_act,
+    self, ACT_ABOVE, bad_levels, Policy, SLEEP_ABOVE, Skip, WAKE_BELOW, night_owl_act, optimal_act,
 };
 use bornhack_aegg::game::engine::{FoodKind, GameState, Phase};
 
@@ -108,21 +108,22 @@ impl Policy for LimitedCarePolicy {
         if state.phase != Phase::Active {
             return;
         }
+        let (hunger, tired, sick, _) = bad_levels(state);
         if state.is_sleeping {
-            if state.tired < WAKE_BELOW {
+            if tired < WAKE_BELOW {
                 state.wake();
             }
             return;
         }
-        if state.tired > SLEEP_ABOVE {
+        if tired > SLEEP_ABOVE {
             state.sleep();
             return;
         }
-        if state.hunger > ACT_ABOVE {
+        if hunger > ACT_ABOVE {
             state.feed(FoodKind::Apple);
             return;
         }
-        if self.heal && state.sick > ACT_ABOVE {
+        if self.heal && sick > ACT_ABOVE {
             state.heal();
         }
     }

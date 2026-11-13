@@ -74,3 +74,26 @@ fn custom_flag_only_when_values_differ() {
     t.FULL_HI_PCT = 80;
     assert!(is_custom_set(&t, Mode::Classic));
 }
+
+#[test]
+fn new_egg_starts_inside_every_band() {
+    use bornhack_aegg::game::engine::needs::{
+        dirt_hi, energy_lo, fit_lo, full_hi, full_lo, fun_hi, fun_lo, water_hi, water_lo,
+        weight_hi, weight_lo,
+    };
+    use bornhack_aegg::game::engine::thresholds::HATCHING_TICKS;
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase};
+
+    let mut s = GameState::new_egg(42, PetKind::DEFAULT);
+    s.update(HATCHING_TICKS() as u32);
+    assert_eq!(s.phase, Phase::Active);
+
+    let inside = |v: u16, lo: i32, hi: i32| (lo..=hi).contains(&(v as i32));
+    assert!(inside(s.fullness, full_lo(), full_hi()), "fullness {}", s.fullness);
+    assert!(inside(s.hydration, water_lo(), water_hi()), "hydration {}", s.hydration);
+    assert!(s.energy as i32 >= energy_lo(), "energy {}", s.energy);
+    assert!(inside(s.fun, fun_lo(), fun_hi()), "fun {}", s.fun);
+    assert!(inside(s.weight, weight_lo(), weight_hi()), "weight {}", s.weight);
+    assert!((s.dirt as i32) < dirt_hi(), "dirt {}", s.dirt);
+    assert!(s.fitness as i32 >= fit_lo(), "fitness {}", s.fitness);
+}

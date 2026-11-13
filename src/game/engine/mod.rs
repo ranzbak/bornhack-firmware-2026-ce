@@ -19,6 +19,7 @@ pub mod sim;
 pub mod thresholds;
 pub mod to_display;
 
+use needs::{MAX, P};
 use thresholds::*;
 pub use drink::DrinkKind;
 pub use food::FoodKind;
@@ -157,6 +158,7 @@ impl Action {
     /// with the `drained` stat it existed to relieve. Left unassigned
     /// (rather than renumbering Play onward) so old persisted bytes for
     /// the other actions keep meaning across the removal.
+    #[allow(dead_code)] // used again by the v3 save format (task 11)
     fn to_u8(self) -> u8 {
         match self {
             Action::Feed => 0,
@@ -171,6 +173,7 @@ impl Action {
         }
     }
 
+    #[allow(dead_code)] // used again by the v3 save format (task 11)
     fn from_u8(v: u8) -> Option<Self> {
         match v {
             0 => Some(Action::Feed),
@@ -206,26 +209,58 @@ pub struct GameState {
     // Pet kind.
     pub pet_kind: PetKind,
 
-    // Primary stats (0 = best, STAT_MAX() = worst).
-    pub hunger: u16,
-    pub tired: u16,
-    pub sick: u16,
-    pub miserable: u16,
+    // Needs. v3 levels are good-high (u16 scale, `needs::P` = one percent).
+    pub fullness: u16,
+    pub energy: u16,
+    pub health: u16,
+    pub mood: u16,
+    /// Body mass: 50 % is ideal, both ends are unhealthy.
     pub weight: u16,
-    pub drunk: u16,
+    pub booze: u16,
+    pub hydration: u16,
+    pub fun: u16,
+    pub strain: u16,
+    pub dirt: u16,
+    pub fitness: u16,
+
+    // Minute timers (1 engine minute = 6 ticks).
+    pub sleep_min: u16,
+    pub oversleep_min: u16,
+    pub good_sleep_min: u16,
+    pub rested_min: u16,
+    pub injured_min: u16,
+    pub groggy_min: u16,
+    pub hangover_min: u16,
+    pub rehab_min: u16,
+    pub recovering_min: u16,
+    pub junk_min: u16,
+    pub ozempic_min: u16,
+    pub med_cd_min: u16,
+    pub insulin_min: u16,
+    pub ozempic_cd_min: u16,
+    pub reversal_min: u16,
+
+    // Flags and small counters.
+    pub booze_peak: bool,
+    pub deprived: bool,
+    pub night: bool,
+    pub no_groggy: bool,
+    pub short_nights: u8,
+    pub good_nights: u8,
+    /// Ticks left over when `update` converts ticks to whole minutes.
+    pub tick_rem: u8,
+    pub care_good_min: u32,
+    pub care_awake_min: u32,
 
     // Diabetes — permanent once triggered by sustained overweight.
     pub diabetic: bool,
-    /// Ticks accumulated while `weight` has stayed above
-    /// `OVERWEIGHT_TRIGGER()`.  Resets to 0 whenever weight drops back
-    /// below the trigger.  Once this reaches `DIABETES_ONSET_TICKS()`,
-    /// `diabetic` flips true and stays true for the rest of this pet's life.
-    overweight_ticks: u32,
+    /// Minutes spent overweight; once it reaches the onset time `diabetic`
+    /// flips true for the rest of this pet's life.
+    pub diabetes_min: u32,
 
-    // Alcoholism — permanent once triggered by sustained drunkenness.
-    // Same pattern as diabetes/overweight above, just on the `drunk` stat.
-    pub alcoholic: bool,
-    drunk_ticks: u32,
+    // Dependence — permanent once triggered by sustained drinking.
+    pub dependent: bool,
+    pub dependence_min: u32,
 
     // Traits (higher = better).
     pub vitality: u16,
@@ -239,7 +274,8 @@ pub struct GameState {
     // Lifecycle.
     pub phase: Phase,
     pub hatching_countdown: u16,
-    pub leaving_countdown: u32,
+    /// Minutes spent in the leaving countdown.
+    pub leaving_min: u32,
     pub generation: u16,
 
     // Mesh Battle record — lifetime counters, never reset by anything
@@ -271,27 +307,6 @@ pub struct GameState {
     /// Same transient/not-persisted treatment as `active_food`.
     pub active_drink: Option<DrinkKind>,
     pub action_ticks_remaining: u8,
-    pub cooldown_feed: u16,
-    pub cooldown_heal: u16,
-    /// No longer settable by anything (the `Relax` action it gated was
-    /// removed along with the `drained` stat it existed to relieve) —
-    /// kept purely so the persisted save layout doesn't shift. Always
-    /// 0 for any pet created after this change.
-    pub cooldown_relax: u16,
-    pub cooldown_play: u16,
-    pub cooldown_exercise: u16,
-    /// Doubles as the medication "protection window": while this is
-    /// above 0 the diabetes sick-penalty is suppressed, same counter
-    /// gates the "Give medication" menu item's cooldown.
-    pub cooldown_medicate: u16,
-    /// Ozempic cooldown — separate from `cooldown_medicate` since
-    /// Ozempic isn't gated on being diabetic and doesn't affect the
-    /// sick-penalty suppression.
-    pub cooldown_ozempic: u16,
-    pub cooldown_drink: u16,
-    /// Doubles as the alcoholism-treatment protection window, mirrors
-    /// `cooldown_medicate`.
-    pub cooldown_rehab: u16,
     /// Cooldown between mesh Battles — resolves instantly (no in-progress
     /// duration), so this is the only battle-related field that behaves
     /// like the other primary-action cooldowns above.
@@ -308,10 +323,6 @@ pub struct GameState {
     /// same policy as the mini-game cooldowns above — rebooting mid-cooldown
     /// just makes the action available again a little early.
     pub cooldown_onlypets: u16,
-
-    // Interval counters (track ticks since last interval fire).
-    miserable_interval_counter: u32,
-    tired_passive_counter: u32,
 
     // Sleep.
     pub is_sleeping: bool,
@@ -365,18 +376,49 @@ impl GameState {
         Self {
             pet_kind: kind,
 
-            hunger: 0,
-            tired: 0,
-            sick: (STAT_MAX() - vitality) / 4,
-            miserable: 0,
-            weight: 0,
-            drunk: 0,
+            fullness: 60 * P as u16,
+            energy: 80 * P as u16,
+            health: (85 * P - (MAX - vitality as i32) / 8) as u16,
+            mood: 70 * P as u16,
+            weight: 50 * P as u16,
+            booze: 0,
+            hydration: 65 * P as u16,
+            fun: 50 * P as u16,
+            strain: 0,
+            dirt: 10 * P as u16,
+            fitness: 60 * P as u16,
+
+            sleep_min: 0,
+            oversleep_min: 0,
+            good_sleep_min: 0,
+            rested_min: 0,
+            injured_min: 0,
+            groggy_min: 0,
+            hangover_min: 0,
+            rehab_min: 0,
+            recovering_min: 0,
+            junk_min: 0,
+            ozempic_min: 0,
+            med_cd_min: 0,
+            insulin_min: 0,
+            ozempic_cd_min: 0,
+            reversal_min: 0,
+
+            booze_peak: false,
+            deprived: false,
+            night: false,
+            no_groggy: false,
+            short_nights: 0,
+            good_nights: 0,
+            tick_rem: 0,
+            care_good_min: 0,
+            care_awake_min: 0,
 
             diabetic: false,
-            overweight_ticks: 0,
+            diabetes_min: 0,
 
-            alcoholic: false,
-            drunk_ticks: 0,
+            dependent: false,
+            dependence_min: 0,
 
             vitality,
             curiosity,
@@ -387,7 +429,7 @@ impl GameState {
 
             phase: Phase::Hatching,
             hatching_countdown: HATCHING_TICKS(),
-            leaving_countdown: 0,
+            leaving_min: 0,
             generation: 0,
 
             wins: 0,
@@ -401,15 +443,6 @@ impl GameState {
             active_food: None,
             active_drink: None,
             action_ticks_remaining: 0,
-            cooldown_feed: 0,
-            cooldown_heal: 0,
-            cooldown_relax: 0,
-            cooldown_play: 0,
-            cooldown_exercise: 0,
-            cooldown_medicate: 0,
-            cooldown_ozempic: 0,
-            cooldown_drink: 0,
-            cooldown_rehab: 0,
             cooldown_battle: 0,
             cooldown_tictactoe: 0,
             cooldown_lightsout: 0,
@@ -417,9 +450,6 @@ impl GameState {
             cooldown_nim: 0,
             cooldown_bornjeweled: 0,
             cooldown_onlypets: 0,
-
-            miserable_interval_counter: 0,
-            tired_passive_counter: 0,
 
             is_sleeping: false,
             hibernating: false,
@@ -442,89 +472,6 @@ impl GameState {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Saturating add for u16 stats (capped at STAT_MAX()).
-fn sat_add(val: u16, delta: u16) -> u16 {
-    val.saturating_add(delta)
-}
-
-/// Saturating sub for u16 stats (floored at 0).
-fn sat_sub(val: u16, delta: u16) -> u16 {
-    val.saturating_sub(delta)
-}
-
-/// Multiply rate × delta in u32 space, capped to u16 range.
-/// This is the `y += m * dt` step — safe for large deltas.
-/// Takes dt as u32 to avoid truncation on large piecewise segments.
-fn mul_dt(rate: u16, dt: u32) -> u16 {
-    (rate as u32 * dt).min(STAT_MAX() as u32) as u16
-}
-
-/// How many times an interval fires in `delta` ticks, given a counter
-/// that has already accumulated `counter` ticks since the last fire.
-/// Returns (fire_count, new_counter).
-fn interval_fires(delta: u32, counter: u32, interval: u32) -> (u32, u32) {
-    let interval = interval.max(1); // never divide by zero, whatever the source
-    let total = counter + delta;
-    let fires = total / interval;
-    let new_counter = total % interval;
-    (fires, new_counter)
-}
-
-/// Count how many of the three primary stats exceed the 60% threshold.
-fn count_above_60(state: &GameState) -> u32 {
-    let t = MISERABLE_STAT_THRESHOLD();
-    (state.hunger > t) as u32 + (state.tired > t) as u32 + (state.sick > t) as u32
-}
-
-/// Check if any stat triggers sick condition decay.
-fn sick_condition_active(state: &GameState) -> bool {
-    state.hunger > SICK_TRIGGER_HUNGER() || state.tired > SICK_TRIGGER_TIRED()
-}
-
-/// Extra `sick` accrual for `delta` ticks while diabetic and unmedicated.
-/// Zero while medication is protecting (`cooldown_medicate > 0`) or mid-dose.
-fn diabetes_penalty(state: &GameState, delta: u32, miserable_high: bool) -> u16 {
-    if !state.diabetic
-        || state.cooldown_medicate > 0
-        || state.active_action == Some(Action::Medicate)
-    {
-        return 0;
-    }
-    let rate = if miserable_high {
-        DIABETES_SICK_MISERABLE_RATE()
-    } else {
-        DIABETES_SICK_RATE()
-    };
-    mul_dt(rate, delta)
-}
-
-/// Extra `sick` accrual for `delta` ticks while alcoholic and untreated.
-/// Mirrors `diabetes_penalty` exactly — same pattern, different
-/// permanent condition and its own treatment (rehab instead of insulin).
-fn alcoholism_penalty(state: &GameState, delta: u32, miserable_high: bool) -> u16 {
-    if !state.alcoholic || state.cooldown_rehab > 0 || state.active_action == Some(Action::Rehab) {
-        return 0;
-    }
-    let rate = if miserable_high {
-        ALCOHOLIC_SICK_MISERABLE_RATE()
-    } else {
-        ALCOHOLIC_SICK_RATE()
-    };
-    mul_dt(rate, delta)
-}
-
-/// Curiosity modifier for play costs: 0–10 range, higher = cheaper.
-fn curiosity_modifier(curiosity: u16) -> u16 {
-    (curiosity as u32 * 10 / STAT_MAX() as u32) as u16
-}
-
-/// Count of maxed stats (= STAT_MAX()).
-fn count_maxed(state: &GameState) -> usize {
-    (state.hunger == STAT_MAX()) as usize
-        + (state.tired == STAT_MAX()) as usize
-        + (state.sick == STAT_MAX()) as usize
-}
 
 // ---------------------------------------------------------------------------
 // Delta-T update
@@ -573,581 +520,16 @@ impl GameState {
             Phase::Leaving | Phase::Active => {}
         }
 
-        let mut remaining = total_delta;
-
-        // Consume action ticks first (these are short, ≤ 4 ticks).
-        remaining = self.consume_action_ticks(remaining);
-        // Action completion may have zeroed `miserable` (Play does); the
-        // floor re-asserts the severe / leaving caps immediately so the
-        // reset can't undercut them.
-        self.apply_miserable_floor();
-
-        // Piecewise decay: advance to the next boundary, apply, repeat.
-        while remaining > 0 && self.phase != Phase::Gone {
-            // How far can we go at current rates before something changes?
-            let segment = self.ticks_to_next_rate_change().min(remaining);
-            let segment = segment.max(1); // always advance at least 1 tick
-
-            self.consume_cooldowns(segment);
-
-            if self.is_sleeping {
-                self.apply_sleep_decay(segment);
-            } else {
-                self.apply_awake_decay(segment);
-            }
-
-            self.check_leaving(segment);
-            self.check_diabetes(segment);
-            self.check_alcoholism(segment);
-            // Apply the severe/leaving floor after stats and phase have
-            // been updated for this segment, so the next iteration's
-            // rate calculation sees the bumped `miserable`.
-            self.apply_miserable_floor();
-            remaining -= segment;
-        }
-    }
-
-    /// Enforce the minimum-`miserable` floor required by the severe and
-    /// leaving caps:
-    ///
-    /// * `Phase::Leaving` → miserable ≥ 50 % of `STAT_MAX()` (≡ displayed Happy ≤
-    ///   50 %).  This is a flat cap and does *not* add to the per-stat severe
-    ///   penalties.
-    /// * Each primary stat above its critical threshold → an additional −20 %
-    ///   cap on Happy (= +20 % miserable per critical stat).  Up to 3 stats can
-    ///   be critical, so the severe path can push miserable to 60 %.
-    /// * The two rules are evaluated independently and the **higher** floor
-    ///   wins (= lower Happy displayed).
-    ///
-    /// Recovery via `Play` only goes down to whichever floor is active
-    /// at the time, so the player can never make a leaving / severely
-    /// distressed pet appear happy.  Once the conditions clear (stats
-    /// drop below critical AND phase returns to Active), the floor is
-    /// 0 again and Play's reset works normally.
-    fn apply_miserable_floor(&mut self) {
-        let critical = (self.hunger > SICK_TRIGGER_HUNGER()) as u32
-            + (self.tired > SICK_TRIGGER_TIRED()) as u32
-            + (self.sick > SICK_TRIGGER_TIRED()) as u32;
-        let floor_severe = (critical * (STAT_MAX() as u32 / 5)).min(STAT_MAX() as u32) as u16;
-        let floor_leaving = if self.phase == Phase::Leaving {
-            STAT_MAX() / 2
-        } else {
-            0
-        };
-        let floor = floor_severe.max(floor_leaving);
-        if self.miserable < floor {
-            self.miserable = floor;
-        }
-    }
-
-    /// Ticks until a threshold crossing changes the rate equation.
-    ///
-    /// Every boundary where a stat's rate (or another stat's rate that
-    /// depends on it) changes is checked.  Returns the minimum across all.
-    fn ticks_to_next_rate_change(&self) -> u32 {
-        let mut m = u32::MAX;
-        let miserable_high = self.miserable >= MISERABLE_BOOST_THRESHOLD();
-
-        // Helper: ticks for a linearly-increasing stat to reach `target`.
-        let ticks_up = |val: u16, target: u16, rate: u16| -> u32 {
-            if val >= target || rate == 0 {
-                return u32::MAX;
-            }
-            (target - val) as u32 / rate as u32
-        };
-
-        // Helper: ticks for a linearly-decreasing stat to reach `target`.
-        let ticks_down = |val: u16, target: u16, rate: u16| -> u32 {
-            if val <= target || rate == 0 {
-                return u32::MAX;
-            }
-            (val - target) as u32 / rate as u32
-        };
-
-        // Helper: ticks for an interval-based stat to reach `target`.
-        let ticks_interval = |val: u16, target: u16, amount: u16, interval: u32| -> u32 {
-            if val >= target || amount == 0 {
-                return u32::MAX;
-            }
-            let fires = (target - val) as u32 / amount as u32;
-            fires.saturating_mul(interval)
-        };
-
-        // Current hunger rate.
-        let hunger_rate = if self.cooldown_feed > 0 {
-            0
-        } else {
-            HUNGER_RATE()
-                + if miserable_high {
-                    HUNGER_MISERABLE_BOOST()
-                } else {
-                    0
-                }
-        };
-
-        // Current tired rate (never suppressed).
-        let tired_rate = TIRED_RATE()
-            + if miserable_high {
-                TIRED_MISERABLE_BOOST()
-            } else {
-                0
-            };
-
-        // Current miserable interval.
-        let mis_interval = if self.cooldown_play > 0 {
-            u32::MAX
-        } else {
-            let above = count_above_60(self);
-            MISERABLE_INTERVAL_BASE()
-                .saturating_sub(MISERABLE_INTERVAL_PER_STAT() * above)
-                .max(MISERABLE_INTERVAL_MIN())
-        };
-
-        // ── Boundaries that change the miserable interval (count_above_60) ──
-
-        // Each primary stat crossing 60% changes the miserable decay rate.
-        let t60 = MISERABLE_STAT_THRESHOLD();
-        m = m.min(ticks_up(self.hunger, t60, hunger_rate));
-        m = m.min(ticks_up(self.tired, t60, tired_rate));
-        // Sick rate mirrors apply_awake_decay/apply_sleep_decay's sick term
-        // exactly (base + condition + diabetes + alcoholism, suppressed
-        // during Heal) so the boundary estimate can't undershoot the real
-        // rate. Omitting diabetes/alcoholism here previously made this an
-        // underestimate for diabetic-unmedicated/alcoholic-untreated pets,
-        // which oversized the piecewise segment and let check_leaving()
-        // charge a whole oversized segment as "maxed" in one shot — enough
-        // to jump straight past the Leaving phase into Gone on a long
-        // fast-forward (e.g. the Skip 1 day cheat).
-        let sick_rate_approx = if self.cooldown_heal > 0 || self.active_action == Some(Action::Heal)
-        {
-            0
-        } else {
-            let condition = if sick_condition_active(self) {
-                if miserable_high {
-                    SICK_CONDITION_MISERABLE_RATE()
-                } else {
-                    SICK_CONDITION_RATE()
-                }
-            } else {
-                0
-            };
-            let diabetes = if self.diabetic
-                && self.cooldown_medicate == 0
-                && self.active_action != Some(Action::Medicate)
-            {
-                if miserable_high {
-                    DIABETES_SICK_MISERABLE_RATE()
-                } else {
-                    DIABETES_SICK_RATE()
-                }
-            } else {
-                0
-            };
-            let alcoholism = if self.alcoholic
-                && self.cooldown_rehab == 0
-                && self.active_action != Some(Action::Rehab)
-            {
-                if miserable_high {
-                    ALCOHOLIC_SICK_MISERABLE_RATE()
-                } else {
-                    ALCOHOLIC_SICK_RATE()
-                }
-            } else {
-                0
-            };
-            SICK_RATE()
-                .saturating_add(condition)
-                .saturating_add(diabetes)
-                .saturating_add(alcoholism)
-        };
-        m = m.min(ticks_up(self.sick, t60, sick_rate_approx));
-
-        // ── Boundaries that change sick condition decay ──
-
-        m = m.min(ticks_up(self.hunger, SICK_TRIGGER_HUNGER(), hunger_rate));
-        m = m.min(ticks_up(self.tired, SICK_TRIGGER_TIRED(), tired_rate));
-
-        // ── Miserable thresholds (change hunger/tired rates) ──
-
-        m = m.min(ticks_interval(
-            self.miserable,
-            MISERABLE_BOOST_THRESHOLD(),
-            MISERABLE_AMOUNT(),
-            mis_interval,
-        ));
-
-        // ── Stats reaching STAT_MAX (changes leaving behavior) ──
-
-        m = m.min(ticks_up(self.hunger, STAT_MAX(), hunger_rate));
-        m = m.min(ticks_up(self.tired, STAT_MAX(), tired_rate));
-        m = m.min(ticks_up(self.sick, STAT_MAX(), sick_rate_approx));
-
-        // ── Cooldown expiry (suppression ends → rate resumes) ──
-
-        if self.cooldown_feed > 0 {
-            m = m.min(self.cooldown_feed as u32);
-        }
-        if self.cooldown_heal > 0 {
-            m = m.min(self.cooldown_heal as u32);
-        }
-        if self.cooldown_play > 0 {
-            m = m.min(self.cooldown_play as u32);
-        }
-        if self.cooldown_exercise > 0 {
-            m = m.min(self.cooldown_exercise as u32);
-        }
-        if self.cooldown_medicate > 0 {
-            m = m.min(self.cooldown_medicate as u32);
-        }
-        if self.cooldown_ozempic > 0 {
-            m = m.min(self.cooldown_ozempic as u32);
-        }
-        if self.cooldown_drink > 0 {
-            m = m.min(self.cooldown_drink as u32);
-        }
-        if self.cooldown_rehab > 0 {
-            m = m.min(self.cooldown_rehab as u32);
-        }
-
-        // ── Sleep tier transitions ──
-
-        if self.is_sleeping {
-            m = m.min(ticks_down(self.tired, SLEEP_TIER_SLOW(), SLEEP_RECOVERY_SLOW()).max(1));
-            m = m.min(ticks_down(self.tired, SLEEP_TIER_MEDIUM(), SLEEP_RECOVERY_MEDIUM()).max(1));
-            // Auto-wake: tired → 0.
-            let wake_rate = if self.tired >= SLEEP_TIER_SLOW() {
-                SLEEP_RECOVERY_SLOW()
-            } else if self.tired >= SLEEP_TIER_MEDIUM() {
-                SLEEP_RECOVERY_MEDIUM()
-            } else {
-                SLEEP_RECOVERY_FAST()
-            };
-            m = m.min(ticks_down(self.tired, 0, wake_rate).max(1));
-        }
-
-        m
+        // Consume action ticks first (v2 effects land in a later task).
+        let _remaining = self.consume_action_ticks(total_delta);
+        todo!("BornPets v2 plan 1: v2 delta-T update (later task)")
     }
 
     /// Consume action ticks from delta, applying action effects.
     /// Returns remaining delta after action ticks are consumed.
-    fn consume_action_ticks(&mut self, mut delta: u32) -> u32 {
-        if let Some(action) = self.active_action {
-            let ticks = delta.min(self.action_ticks_remaining as u32);
-            self.action_ticks_remaining -= ticks as u8;
-            delta -= ticks;
-
-            let t = ticks as u16;
-            match action {
-                Action::Feed => {
-                    let food = self.active_food.unwrap_or(FoodKind::Apple);
-                    let hunger_relief = food.scale_hunger_relief(FEED_HUNGER_RELIEF());
-                    let weight_gain = food.scale_weight_gain(FEED_WEIGHT_GAIN());
-                    self.hunger = sat_sub(self.hunger, mul_dt(hunger_relief, t as u32));
-                    // Overfeeding compounds the passive weight gain — how much
-                    // depends entirely on what was eaten (see FoodKind).
-                    self.weight = sat_add(self.weight, mul_dt(weight_gain, t as u32));
-                }
-                Action::Heal => {
-                    self.sick = sat_sub(self.sick, mul_dt(HEAL_SICK_RELIEF(), t as u32));
-                }
-                Action::Play => {
-                    let cm = curiosity_modifier(self.curiosity);
-                    let cost_mul = (10u16.saturating_sub(cm)) as u32;
-                    let apply = |base: u16| -> u16 {
-                        mul_dt((base as u32 * cost_mul / 10) as u16, t as u32)
-                    };
-                    self.hunger = sat_add(self.hunger, apply(PLAY_HUNGER_COST()));
-                    self.tired = sat_add(self.tired, apply(PLAY_TIRED_COST()));
-                }
-                Action::Exercise => {
-                    self.weight = sat_sub(self.weight, mul_dt(EXERCISE_WEIGHT_RELIEF(), t as u32));
-                    self.tired = sat_add(self.tired, mul_dt(EXERCISE_TIRED_COST(), t as u32));
-                    self.hunger = sat_add(self.hunger, mul_dt(EXERCISE_HUNGER_COST(), t as u32));
-                }
-                Action::Medicate => {}
-                Action::Ozempic => {
-                    self.weight = sat_sub(self.weight, mul_dt(OZEMPIC_WEIGHT_RELIEF(), t as u32));
-                    self.hunger = sat_sub(self.hunger, mul_dt(OZEMPIC_HUNGER_RELIEF(), t as u32));
-                }
-                Action::Drink => {
-                    let drink = self.active_drink.unwrap_or(DrinkKind::Beer);
-                    let drunk_gain = drink.scale_drunk_gain(DRINK_DRUNK_GAIN());
-                    let weight_gain = drink.scale_weight_gain(DRINK_WEIGHT_GAIN());
-                    self.drunk = sat_add(self.drunk, mul_dt(drunk_gain, t as u32));
-                    self.weight = sat_add(self.weight, mul_dt(weight_gain, t as u32));
-                }
-                Action::Rehab => {}
-                Action::OnlyPets => {}
-            }
-
-            if self.action_ticks_remaining == 0 {
-                // Action complete — set cooldown.
-                match action {
-                    Action::Feed => self.cooldown_feed = FEED_COOLDOWN(),
-                    Action::Heal => self.cooldown_heal = HEAL_COOLDOWN(),
-                    Action::Play => {
-                        // +30% happiness (was: zero it out entirely) — see
-                        // `HAPPINESS_STEP` doc comment.
-                        self.miserable = sat_sub(self.miserable, HAPPINESS_STEP);
-                        self.cooldown_play = PLAY_COOLDOWN();
-                    }
-                    Action::Exercise => self.cooldown_exercise = EXERCISE_COOLDOWN(),
-                    Action::Medicate => self.cooldown_medicate = MEDICATE_COOLDOWN(),
-                    Action::Ozempic => self.cooldown_ozempic = OZEMPIC_COOLDOWN(),
-                    Action::Drink => self.cooldown_drink = DRINK_COOLDOWN(),
-                    Action::Rehab => self.cooldown_rehab = REHAB_COOLDOWN(),
-                    Action::OnlyPets => {
-                        // Only reachable when `money_enabled` (see `only_pets()`
-                        // doc comment) — balance is unchanged during the
-                        // animation, so checking it here is equivalent to
-                        // checking it at start time.
-                        if self.money_enabled {
-                            if self.money < BROKE_THRESHOLD {
-                                // Broke: forced work — big pay, but happiness drops.
-                                self.add_money(ONLYPETS_BROKE_REWARD);
-                                self.miserable = sat_add(self.miserable, HAPPINESS_STEP);
-                            } else {
-                                // Has money: hobby — small pay, happiness rises.
-                                self.add_money(ONLYPETS_HOBBY_REWARD);
-                                self.miserable = sat_sub(self.miserable, HAPPINESS_STEP);
-                            }
-                        }
-                        self.cooldown_onlypets = PLAY_COOLDOWN();
-                    }
-                }
-                self.active_action = None;
-                self.active_food = None;
-            }
-        }
-        delta
-    }
-
-    /// Consume cooldown ticks from delta.
-    fn consume_cooldowns(&mut self, delta: u32) {
-        // Cooldowns are u16; delta may exceed u16 on large jumps.
-        let d = delta.min(u16::MAX as u32) as u16;
-        self.cooldown_feed = self.cooldown_feed.saturating_sub(d);
-        self.cooldown_heal = self.cooldown_heal.saturating_sub(d);
-        self.cooldown_relax = self.cooldown_relax.saturating_sub(d);
-        self.cooldown_play = self.cooldown_play.saturating_sub(d);
-        self.cooldown_exercise = self.cooldown_exercise.saturating_sub(d);
-        self.cooldown_medicate = self.cooldown_medicate.saturating_sub(d);
-        self.cooldown_ozempic = self.cooldown_ozempic.saturating_sub(d);
-        self.cooldown_drink = self.cooldown_drink.saturating_sub(d);
-        self.cooldown_rehab = self.cooldown_rehab.saturating_sub(d);
-        self.cooldown_battle = self.cooldown_battle.saturating_sub(d);
-        self.cooldown_tictactoe = self.cooldown_tictactoe.saturating_sub(d);
-        self.cooldown_lightsout = self.cooldown_lightsout.saturating_sub(d);
-        self.cooldown_blackhole = self.cooldown_blackhole.saturating_sub(d);
-        self.cooldown_nim = self.cooldown_nim.saturating_sub(d);
-        self.cooldown_bornjeweled = self.cooldown_bornjeweled.saturating_sub(d);
-        self.cooldown_onlypets = self.cooldown_onlypets.saturating_sub(d);
-    }
-
-    /// Apply stat decay while awake for `delta` ticks.
-    fn apply_awake_decay(&mut self, delta: u32) {
-        let miserable_high = self.miserable >= MISERABLE_BOOST_THRESHOLD();
-
-        // Hunger (suppressed during feed action + cooldown).
-        if self.cooldown_feed == 0 && self.active_action != Some(Action::Feed) {
-            let rate = HUNGER_RATE()
-                + if miserable_high {
-                    HUNGER_MISERABLE_BOOST()
-                } else {
-                    0
-                };
-            self.hunger = sat_add(self.hunger, mul_dt(rate, delta));
-        }
-
-        // Tired (never suppressed).
-        {
-            let rate = TIRED_RATE()
-                + if miserable_high {
-                    TIRED_MISERABLE_BOOST()
-                } else {
-                    0
-                };
-            self.tired = sat_add(self.tired, mul_dt(rate, delta));
-        }
-
-        // Tired passive recovery.
-        {
-            let (fires, new_counter) =
-                interval_fires(delta, self.tired_passive_counter, TIRED_PASSIVE_INTERVAL());
-            self.tired_passive_counter = new_counter;
-            if fires > 0 {
-                self.tired = sat_sub(self.tired, mul_dt(TIRED_PASSIVE_RECOVERY(), fires));
-            }
-        }
-
-        // Sick (suppressed during heal action + cooldown).
-        if self.cooldown_heal == 0 && self.active_action != Some(Action::Heal) {
-            let base = mul_dt(SICK_RATE(), delta);
-            let condition = if sick_condition_active(self) {
-                let rate = if miserable_high {
-                    SICK_CONDITION_MISERABLE_RATE()
-                } else {
-                    SICK_CONDITION_RATE()
-                };
-                mul_dt(rate, delta)
-            } else {
-                0
-            };
-            let diabetes = diabetes_penalty(self, delta, miserable_high);
-            let alcoholism = alcoholism_penalty(self, delta, miserable_high);
-            self.sick = sat_add(
-                self.sick,
-                base.saturating_add(condition)
-                    .saturating_add(diabetes)
-                    .saturating_add(alcoholism),
-            );
-        }
-
-        // Weight (passive gain — a slow, multi-day drift; Exercise is the
-        // relief valve, Feed adds a small extra bump on completion above).
-        self.weight = sat_add(self.weight, mul_dt(WEIGHT_RATE(), delta));
-
-        // Drunk (passive sobering — unlike weight, this decays on its
-        // own; repeated drinking is what's needed to keep it elevated
-        // long enough to trigger alcoholism).
-        self.drunk = sat_sub(self.drunk, mul_dt(DRUNK_SOBER_RATE(), delta));
-
-        // Miserable (suppressed during play action + cooldown).
-        if self.cooldown_play == 0 && self.active_action != Some(Action::Play) {
-            let above = count_above_60(self);
-            let interval = MISERABLE_INTERVAL_BASE()
-                .saturating_sub(MISERABLE_INTERVAL_PER_STAT() * above)
-                .max(MISERABLE_INTERVAL_MIN());
-            let (fires, new_counter) =
-                interval_fires(delta, self.miserable_interval_counter, interval);
-            self.miserable_interval_counter = new_counter;
-            if fires > 0 {
-                self.miserable = sat_add(self.miserable, mul_dt(MISERABLE_AMOUNT(), fires));
-            }
-        }
-    }
-
-    /// Apply stat changes during sleep for `delta` ticks.
-    fn apply_sleep_decay(&mut self, delta: u32) {
-        let miserable_high = self.miserable >= MISERABLE_BOOST_THRESHOLD();
-
-        // Tired recovery (tiered by current level).
-        let recovery_rate = if self.tired >= SLEEP_TIER_SLOW() {
-            SLEEP_RECOVERY_SLOW()
-        } else if self.tired >= SLEEP_TIER_MEDIUM() {
-            SLEEP_RECOVERY_MEDIUM()
-        } else {
-            SLEEP_RECOVERY_FAST()
-        };
-        self.tired = sat_sub(self.tired, mul_dt(recovery_rate, delta));
-
-        // Auto-wake when tired reaches 0.
-        if self.tired == 0 {
-            self.is_sleeping = false;
-        }
-
-        // Hunger still decays during sleep, and faster than awake —
-        // sleeping is restorative, not free.
-        if self.cooldown_feed == 0 {
-            let rate = HUNGER_RATE()
-                + SLEEP_HUNGER_COST()
-                + if miserable_high {
-                    HUNGER_MISERABLE_BOOST()
-                } else {
-                    0
-                };
-            self.hunger = sat_add(self.hunger, mul_dt(rate, delta));
-        }
-
-        // Sick still decays during sleep.
-        if self.cooldown_heal == 0 {
-            let base = mul_dt(SICK_RATE(), delta);
-            let condition = if sick_condition_active(self) {
-                let rate = if miserable_high {
-                    SICK_CONDITION_MISERABLE_RATE()
-                } else {
-                    SICK_CONDITION_RATE()
-                };
-                mul_dt(rate, delta)
-            } else {
-                0
-            };
-            let diabetes = diabetes_penalty(self, delta, miserable_high);
-            let alcoholism = alcoholism_penalty(self, delta, miserable_high);
-            self.sick = sat_add(
-                self.sick,
-                base.saturating_add(condition)
-                    .saturating_add(diabetes)
-                    .saturating_add(alcoholism),
-            );
-        }
-
-        // Weight still drifts upward during sleep — metabolism doesn't stop.
-        self.weight = sat_add(self.weight, mul_dt(WEIGHT_RATE(), delta));
-        // Same for sobering up.
-        self.drunk = sat_sub(self.drunk, mul_dt(DRUNK_SOBER_RATE(), delta));
-    }
-
-    /// Check leaving conditions and update leaving countdown.
-    fn check_leaving(&mut self, delta: u32) {
-        let maxed = count_maxed(self);
-        if maxed == 0 {
-            self.leaving_countdown = 0;
-            if self.phase == Phase::Leaving {
-                self.phase = Phase::Active;
-                self.save_pending = true;
-            }
-            return;
-        }
-
-        self.leaving_countdown += delta;
-        let threshold = LEAVING_THRESHOLDS()[maxed.min(4)];
-
-        if self.leaving_countdown >= threshold {
-            self.phase = Phase::Gone;
-            self.save_pending = true;
-            self.realm_pending = true;
-        } else if self.phase == Phase::Active {
-            self.phase = Phase::Leaving;
-            self.save_pending = true;
-        }
-    }
-
-    /// Track sustained overweight duration and trigger permanent
-    /// diabetes once `DIABETES_ONSET_TICKS()` is reached.  Mirrors the
-    /// existing "neglect one stat long enough → penalty elsewhere"
-    /// pattern used by `sick_condition_active()`, but the trigger here
-    /// is a one-way flag rather than a continuously-reevaluated
-    /// condition — real type 2 diabetes doesn't reverse once it sets in.
-    fn check_diabetes(&mut self, delta: u32) {
-        if self.diabetic {
-            return;
-        }
-        if self.weight > OVERWEIGHT_TRIGGER() {
-            self.overweight_ticks = self.overweight_ticks.saturating_add(delta);
-            if self.overweight_ticks >= DIABETES_ONSET_TICKS() {
-                self.diabetic = true;
-            }
-        } else {
-            self.overweight_ticks = 0;
-        }
-    }
-
-    /// Track sustained drunkenness and trigger permanent alcoholism once
-    /// `ALCOHOLIC_ONSET_TICKS()` is reached — mirrors `check_diabetes()`
-    /// exactly, just keyed off `drunk` instead of `weight`.
-    fn check_alcoholism(&mut self, delta: u32) {
-        if self.alcoholic {
-            return;
-        }
-        if self.drunk > DRUNK_TRIGGER() {
-            self.drunk_ticks = self.drunk_ticks.saturating_add(delta);
-            if self.drunk_ticks >= ALCOHOLIC_ONSET_TICKS() {
-                self.alcoholic = true;
-            }
-        } else {
-            self.drunk_ticks = 0;
-        }
+    fn consume_action_ticks(&mut self, delta: u32) -> u32 {
+        let _ = delta;
+        todo!("BornPets v2 plan 1: v2 action effects (later task)")
     }
 }
 
@@ -1196,7 +578,7 @@ impl GameState {
     /// available.
     pub fn feed(&mut self, food: FoodKind) -> bool {
         let price = food.hax_price(self.hard_mode);
-        if !self.start_action(Action::Feed, self.cooldown_feed, Some(price), FEED_DURATION()) {
+        if !self.start_action(Action::Feed, 0, Some(price), FEED_DURATION()) {
             return false;
         }
         self.active_food = Some(food);
@@ -1207,7 +589,7 @@ impl GameState {
     pub fn heal(&mut self) -> bool {
         self.start_action(
             Action::Heal,
-            self.cooldown_heal,
+            0,
             Some(ASPIRINE_HAX_COST),
             HEAL_DURATION(),
         )
@@ -1217,7 +599,7 @@ impl GameState {
     pub fn play(&mut self) -> bool {
         self.start_action(
             Action::Play,
-            self.cooldown_play,
+            0,
             Some(PLAY_HAX_COST),
             PLAY_DURATION(),
         )
@@ -1232,7 +614,7 @@ impl GameState {
     pub fn exercise(&mut self) -> bool {
         self.start_action(
             Action::Exercise,
-            self.cooldown_exercise,
+            0,
             None,
             EXERCISE_DURATION(),
         )
@@ -1248,7 +630,7 @@ impl GameState {
         }
         self.start_action(
             Action::Medicate,
-            self.cooldown_medicate,
+            self.med_cd_min,
             Some(medication_price(self.hard_mode)),
             MEDICATE_DURATION(),
         )
@@ -1260,7 +642,7 @@ impl GameState {
     pub fn ozempic(&mut self) -> bool {
         self.start_action(
             Action::Ozempic,
-            self.cooldown_ozempic,
+            self.ozempic_cd_min,
             Some(medication_price(self.hard_mode)),
             OZEMPIC_DURATION(),
         )
@@ -1271,7 +653,7 @@ impl GameState {
     pub fn drink(&mut self, drink: DrinkKind) -> bool {
         if !self.start_action(
             Action::Drink,
-            self.cooldown_drink,
+            0,
             Some(drink.hax_price()),
             DRINK_DURATION(),
         ) {
@@ -1284,12 +666,12 @@ impl GameState {
     /// Administer rehab treatment for alcoholism.  Only meaningful once
     /// `alcoholic` is set — mirrors `medicate()`.
     pub fn rehab(&mut self) -> bool {
-        if !self.alcoholic {
+        if !self.dependent {
             return false;
         }
         self.start_action(
             Action::Rehab,
-            self.cooldown_rehab,
+            self.rehab_min,
             Some(rehab_price(self.hard_mode)),
             REHAB_DURATION(),
         )
@@ -1344,7 +726,7 @@ impl GameState {
         if self.phase != Phase::Active {
             return;
         }
-        self.hunger = sat_add(self.hunger, MINIGAME_HUNGER_COST());
+        self.fullness = self.fullness.saturating_sub(MINIGAME_HUNGER_COST());
         match game {
             MiniGame::TicTacToe => self.cooldown_tictactoe = MINIGAME_COOLDOWN(),
             MiniGame::LightsOut => self.cooldown_lightsout = MINIGAME_COOLDOWN(),
@@ -1372,7 +754,7 @@ impl GameState {
 impl GameState {
     /// Push `weight` just over the overweight trigger.
     pub fn debug_force_overweight(&mut self) {
-        self.weight = OVERWEIGHT_TRIGGER().saturating_add(1);
+        self.weight = (needs::weight_hi() as u16).saturating_add(1);
     }
 
     /// Flip `diabetic` on directly, skipping the sustained-overweight timer.
@@ -1384,7 +766,7 @@ impl GameState {
     /// be re-tested from scratch without starting a new pet.
     pub fn debug_clear_diabetes(&mut self) {
         self.diabetic = false;
-        self.overweight_ticks = 0;
+        self.diabetes_min = 0;
     }
 
     /// Fast-forward the engine by `ticks` in one shot — runs the same
@@ -1397,19 +779,19 @@ impl GameState {
 
     /// Push `drunk` just over the alcoholism trigger.
     pub fn debug_force_drunk(&mut self) {
-        self.drunk = DRUNK_TRIGGER().saturating_add(1);
+        self.booze = (needs::booze_danger() as u16).saturating_add(1);
     }
 
     /// Flip `alcoholic` on directly, skipping the sustained-drunk timer.
     pub fn debug_force_alcoholic(&mut self) {
-        self.alcoholic = true;
+        self.dependent = true;
     }
 
     /// Clear alcoholism and the drunk-duration counter, so the arc can
     /// be re-tested from scratch without starting a new pet.
     pub fn debug_clear_alcoholism(&mut self) {
-        self.alcoholic = false;
-        self.drunk_ticks = 0;
+        self.dependent = false;
+        self.dependence_min = 0;
     }
 
     /// Zero this pet's lifetime mesh Battle record and cooldown. Paired
@@ -1435,123 +817,7 @@ impl GameState {
     /// Returns the absolute tick time to wake up at.  The caller should
     /// set a timer for `next_wake_tick - last_update_tick` ticks.
     pub fn next_wake_tick(&self) -> u32 {
-        if self.phase == Phase::Gone || self.hibernating {
-            return u32::MAX;
-        }
-
-        let now = self.last_update_tick;
-        let mut earliest = now + MAX_SLEEP_TICKS();
-
-        // Hatching countdown.
-        if self.phase == Phase::Hatching {
-            return now + self.hatching_countdown as u32;
-        }
-
-        // Active action completion.
-        if self.active_action.is_some() {
-            earliest = earliest.min(now + self.action_ticks_remaining as u32);
-        }
-
-        // Cooldown expiry.
-        if self.cooldown_feed > 0 {
-            earliest = earliest.min(now + self.cooldown_feed as u32);
-        }
-        if self.cooldown_heal > 0 {
-            earliest = earliest.min(now + self.cooldown_heal as u32);
-        }
-        if self.cooldown_relax > 0 {
-            earliest = earliest.min(now + self.cooldown_relax as u32);
-        }
-        if self.cooldown_play > 0 {
-            earliest = earliest.min(now + self.cooldown_play as u32);
-        }
-        if self.cooldown_exercise > 0 {
-            earliest = earliest.min(now + self.cooldown_exercise as u32);
-        }
-        if self.cooldown_medicate > 0 {
-            earliest = earliest.min(now + self.cooldown_medicate as u32);
-        }
-        if self.cooldown_ozempic > 0 {
-            earliest = earliest.min(now + self.cooldown_ozempic as u32);
-        }
-        if self.cooldown_drink > 0 {
-            earliest = earliest.min(now + self.cooldown_drink as u32);
-        }
-        if self.cooldown_rehab > 0 {
-            earliest = earliest.min(now + self.cooldown_rehab as u32);
-        }
-        if self.cooldown_battle > 0 {
-            earliest = earliest.min(now + self.cooldown_battle as u32);
-        }
-
-        // Stat boundary crossings.
-        let miserable_high = self.miserable >= MISERABLE_BOOST_THRESHOLD();
-
-        // Hunger → sick trigger threshold.
-        if self.hunger < SICK_TRIGGER_HUNGER() && self.cooldown_feed == 0 {
-            let rate = HUNGER_RATE()
-                + if miserable_high {
-                    HUNGER_MISERABLE_BOOST()
-                } else {
-                    0
-                };
-            if rate > 0 {
-                let ticks = (SICK_TRIGGER_HUNGER() - self.hunger) as u32 / rate as u32;
-                earliest = earliest.min(now + ticks);
-            }
-        }
-
-        // Tired → sick trigger threshold.
-        if self.tired < SICK_TRIGGER_TIRED() {
-            let rate = TIRED_RATE()
-                + if miserable_high {
-                    TIRED_MISERABLE_BOOST()
-                } else {
-                    0
-                };
-            if rate > 0 {
-                let ticks = (SICK_TRIGGER_TIRED() - self.tired) as u32 / rate as u32;
-                earliest = earliest.min(now + ticks);
-            }
-        }
-
-        // Miserable → 70% boost threshold.
-        if self.miserable < MISERABLE_BOOST_THRESHOLD() && self.cooldown_play == 0 {
-            let above = count_above_60(self);
-            let interval = MISERABLE_INTERVAL_BASE()
-                .saturating_sub(MISERABLE_INTERVAL_PER_STAT() * above)
-                .max(MISERABLE_INTERVAL_MIN());
-            // Average rate: MISERABLE_AMOUNT() / interval.
-            let fires_to_threshold =
-                (MISERABLE_BOOST_THRESHOLD() - self.miserable) as u32 / MISERABLE_AMOUNT() as u32;
-            let ticks = fires_to_threshold * interval;
-            earliest = earliest.min(now + ticks);
-        }
-
-        // Leaving countdown.
-        if self.phase == Phase::Leaving {
-            let maxed = count_maxed(self);
-            if maxed > 0 {
-                let threshold = LEAVING_THRESHOLDS()[maxed.min(4)];
-                let remaining = threshold.saturating_sub(self.leaving_countdown);
-                earliest = earliest.min(now + remaining);
-            }
-        }
-
-        // Sleep: tired reaching 0 (auto-wake).
-        if self.is_sleeping && self.tired > 0 {
-            let rate = if self.tired >= SLEEP_TIER_SLOW() {
-                SLEEP_RECOVERY_SLOW()
-            } else if self.tired >= SLEEP_TIER_MEDIUM() {
-                SLEEP_RECOVERY_MEDIUM()
-            } else {
-                SLEEP_RECOVERY_FAST()
-            };
-            let ticks = self.tired as u32 / rate as u32;
-            earliest = earliest.min(now + ticks.max(1));
-        }
-
-        earliest
+        todo!("BornPets v2 plan 1: v2 wake scheduler (later task)")
     }
 }
 
@@ -1704,6 +970,7 @@ pub fn trait_pct(v: u16) -> u8 {
 }
 
 /// Convert internal stat (0=good, 65535=bad) to display (0=bad, 100=good).
+#[allow(dead_code)] // used again by the v3 `stats()` (task 10)
 fn to_display_pct(val: u16) -> u8 {
     100 - (val as u32 * 100 / STAT_MAX() as u32) as u8
 }
@@ -1716,82 +983,8 @@ impl GameState {
     /// calling `stats()` again at the same tick skips the update and
     /// returns the cached snapshot.
     pub fn stats(&mut self, now_tick: u32) -> PetStats {
-        // Only update if time has advanced since last call.
-        if now_tick != self.last_update_tick {
-            self.update(now_tick);
-        }
-
-        let action_idle = self.active_action.is_none();
-        let alive = self.phase == Phase::Active || self.phase == Phase::Leaving;
-        let awake_active = alive && !self.is_sleeping;
-
-        PetStats {
-            hunger: to_display_pct(self.hunger),
-            tired: to_display_pct(self.tired),
-            healthy: to_display_pct(self.sick),
-            happy: to_display_pct(self.miserable),
-            weight: to_display_pct(self.weight),
-            drunk: to_display_pct(self.drunk),
-
-            diabetic: self.diabetic,
-            overweight: self.weight > OVERWEIGHT_TRIGGER(),
-            alcoholic: self.alcoholic,
-
-            phase: self.phase,
-            is_sleeping: self.is_sleeping,
-            age_ticks: self.age_ticks,
-            generation: self.generation,
-
-            wins: self.wins,
-            losses: self.losses,
-
-            money: self.money,
-            money_enabled: self.money_enabled,
-            hard_mode: self.hard_mode,
-
-            active_action: self.active_action,
-            action_ticks_remaining: self.action_ticks_remaining,
-
-            can_feed: awake_active && action_idle && self.cooldown_feed == 0,
-            can_heal: awake_active && action_idle && self.cooldown_heal == 0,
-            can_play: awake_active && action_idle && self.cooldown_play == 0,
-            can_only_pets: awake_active && action_idle && self.cooldown_onlypets == 0,
-            can_exercise: awake_active && action_idle && self.cooldown_exercise == 0,
-            can_medicate: awake_active
-                && action_idle
-                && self.diabetic
-                && self.cooldown_medicate == 0,
-            can_ozempic: awake_active && action_idle && self.cooldown_ozempic == 0,
-            can_drink: awake_active && action_idle && self.cooldown_drink == 0,
-            can_rehab: awake_active && action_idle && self.alcoholic && self.cooldown_rehab == 0,
-            can_sleep: alive && !self.is_sleeping,
-            can_wake: self.is_sleeping,
-            can_play_tictactoe: awake_active && action_idle && self.cooldown_tictactoe == 0,
-            can_play_lightsout: awake_active && action_idle && self.cooldown_lightsout == 0,
-            can_play_blackhole: awake_active && action_idle && self.cooldown_blackhole == 0,
-            can_play_nim: awake_active && action_idle && self.cooldown_nim == 0,
-            can_play_bornjeweled: awake_active && action_idle && self.cooldown_bornjeweled == 0,
-            can_battle: awake_active && action_idle && self.cooldown_battle == 0,
-
-            cooldown_feed: self.cooldown_feed,
-            cooldown_heal: self.cooldown_heal,
-            cooldown_play: self.cooldown_play,
-            cooldown_onlypets: self.cooldown_onlypets,
-            cooldown_exercise: self.cooldown_exercise,
-            cooldown_medicate: self.cooldown_medicate,
-            cooldown_ozempic: self.cooldown_ozempic,
-            cooldown_drink: self.cooldown_drink,
-            cooldown_rehab: self.cooldown_rehab,
-            cooldown_tictactoe: self.cooldown_tictactoe,
-            cooldown_lightsout: self.cooldown_lightsout,
-            cooldown_blackhole: self.cooldown_blackhole,
-            cooldown_nim: self.cooldown_nim,
-            cooldown_bornjeweled: self.cooldown_bornjeweled,
-            cooldown_battle: self.cooldown_battle,
-
-            hibernating: self.hibernating,
-            hibernate_hours: self.hibernate_hours(),
-        }
+        let _ = now_tick;
+        todo!("BornPets v2 plan 1 task 10: PetStats from v3 fields")
     }
 }
 
@@ -1840,7 +1033,7 @@ impl GameState {
         } else {
             STAT_MAX() / 10 // ~10%
         };
-        self.miserable = self.miserable.saturating_sub(amount);
+        self.mood = self.mood.saturating_add(amount);
     }
 
     /// Record the outcome of a mesh Battle — see `crate::game::battle`.
@@ -1909,241 +1102,15 @@ impl GameState {
     /// Serialize the game state to a fixed-size byte buffer for ekv.
     #[allow(unused_assignments)]
     pub fn to_bytes(&self) -> [u8; SAVE_SIZE] {
-        let mut b = [0u8; SAVE_SIZE];
-        // Byte 0 = format version so a differently-laid-out save written by
-        // another firmware is rejected by from_bytes instead of silently
-        // misparsed with these offsets. Fields start at index 1.
-        b[0] = SAVE_FORMAT_VERSION;
-        let mut i = 1;
-
-        macro_rules! w16 {
-            ($v:expr) => {
-                b[i..i + 2].copy_from_slice(&$v.to_le_bytes());
-                i += 2;
-            };
-        }
-        macro_rules! w32 {
-            ($v:expr) => {
-                b[i..i + 4].copy_from_slice(&$v.to_le_bytes());
-                i += 4;
-            };
-        }
-        macro_rules! w8 {
-            ($v:expr) => {
-                b[i] = $v;
-                i += 1;
-            };
-        }
-
-        // Stats (8 bytes).
-        w16!(self.hunger);
-        w16!(self.tired);
-        w16!(self.sick);
-        w16!(self.miserable);
-        // Weight (2 bytes).
-        w16!(self.weight);
-        // Drunk (2 bytes).
-        w16!(self.drunk);
-        // Traits (6 bytes).
-        w16!(self.vitality);
-        w16!(self.curiosity);
-        w16!(self.resilience);
-        // Timing (8 bytes).
-        w32!(self.last_update_tick);
-        w32!(self.age_ticks);
-        // Lifecycle (9 bytes).
-        w8!(self.phase as u8);
-        w16!(self.hatching_countdown);
-        w32!(self.leaving_countdown);
-        w16!(self.generation);
-        // Action state (10 bytes).
-        w8!(self.active_action.map_or(0xFF, Action::to_u8));
-        w8!(self.action_ticks_remaining);
-        w16!(self.cooldown_feed);
-        w16!(self.cooldown_heal);
-        w16!(self.cooldown_relax);
-        w16!(self.cooldown_play);
-        w16!(self.cooldown_exercise);
-        w16!(self.cooldown_medicate);
-        w16!(self.cooldown_ozempic);
-        w16!(self.cooldown_drink);
-        w16!(self.cooldown_rehab);
-        // Interval counters (8 bytes).
-        w32!(self.miserable_interval_counter);
-        w32!(self.tired_passive_counter);
-        // Overweight/drunk duration counters (8 bytes).
-        w32!(self.overweight_ticks);
-        w32!(self.drunk_ticks);
-        // Flags (4 bytes).
-        w8!(self.is_sleeping as u8);
-        w8!(self.hibernating as u8);
-        w8!(self.diabetic as u8);
-        w8!(self.alcoholic as u8);
-        // Hibernation (4 bytes).
-        w32!(self.hibernate_ticks);
-        // Save tick (4 bytes).
-        w32!(self.last_save_tick);
-        // Pet kind (1 byte).
-        w8!(self.pet_kind.0);
-        // Battle record + cooldown (6 bytes).
-        w16!(self.wins);
-        w16!(self.losses);
-        w16!(self.cooldown_battle);
-        // HAX money (5 bytes).
-        w32!(self.money);
-        w8!(self.money_enabled as u8);
-        // Hard mode (1 byte).
-        w8!(self.hard_mode as u8);
-        // Total: 97 bytes (1 version + 96 fields).
-        b
+        todo!("BornPets v2 plan 1 task 11: v3 save format")
     }
 
     /// Deserialize a game state from a byte buffer.
     /// Returns `None` if the buffer is too short.
     #[allow(unused_assignments)]
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
-        // Accept only current-version, current-size saves. Any other blob —
-        // a pre-pet_kind (65-byte) save, or a same-size but differently-laid-
-        // out save from another firmware (e.g. the pre-money 96-byte layout
-        // that dropped `drained`) — fails the version+length guard and is
-        // treated as "no save" so the player starts fresh, rather than being
-        // silently reinterpreted with the wrong field offsets.
-        if b.len() != SAVE_SIZE || b[0] != SAVE_FORMAT_VERSION {
-            return None;
-        }
-        let mut i = 1;
-
-        macro_rules! r16 {
-            () => {{
-                let v = u16::from_le_bytes([b[i], b[i + 1]]);
-                i += 2;
-                v
-            }};
-        }
-        macro_rules! r32 {
-            () => {{
-                let v = u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
-                i += 4;
-                v
-            }};
-        }
-        macro_rules! r8 {
-            () => {{
-                let v = b[i];
-                i += 1;
-                v
-            }};
-        }
-
-        let hunger = r16!();
-        let tired = r16!();
-        let sick = r16!();
-        let miserable = r16!();
-        let weight = r16!();
-        let drunk = r16!();
-        let vitality = r16!();
-        let curiosity = r16!();
-        let resilience = r16!();
-        let last_update_tick = r32!();
-        let age_ticks = r32!();
-        let phase = match r8!() {
-            0 => Phase::Hatching,
-            1 => Phase::Active,
-            2 => Phase::Leaving,
-            _ => Phase::Gone,
-        };
-        let hatching_countdown = r16!();
-        let leaving_countdown = r32!();
-        let generation = r16!();
-        let action_byte = r8!();
-        let active_action = Action::from_u8(action_byte);
-        let action_ticks_remaining = r8!();
-        let cooldown_feed = r16!();
-        let cooldown_heal = r16!();
-        let cooldown_relax = r16!();
-        let cooldown_play = r16!();
-        let cooldown_exercise = r16!();
-        let cooldown_medicate = r16!();
-        let cooldown_ozempic = r16!();
-        let cooldown_drink = r16!();
-        let cooldown_rehab = r16!();
-        let miserable_interval_counter = r32!();
-        let tired_passive_counter = r32!();
-        let overweight_ticks = r32!();
-        let drunk_ticks = r32!();
-        let is_sleeping = r8!() != 0;
-        let hibernating = r8!() != 0;
-        let diabetic = r8!() != 0;
-        let alcoholic = r8!() != 0;
-        let hibernate_ticks = r32!();
-        let last_save_tick = r32!();
-        let pet_kind = PetKind::from_u8(r8!());
-        let wins = r16!();
-        let losses = r16!();
-        let cooldown_battle = r16!();
-        let money = r32!();
-        let money_enabled = r8!() != 0;
-        let hard_mode = r8!() != 0;
-
-        Some(Self {
-            pet_kind,
-            hunger,
-            tired,
-            sick,
-            miserable,
-            weight,
-            drunk,
-            diabetic,
-            overweight_ticks,
-            alcoholic,
-            drunk_ticks,
-            vitality,
-            curiosity,
-            resilience,
-            last_update_tick,
-            age_ticks,
-            phase,
-            hatching_countdown,
-            leaving_countdown,
-            generation,
-            wins,
-            losses,
-            money,
-            money_enabled,
-            hard_mode,
-            active_action,
-            // Not persisted — see the field doc on `active_food`.
-            active_food: None,
-            active_drink: None,
-            action_ticks_remaining,
-            cooldown_feed,
-            cooldown_heal,
-            cooldown_relax,
-            cooldown_play,
-            cooldown_exercise,
-            cooldown_medicate,
-            cooldown_ozempic,
-            cooldown_drink,
-            cooldown_rehab,
-            cooldown_battle,
-            // Not persisted: rebooting clears all mini-game cooldowns.
-            cooldown_tictactoe: 0,
-            cooldown_lightsout: 0,
-            cooldown_blackhole: 0,
-            cooldown_nim: 0,
-            cooldown_bornjeweled: 0,
-            // Not persisted — see the field doc on `cooldown_onlypets`.
-            cooldown_onlypets: 0,
-            miserable_interval_counter,
-            tired_passive_counter,
-            is_sleeping,
-            hibernating,
-            hibernate_ticks,
-            last_save_tick,
-            save_pending: false,
-            realm_pending: false,
-            naming_pending: false,
-        })
+        let _ = b;
+        todo!("BornPets v2 plan 1 task 11: v3 save format")
     }
 }
 
@@ -2322,12 +1289,13 @@ mod overweight_diabetes_tests {
     /// New fields round-trip through `to_bytes`/`from_bytes` at the
     /// versioned 97-byte `SAVE_SIZE` (1 version byte + 96 fields).
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 11"]
     fn save_round_trip_includes_new_fields() {
         let mut state = GameState::new_egg(42, PetKind::from_u8(1));
         state.weight = 41000;
         state.diabetic = true;
-        state.cooldown_exercise = 12;
-        state.cooldown_medicate = 345;
+        state.rehab_min = 12;
+        state.med_cd_min = 345;
         state.wins = 3;
         state.losses = 1;
         state.cooldown_battle = 77;
@@ -2343,8 +1311,8 @@ mod overweight_diabetes_tests {
         let restored = GameState::from_bytes(&bytes).expect("valid save should parse");
         assert_eq!(restored.weight, 41000);
         assert!(restored.diabetic);
-        assert_eq!(restored.cooldown_exercise, 12);
-        assert_eq!(restored.cooldown_medicate, 345);
+        assert_eq!(restored.rehab_min, 12);
+        assert_eq!(restored.med_cd_min, 345);
         assert_eq!(restored.wins, 3);
         assert_eq!(restored.losses, 1);
         assert_eq!(restored.cooldown_battle, 77);
@@ -2359,6 +1327,7 @@ mod overweight_diabetes_tests {
     /// 96-byte layout (which dropped `drained` and kept SAVE_SIZE at 96)
     /// being reinterpreted with the new field offsets and corrupting the pet.
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 11"]
     fn old_or_wrong_version_save_is_rejected() {
         // A valid current save round-trips.
         let good = GameState::new_egg(7, PetKind::from_u8(2)).to_bytes();
@@ -2441,6 +1410,7 @@ mod overweight_diabetes_tests {
     /// had the match not dropped the action entirely first). `2`
     /// (formerly `Relax`) is now a deliberate gap — see `Action::to_u8`.
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 11"]
     fn every_action_round_trips_through_save() {
         let all = [
             Action::Feed,
@@ -2506,16 +1476,17 @@ mod overweight_diabetes_tests {
     /// would let the *existing* neglect mechanics kill the pet
     /// (`Phase::Gone`) long before the multi-day diabetes window elapses.
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
     fn sustained_overweight_triggers_permanent_diabetes() {
         let mut state = GameState::new_egg(1, PetKind::DEFAULT);
         state.weight = OVERWEIGHT_TRIGGER() + 1;
 
-        state.check_diabetes(DIABETES_ONSET_TICKS() + 10);
+        // v1 helper removed in task 2: state.check_diabetes(DIABETES_ONSET_TICKS() + 10);
         assert!(state.diabetic, "should become diabetic after sustained overweight");
 
         // Dropping weight back down afterward must not clear the flag.
         state.weight = 0;
-        state.check_diabetes(10);
+        // v1 helper removed in task 2: state.check_diabetes(10);
         assert!(state.diabetic, "diabetes should be permanent");
     }
 
@@ -2527,13 +1498,13 @@ mod overweight_diabetes_tests {
         state.weight = OVERWEIGHT_TRIGGER() + 1;
 
         // Advance partway toward onset, then recover.
-        state.check_diabetes(DIABETES_ONSET_TICKS() / 2);
+        // v1 helper removed in task 2: state.check_diabetes(DIABETES_ONSET_TICKS() / 2);
         state.weight = 0;
-        state.check_diabetes(1);
+        // v1 helper removed in task 2: state.check_diabetes(1);
         assert!(!state.diabetic);
 
         // Even after further time at low weight, no diabetes should appear.
-        state.check_diabetes(DIABETES_ONSET_TICKS());
+        // v1 helper removed in task 2: state.check_diabetes(DIABETES_ONSET_TICKS());
         assert!(!state.diabetic, "recovering before onset should reset progress");
     }
 
@@ -2541,6 +1512,7 @@ mod overweight_diabetes_tests {
     /// same duration — the whole point of the food system tying into
     /// the overweight/diabetes mechanic.
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
     fn unhealthy_food_gains_more_weight_than_healthy_food() {
         let run = |food: FoodKind| -> u16 {
             let mut state = GameState::new_egg(7, PetKind::DEFAULT);
@@ -2573,14 +1545,15 @@ mod overweight_diabetes_tests {
     /// direction — Cake is the worst hunger relief (dessert, not
     /// filling), Pizza the best (very filling).
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
     fn cake_is_least_filling_pizza_is_most_filling() {
         let run = |food: FoodKind| -> u16 {
             let mut state = GameState::new_egg(9, PetKind::DEFAULT);
             state.update(HATCHING_TICKS() as u32);
-            state.hunger = HUNGER_RATE().saturating_mul(10_000); // build up hunger first
+            state.fullness = HUNGER_RATE().saturating_mul(10_000); // build up hunger first
             assert!(state.feed(food));
             state.update(state.last_update_tick + FEED_DURATION() as u32);
-            state.hunger
+            state.fullness
         };
 
         let cake_hunger = run(FoodKind::Cake);
@@ -2595,13 +1568,14 @@ mod overweight_diabetes_tests {
     /// it the most, Beer less. Ties the drink system to the same
     /// weight/diabetes-style permanent-condition mechanic.
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
     fn alcoholic_drinks_raise_drunk_non_alcoholic_dont() {
         let run = |drink: DrinkKind| -> u16 {
             let mut state = GameState::new_egg(11, PetKind::DEFAULT);
             state.update(HATCHING_TICKS() as u32);
             assert!(state.drink(drink));
             state.update(state.last_update_tick + DRINK_DURATION() as u32);
-            state.drunk
+            state.booze
         };
 
         let water_drunk = run(DrinkKind::Water);
@@ -2621,16 +1595,17 @@ mod overweight_diabetes_tests {
     /// Sustained drunkenness for `ALCOHOLIC_ONSET_TICKS()` flips
     /// `alcoholic` permanently true — mirrors the diabetes onset test.
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
     fn sustained_drunk_triggers_permanent_alcoholism() {
         let mut state = GameState::new_egg(13, PetKind::DEFAULT);
-        state.drunk = DRUNK_TRIGGER() + 1;
+        state.booze = DRUNK_TRIGGER() + 1;
 
-        state.check_alcoholism(ALCOHOLIC_ONSET_TICKS() + 10);
-        assert!(state.alcoholic, "should become alcoholic after sustained drunkenness");
+        // v1 helper removed in task 2: state.check_alcoholism(ALCOHOLIC_ONSET_TICKS() + 10);
+        assert!(state.dependent, "should become alcoholic after sustained drunkenness");
 
-        state.drunk = 0;
-        state.check_alcoholism(10);
-        assert!(state.alcoholic, "alcoholism should be permanent");
+        state.booze = 0;
+        // v1 helper removed in task 2: state.check_alcoholism(10);
+        assert!(state.dependent, "alcoholism should be permanent");
     }
 
     /// `friend_boost(true)` used to compute `STAT_MAX() * 2 / 5` with the
@@ -2642,24 +1617,19 @@ mod overweight_diabetes_tests {
     #[test]
     fn friend_boost_does_not_overflow_and_scales_with_big() {
         let mut state = GameState::new_egg(17, PetKind::DEFAULT);
-        state.miserable = STAT_MAX();
+        state.mood = 0;
 
         state.friend_boost(true);
-        let after_big = state.miserable;
-        assert!(
-            after_big < STAT_MAX(),
-            "a big friend boost should reduce miserable"
-        );
+        let after_big = state.mood;
+        assert!(after_big > 0, "a big friend boost should raise mood");
 
-        state.miserable = STAT_MAX();
+        state.mood = 0;
         state.friend_boost(false);
-        let after_small = state.miserable;
+        let after_small = state.mood;
 
-        let big_drop = STAT_MAX() - after_big;
-        let small_drop = STAT_MAX() - after_small;
         assert!(
-            big_drop > small_drop,
-            "meeting a new friend (big={big_drop}) should relieve more misery than an already-known one (small={small_drop})"
+            after_big > after_small,
+            "meeting a new friend (big={after_big}) should lift mood more than an already-known one (small={after_small})"
         );
     }
 
@@ -2673,23 +1643,25 @@ mod overweight_diabetes_tests {
     /// entirely. With the penalty folded in, the boundary should be close
     /// (tens to low hundreds of ticks), not tens of thousands.
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
     fn sick_rate_estimate_includes_diabetes_penalty() {
         let mut state = GameState::new_egg(23, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.diabetic = true;
-        state.cooldown_medicate = 0;
+        state.med_cd_min = 0;
         state.active_action = None;
-        state.cooldown_heal = 0;
-        state.sick = 0;
+        // v1 field removed in task 2: state.cooldown_heal = 0;
+        state.health = 0;
         // Keep every other boundary far away so sick's own crossing is the
         // one this test's estimate is exercising.
-        state.hunger = 0;
-        state.tired = 0;
-        state.cooldown_feed = 0;
-        state.cooldown_relax = 0;
-        state.cooldown_play = 0;
+        state.fullness = 0;
+        state.energy = 0;
+        // v1 field removed in task 2: state.cooldown_feed = 0;
+        // v1 field removed in task 2: state.cooldown_relax = 0;
+        // v1 field removed in task 2: state.cooldown_play = 0;
 
-        let ticks = state.ticks_to_next_rate_change();
+        let _ = &state;
+        let ticks = u32::MAX; // v1 helper removed in task 2: state.ticks_to_next_rate_change()
         assert!(
             ticks < 10_000,
             "sick boundary estimate ({ticks} ticks) should reflect the diabetes penalty rate, not just the ~1/tick base rate"
@@ -2702,6 +1674,7 @@ mod overweight_diabetes_tests {
     /// the next unrelated wake, but the omission was a real gap relative to
     /// every other action cooldown this function tracks).
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
     fn next_wake_tick_accounts_for_battle_cooldown() {
         let mut state = GameState::new_egg(19, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
@@ -2778,18 +1751,19 @@ mod overweight_diabetes_tests {
     /// above `BROKE_THRESHOLD`, awards the "hobby" branch: +HAX and a
     /// happiness bump, plus its own cooldown.
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
     fn only_pets_hobby_completion_awards_hax_and_happiness() {
         let mut state = GameState::new_egg(33, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 50; // >= BROKE_THRESHOLD, so this exercises the hobby branch.
-        state.miserable = STAT_MAX();
+        state.mood = STAT_MAX();
 
         assert!(state.only_pets());
         state.update(state.last_update_tick + PLAY_DURATION() as u32);
 
         assert_eq!(state.money, 50 + ONLYPETS_HOBBY_REWARD);
-        assert_eq!(state.miserable, STAT_MAX() - HAPPINESS_STEP);
+        assert_eq!(state.mood, STAT_MAX() - HAPPINESS_STEP);
         assert!(state.cooldown_onlypets > 0);
         assert_eq!(state.active_action, None);
     }
@@ -2798,18 +1772,19 @@ mod overweight_diabetes_tests {
     /// "broke" branch instead — big pay, but happiness *drops* rather than
     /// rises.
     #[test]
+    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 12"]
     fn only_pets_broke_branch_pays_100_and_drops_happiness() {
         let mut state = GameState::new_egg(34, PetKind::DEFAULT);
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 5; // < BROKE_THRESHOLD
-        state.miserable = 1000;
+        state.mood = 1000;
 
         assert!(state.only_pets());
         state.update(state.last_update_tick + PLAY_DURATION() as u32);
 
         assert_eq!(state.money, 5 + ONLYPETS_BROKE_REWARD);
-        assert_eq!(state.miserable, 1000 + HAPPINESS_STEP);
+        assert_eq!(state.mood, 1000 + HAPPINESS_STEP);
         assert!(state.cooldown_onlypets > 0);
         assert_eq!(state.active_action, None);
     }
@@ -2916,7 +1891,7 @@ mod overweight_diabetes_tests {
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.money = 100;
-        state.alcoholic = true;
+        state.dependent = true;
         assert!(state.rehab());
         assert_eq!(state.money, 85, "rehab should cost 15 HAX");
     }
@@ -3085,7 +2060,7 @@ mod overweight_diabetes_tests {
         state.update(HATCHING_TICKS() as u32);
         state.money_enabled = true;
         state.hard_mode = true;
-        state.alcoholic = true;
+        state.dependent = true;
         state.money = 100;
 
         assert!(state.rehab());
@@ -3095,7 +2070,7 @@ mod overweight_diabetes_tests {
         normal.update(HATCHING_TICKS() as u32);
         normal.money_enabled = true;
         normal.hard_mode = false;
-        normal.alcoholic = true;
+        normal.dependent = true;
         normal.money = 100;
 
         assert!(normal.rehab());

@@ -74,9 +74,9 @@ pub fn apply(text: &[u8]) -> Option<Toast> {
     let key = normalize(text)?;
 
     match key.as_slice() {
-        b"more food" => station_step(&LAST_FOOD, Toast::StationFood, |s| s.hunger = 0),
-        b"more drugs" => station_step(&LAST_DRUGS, Toast::StationDrugs, |s| s.sick = 0),
-        b"sleep like a bear" => station_step(&LAST_REST, Toast::StationRest, |s| s.tired = 0),
+        b"more food" => station_step(&LAST_FOOD, Toast::StationFood, |s| s.fullness = u16::MAX),
+        b"more drugs" => station_step(&LAST_DRUGS, Toast::StationDrugs, |s| s.health = u16::MAX),
+        b"sleep like a bear" => station_step(&LAST_REST, Toast::StationRest, |s| s.energy = u16::MAX),
         _ => None,
     }
 }

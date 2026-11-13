@@ -78,9 +78,7 @@ pub enum DisplayAnim {
 
 /// Count of maxed stats (= STAT_MAX()).
 fn count_maxed(state: &GameState) -> u8 {
-    (state.hunger == STAT_MAX()) as u8
-        + (state.tired == STAT_MAX()) as u8
-        + (state.sick == STAT_MAX()) as u8
+    (state.fullness == 0) as u8 + (state.energy == 0) as u8 + (state.health == 0) as u8
 }
 
 impl GameState {
@@ -136,39 +134,45 @@ impl GameState {
         // alongside whatever the pet's normal animation is — see
         // `lifecycle::is_diabetic_unmedicated()` / `game::mod` render.
 
+        // v1 thresholds are bad-high; v3 levels are good-high, so invert.
+        let hunger = STAT_MAX() - self.fullness;
+        let tired = STAT_MAX() - self.energy;
+        let sick = STAT_MAX() - self.health;
+        let miserable = STAT_MAX() - self.mood;
+
         // ── Group 4: critical stats ─────────────────────────────────
         // Ranked by recovery difficulty: sick > tired > hungry.
-        if self.sick > SICK_TRIGGER_TIRED() {
+        if sick > SICK_TRIGGER_TIRED() {
             return DisplayAnim::CriticalSick;
         }
-        if self.tired > SICK_TRIGGER_TIRED() {
+        if tired > SICK_TRIGGER_TIRED() {
             return DisplayAnim::CriticalTired;
         }
-        if self.hunger > SICK_TRIGGER_HUNGER() {
+        if hunger > SICK_TRIGGER_HUNGER() {
             return DisplayAnim::CriticalHungry;
         }
 
         // ── Group 5: warning stats ──────────────────────────────────
         // Same priority ranking, lower thresholds.
-        if self.sick > WARNING_SICK() {
+        if sick > WARNING_SICK() {
             return DisplayAnim::WarningSick;
         }
-        if self.tired > WARNING_TIRED() {
+        if tired > WARNING_TIRED() {
             return DisplayAnim::WarningTired;
         }
-        if self.hunger > WARNING_HUNGER() {
+        if hunger > WARNING_HUNGER() {
             return DisplayAnim::WarningHungry;
         }
-        if self.miserable > WARNING_MISERABLE() {
+        if miserable > WARNING_MISERABLE() {
             return DisplayAnim::WarningMiserable;
         }
 
         // ── Group 6: content ────────────────────────────────────────
         // Happy when all stats are well below warning thresholds.
-        if self.hunger < WARNING_HUNGER() / 2
-            && self.tired < WARNING_TIRED() / 2
-            && self.sick < WARNING_SICK() / 2
-            && self.miserable < WARNING_MISERABLE() / 2
+        if hunger < WARNING_HUNGER() / 2
+            && tired < WARNING_TIRED() / 2
+            && sick < WARNING_SICK() / 2
+            && miserable < WARNING_MISERABLE() / 2
         {
             return DisplayAnim::Happy;
         }
