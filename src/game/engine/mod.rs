@@ -328,8 +328,7 @@ pub struct GameState {
     pub active_drink: Option<DrinkKind>,
     pub action_ticks_remaining: u8,
     /// Cooldown between mesh Battles — resolves instantly (no in-progress
-    /// duration), so this is the only battle-related field that behaves
-    /// like the other primary-action cooldowns above.
+    /// duration), so this is the only battle-related field of its kind.
     pub cooldown_battle: u16,
     /// Per-mini-game cooldown after winning.  Each game tracks its
     /// own counter so winning one doesn't gate the others.  None of
@@ -486,10 +485,6 @@ impl GameState {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Delta-T update
 // ---------------------------------------------------------------------------
 
@@ -580,6 +575,9 @@ impl GameState {
     /// `advance(self, segment)` is exact: the solver's bound, shrunk further
     /// by trial advances on a copy.
     fn segment(&self, minutes: u32, steep: &mut u32) -> u32 {
+        /// Single-minute segments taken after a runaway mood target: long
+        /// enough to ride out a steep stretch, short enough to retry soon.
+        const STEEP_MINUTES: u32 = 4;
         let mut dt = solver::seg_len(self, minutes).clamp(1, minutes);
         // Mood and health crossing a line of their own is not bounded by
         // the solver: shrink the segment until a trial advance on a copy
@@ -603,12 +601,13 @@ impl GameState {
             let (m1, t1) = (trial.mood as i32, regime::mood_target(&trial));
             // Mood and target are linear inside a segment only up to
             // integer truncation: each truncating term of `mood_target`
-            // (seven: four `* 3 / 2`, three `/ 2`) wobbles the target by
-            // under 1 per minute, so R = 7 + 1 (R22c). Mood on its target
+            // (`regime::TRUNCATING_TERMS`: four `* 3 / 2`, three `/ 2`) wobbles
+            // the target by under 1 per minute, so R = 4 + 3 + 1 (R22c): the
+            // terms plus one more for the rounding of the step. Mood on its target
             // is safe if the target moves at most MOOD_STEP - R per
             // minute; a full step is safe if the target led mood by R at
             // both ends, so it was never met midway.
-            const R: i32 = 8;
+            const R: i32 = regime::TRUNCATING_TERMS + 1;
             let step = thresholds::MOOD_STEP() as i32;
             let on_target = m0 == t0 && (t1 - t0).abs() + R <= (step - R) * dt as i32;
             let full_step = (m1 - m0).abs() == step * dt as i32
@@ -624,7 +623,9 @@ impl GameState {
             // log2(dt) trials every minute.
             if sig_same && m0 == t0 && (t1 - t0).abs() > (step - R) * dt as i32 {
                 dt = 1;
-                *steep = 4;
+                // Single minutes are exact; skip the trials for this many
+                // segments rather than re-pay the log2(dt) trials each time.
+                *steep = STEEP_MINUTES;
                 break;
             }
             dt = dt.div_ceil(2);
@@ -1058,8 +1059,6 @@ pub struct PetStats {
     pub healthy: u8,
     /// How happy the pet is (100 = happy, 0 = miserable).
     pub happy: u8,
-    /// How fit the pet is (100 = athletic).
-    pub weight: u8,
     /// How sober the pet is (100 = stone sober, 0 = maximally drunk).
     pub drunk: u8,
 
@@ -1218,7 +1217,6 @@ impl GameState {
             self.update(now_tick);
         }
 
-        let alive = self.is_alive();
         let can = |a: Action| self.refusal_for(a, None).is_none();
         let can_game = |g: Option<MiniGame>| self.game_refusal(g).is_none();
         let (status, danger) = status::status(self);
@@ -1228,7 +1226,6 @@ impl GameState {
             tired: level_pct(self.energy),
             healthy: level_pct(self.health),
             happy: level_pct(self.mood),
-            weight: level_pct(self.fitness),
             drunk: 100 - level_pct(self.booze),
 
             water: level_pct(self.hydration),

@@ -147,11 +147,11 @@ impl Toast {
         match self {
             Toast::None => "",
             Toast::Feed => "-hunger",
-            Toast::Heal => "-sick",
+            Toast::Heal => "+health",
             Toast::Sleep => "-tired",
-            Toast::Relax => "-drained",
+            Toast::Relax => "+energy +fun",
             Toast::Wash => "-dirty",
-            Toast::Play => "-miserable",
+            Toast::Play => "+fun",
             Toast::Inspired => "+inspired",
             Toast::Hibernate => "hibernating",
             Toast::Wake => "waking up",
@@ -161,12 +161,12 @@ impl Toast {
             Toast::StationRest => "Sleep bonus!",
             // Dynamic — handled in the renderer.
             Toast::StationCooldown => "",
-            Toast::Ozempic => "-weight -hunger",
+            Toast::Ozempic => "-weight",
             Toast::Exercise => "-weight",
             Toast::Medicate => "+medicated",
             Toast::DebugCheat => "cheat applied",
             Toast::Drink => "+drunk",
-            Toast::Rehab => "+sober",
+            Toast::Rehab => "rehab started",
             Toast::NewFriend => "new friend!",
             Toast::FriendReunion => "+happy",
             Toast::BattleWon => "won a battle!",
@@ -929,6 +929,21 @@ impl Drop for TestState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn toasts_name_the_v3_effects() {
+        use super::Toast;
+        for (toast, text) in [
+            (Toast::Heal, "+health"),
+            (Toast::Relax, "+energy +fun"),
+            (Toast::Play, "+fun"),
+            (Toast::Rehab, "rehab started"),
+            (Toast::Ozempic, "-weight"),
+        ] {
+            assert_eq!(toast.message(), text);
+            assert!(text.len() <= 15, "{text}: wider than the old longest toast");
+        }
+    }
+
     #[test]
     fn the_battle_result_card_needs_no_wake_loop() {
         let _guard = super::lock_test_state();

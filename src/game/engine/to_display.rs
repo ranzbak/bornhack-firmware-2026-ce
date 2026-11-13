@@ -114,7 +114,7 @@ impl GameState {
                 Action::Rehab => DisplayAnim::Rehab,
                 Action::Drink => DisplayAnim::Drinking,
                 Action::OnlyPets => DisplayAnim::OnlyPets,
-                // Placeholder until Task 9b gives Wash and Relax their own animations.
+                // Wash and Relax have no sprites of their own; they show the play animation.
                 Action::Wash | Action::Relax => DisplayAnim::Playing,
             };
         }

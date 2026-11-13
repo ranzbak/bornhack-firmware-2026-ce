@@ -7,7 +7,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle, Triangle};
-use embedded_graphics::text::{Text};
+use embedded_graphics::text::Text;
 
 use crate::ui::{self, TEXT_BOLD_BLACK};
 use crate::{RED, TriColor};
@@ -62,8 +62,12 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     let fill = PrimitiveStyle::with_fill(color);
-    Circle::new(o + Point::new(0, 1), 8).into_styled(fill).draw(display)?;
-    Circle::new(o + Point::new(6, 1), 8).into_styled(fill).draw(display)?;
+    Circle::new(o + Point::new(0, 1), 8)
+        .into_styled(fill)
+        .draw(display)?;
+    Circle::new(o + Point::new(6, 1), 8)
+        .into_styled(fill)
+        .draw(display)?;
     Triangle::new(
         o + Point::new(0, 6),
         o + Point::new(14, 6),
@@ -123,7 +127,11 @@ where
     for (i, (label, is_bad)) in rows.iter().enumerate() {
         let y = ROWS_Y + i as i32 * ROW_H;
         Text::with_text_style(label, Point::new(ROW_X, y), TEXT_BOLD_BLACK, left).draw(display)?;
-        let value_style = if *is_bad { crate::ui::TEXT_BOLD_RED } else { TEXT_BOLD_BLACK };
+        let value_style = if *is_bad {
+            crate::ui::TEXT_BOLD_RED
+        } else {
+            TEXT_BOLD_BLACK
+        };
         let value = if *is_bad { "Yes" } else { "No" };
         Text::with_text_style(
             value,
@@ -147,11 +155,11 @@ where
     // Weight as a bar, same widget every other stat uses, so it reads
     // consistently with the main Stats view.
     let weight_y = ROWS_Y + rows.len() as i32 * ROW_H + 4;
-    let fill_color = if stats.weight < 25 { RED } else { crate::BLACK };
+    let fill_color = if stats.fit < 25 { RED } else { crate::BLACK };
     super::stat_bar::draw_stat_bar(
         display,
         "Fit",
-        stats.weight,
+        stats.fit,
         Point::new(ROW_X, weight_y + 2),
         Point::new(ROW_X + 40, weight_y),
         Size::new(84, 16),

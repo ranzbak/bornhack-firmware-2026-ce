@@ -61,8 +61,6 @@ macro_rules! thresholds_table {
 }
 
 thresholds_table! {
-    // Scale
-    UNIT: u16,
     // Actions
     FEED_DURATION: u8,
     HEAL_DURATION: u8,
@@ -83,9 +81,6 @@ thresholds_table! {
     OZEMPIC_DURATION: u8,
     // Drink
     DRINK_DURATION: u8,
-    // Drunk / alcoholism
-    DRUNK_TRIGGER: u16,
-    WARNING_DRUNK: u16,
     // Rehab
     REHAB_DURATION: u8,
     // Battle — no duration (resolves instantly), just a cooldown between fights.
@@ -340,8 +335,6 @@ thresholds_table! {
 impl Thresholds {
     /// The original balance — what the badge ships with.
     pub const CLASSIC: Thresholds = Thresholds {
-        UNIT: 655,
-
         FEED_DURATION: 2,
         HEAL_DURATION: 3,
         PLAY_DURATION: 4,
@@ -364,9 +357,6 @@ impl Thresholds {
         OZEMPIC_DURATION: 2,
 
         DRINK_DURATION: 2,
-
-        DRUNK_TRIGGER: 39321,
-        WARNING_DRUNK: 32768,
 
         REHAB_DURATION: 3,
 
@@ -619,8 +609,6 @@ impl Thresholds {
     /// Aim: a forgiving balance for badge holders who don't want to baby-sit.
     pub const CASUAL: Thresholds = Thresholds {
         // Everything not listed below is identical to CLASSIC.
-        UNIT: 655,
-
         FEED_DURATION: 2,
         HEAL_DURATION: 3,
         PLAY_DURATION: 4,
@@ -643,9 +631,6 @@ impl Thresholds {
         OZEMPIC_DURATION: 2,
 
         DRINK_DURATION: 2,
-
-        DRUNK_TRIGGER: 39321,
-        WARNING_DRUNK: 32768,
 
         REHAB_DURATION: 3,
 
@@ -1002,8 +987,8 @@ pub fn active_mode() -> Mode {
 pub type Setter = fn(&mut Thresholds, u32);
 
 pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
-    // Interval keys divide the tick counter (see interval_fires); floor to 1
-    // so a BPETS_V3.CFG value of 0 can't cause a divide-by-zero.
+    // Setters clamp to the field's type (and to a sane range where a value
+    // would otherwise wrap or divide by zero); `validate` fixes band order.
     ("MINIGAME_COOLDOWN", |t, v| {
         t.MINIGAME_COOLDOWN = clamp_u16(v)
     }),

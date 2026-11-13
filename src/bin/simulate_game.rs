@@ -4,9 +4,9 @@
 //! Usage: `cargo run --release --bin simulate_game --features simulator [-- --preset classic|casual]`
 //! Or:    `make simulate-game`
 
+use bornhack_aegg::game::engine::GameState;
 use bornhack_aegg::game::engine::sim::{self, Driver, Plan};
 use bornhack_aegg::game::engine::thresholds::Mode;
-use bornhack_aegg::game::engine::{GameState, Phase};
 
 type Routine = fn(u32, u32, &GameState) -> Plan;
 

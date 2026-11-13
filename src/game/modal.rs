@@ -1081,7 +1081,7 @@ where
         ("Rested", stats.tired),
         ("Healthy", stats.healthy),
         ("Happy", stats.happy),
-        ("Fit", stats.weight),
+        ("Fit", stats.fit),
     ];
 
     // Layout: label at left margin, bar to the right of the longest
