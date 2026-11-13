@@ -90,7 +90,7 @@ When the badge is plugged in via USB-C it appears on your computer as a small dr
 | `ALARMS.ICS`                  | iCalendar file: imports alarms and calendar events     |
 | `030000.PCX` … `030009.PCX`   | Sponsor slides shown on the splash carousel            |
 | `<6 hex>.PCX`                 | Game sprites (palette + size enforced by asset tool)   |
-| `BORNPETS.CFG`                | Override BornPets balance — see [USER_GAMES.md](USER_GAMES.md) |
+| `BPETS_V3.CFG`                | Override BornPets v3 balance (old firmware keeps `BORNPETS.CFG`) — see [USER_GAMES.md](USER_GAMES.md) |
 | `PETS.CFG`                    | Add / rename pets (with their sprite PCX files) — see [USER_GAMES.md](USER_GAMES.md) |
 | `LUT.CFG`                     | Custom e-paper waveform — see [LUT.md](LUT.md)         |
 
@@ -202,7 +202,7 @@ The factory test runs again on the next boot.
   normal 256-colour or 24-bit export is silently skipped. Use the
   `aegg-asset-assistant` tool to convert art — it gets all of this
   right.
-- **`BORNPETS.CFG` / mode change seems to have no effect.** Both apply
+- **`BPETS_V3.CFG` / mode change seems to have no effect.** Both apply
   at **boot only** — eject the drive properly (so the file is flushed)
   and power-cycle. See [USER_GAMES.md](USER_GAMES.md) for the `*`
   indicators and config rules.

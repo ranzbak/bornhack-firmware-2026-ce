@@ -80,7 +80,7 @@ thresholds_table! {
     REHAB_DURATION: u8,
     // Battle — no duration (resolves instantly), just a cooldown between fights.
     BATTLE_COOLDOWN: u16,
-    // v2 need bands (percent, 1..=99); see engine::needs
+    // v3 need bands (percent, 1..=99); see engine::needs
     FULL_LO_PCT: u8,
     FULL_HI_PCT: u8,
     WATER_LO_PCT: u8,
@@ -95,7 +95,7 @@ thresholds_table! {
     FIT_LO_PCT: u8,
     WEIGHT_LO_PCT: u8,
     WEIGHT_HI_PCT: u8,
-    // v2 regime rates (per engine minute, magnitudes; sign lives in engine::regime).
+    // v3 regime rates (per engine minute, magnitudes; sign lives in engine::regime).
     // `_PM` = units per minute or per-mille, `_PCT` = percent multiplier or level.
     FULL_DRAIN_AWAKE_PM: u16,
     WATER_DRAIN_AWAKE_PM: u16,
@@ -140,7 +140,7 @@ thresholds_table! {
     UNSETTLED_FULL_HI_PCT: u8,
     UNSETTLED_WATER_LO_PCT: u8,
     UNSETTLED_WATER_HI_PCT: u8,
-    // v2 mood / health terms (see engine::regime); DMG_*_PM are per-minute damage
+    // v3 mood / health terms (see engine::regime); DMG_*_PM are per-minute damage
     MOOD_STEP: u16,
     MOOD_PEN_INJURED_PCT: u16,
     MOOD_PEN_GROGGY_PCT: u16,
@@ -181,7 +181,7 @@ thresholds_table! {
     REC_GOOD_MOOD_PCT: u8,
     REC_FAIR_MOOD_PCT: u8,
     REC_DEPRIVED_PCT: u16,
-    // v2 advance: onset/cure times (minutes), sleep rules, collapse, leaving
+    // v3 advance: onset/cure times (minutes), sleep rules, collapse, leaving
     DEPENDENCE_ONSET_MIN: u16,
     DEPENDENCE_RELAPSE_MIN: u16,
     DIABETES_ONSET_MIN: u16,
@@ -213,7 +213,7 @@ thresholds_table! {
     HEALTH_EXCESS_DECAY_PM: u16,
     CARE_GOOD_MOOD_PCT: u8,
     OVERSLEEP_RESET_PCT: u8,
-    // v2 doses: food and drink (percent points of the scale unless noted;
+    // v3 doses: food and drink (percent points of the scale unless noted;
     // `_PM` = per-mille of the scale, so 5 is half a percent)
     DOSE_SALAD_FULL_PCT: u8,
     DOSE_APPLE_FULL_PCT: u8,
@@ -380,7 +380,7 @@ impl Thresholds {
         WEIGHT_LO_PCT: 38,
         WEIGHT_HI_PCT: 63,
 
-        // v2 regime rates, see engine::regime
+        // v3 regime rates, see engine::regime
         FULL_DRAIN_AWAKE_PM: 54,
         WATER_DRAIN_AWAKE_PM: 45,
         ENERGY_DRAIN_AWAKE_PM: 36,
@@ -425,7 +425,7 @@ impl Thresholds {
         UNSETTLED_WATER_LO_PCT: 25,
         UNSETTLED_WATER_HI_PCT: 90,
 
-        // v2 mood / health terms
+        // v3 mood / health terms
         MOOD_STEP: 120,
         MOOD_PEN_INJURED_PCT: 20,
         MOOD_PEN_GROGGY_PCT: 10,
@@ -466,7 +466,7 @@ impl Thresholds {
         REC_GOOD_MOOD_PCT: 60,
         REC_FAIR_MOOD_PCT: 40,
         REC_DEPRIVED_PCT: 50,
-        // v2 advance
+        // v3 advance
         DEPENDENCE_ONSET_MIN: 1200,
         DEPENDENCE_RELAPSE_MIN: 400,
         DIABETES_ONSET_MIN: 4320,
@@ -499,7 +499,7 @@ impl Thresholds {
         CARE_GOOD_MOOD_PCT: 60,
         OVERSLEEP_RESET_PCT: 85,
 
-        // v2 doses: food and drink
+        // v3 doses: food and drink
         DOSE_SALAD_FULL_PCT: 20,
         DOSE_APPLE_FULL_PCT: 25,
         DOSE_FRIKANDEL_FULL_PCT: 35,
@@ -662,7 +662,7 @@ impl Thresholds {
         WEIGHT_LO_PCT: 33,
         WEIGHT_HI_PCT: 68,
 
-        // v2 regime rates, see engine::regime
+        // v3 regime rates, see engine::regime
         FULL_DRAIN_AWAKE_PM: 54,
         WATER_DRAIN_AWAKE_PM: 45,
         ENERGY_DRAIN_AWAKE_PM: 36,
@@ -707,7 +707,7 @@ impl Thresholds {
         UNSETTLED_WATER_LO_PCT: 25,
         UNSETTLED_WATER_HI_PCT: 90,
 
-        // v2 mood / health terms
+        // v3 mood / health terms
         MOOD_STEP: 120,
         MOOD_PEN_INJURED_PCT: 20,
         MOOD_PEN_GROGGY_PCT: 10,
@@ -748,7 +748,7 @@ impl Thresholds {
         REC_GOOD_MOOD_PCT: 60,
         REC_FAIR_MOOD_PCT: 40,
         REC_DEPRIVED_PCT: 50,
-        // v2 advance (collapse health loss halved like every damage rate)
+        // v3 advance (collapse health loss halved like every damage rate)
         DEPENDENCE_ONSET_MIN: 1200,
         DEPENDENCE_RELAPSE_MIN: 400,
         DIABETES_ONSET_MIN: 4320,
@@ -781,7 +781,7 @@ impl Thresholds {
         CARE_GOOD_MOOD_PCT: 60,
         OVERSLEEP_RESET_PCT: 85,
 
-        // v2 doses: food and drink
+        // v3 doses: food and drink
         DOSE_SALAD_FULL_PCT: 20,
         DOSE_APPLE_FULL_PCT: 25,
         DOSE_FRIKANDEL_FULL_PCT: 35,

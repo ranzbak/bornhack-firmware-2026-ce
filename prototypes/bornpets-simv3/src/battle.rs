@@ -1,4 +1,4 @@
-//! v2 battle prototype. Integer math. All inputs are percentages 0..=100.
+//! v3 battle prototype. Integer math. All inputs are percentages 0..=100.
 #[derive(Clone, Copy, Debug)]
 pub struct Cond { pub deprived: bool, pub weight: i32, pub hangover: bool, pub craving: bool, pub fit: i32, pub energy: i32, pub load: i32, pub mood: i32, pub health: i32, pub strain: i32, pub full: i32, pub hyd: i32, pub stim: i32, pub dirt: i32,
                   pub rested: bool, pub injured: bool, pub groggy: bool, pub vit: i32, pub cur: i32, pub res: i32 }

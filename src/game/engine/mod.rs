@@ -1389,7 +1389,7 @@ impl GameState {
     /// Serialize the game state to a fixed-size byte buffer for ekv.
     #[allow(unused_assignments)]
     pub fn to_bytes(&self) -> [u8; SAVE_SIZE] {
-        todo!("BornPets v2 plan 1 task 11: v3 save format")
+        todo!("BornPets v3 plan 1 task 11: v3 save format")
     }
 
     /// Deserialize a game state from a byte buffer.
@@ -1397,7 +1397,7 @@ impl GameState {
     #[allow(unused_assignments)]
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
         let _ = b;
-        todo!("BornPets v2 plan 1 task 11: v3 save format")
+        todo!("BornPets v3 plan 1 task 11: v3 save format")
     }
 }
 
@@ -1576,7 +1576,7 @@ mod overweight_diabetes_tests {
     /// New fields round-trip through `to_bytes`/`from_bytes` at the
     /// versioned 97-byte `SAVE_SIZE` (1 version byte + 96 fields).
     #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 11"]
+    #[ignore = "v1 rules; replaced by BornPets v3 plan 1 task 11"]
     fn save_round_trip_includes_new_fields() {
         let mut state = GameState::new_egg(42, PetKind::from_u8(1));
         state.weight = 41000;
@@ -1614,7 +1614,7 @@ mod overweight_diabetes_tests {
     /// 96-byte layout (which dropped `drained` and kept SAVE_SIZE at 96)
     /// being reinterpreted with the new field offsets and corrupting the pet.
     #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 11"]
+    #[ignore = "v1 rules; replaced by BornPets v3 plan 1 task 11"]
     fn old_or_wrong_version_save_is_rejected() {
         // A valid current save round-trips.
         let good = GameState::new_egg(7, PetKind::from_u8(2)).to_bytes();
@@ -1697,7 +1697,7 @@ mod overweight_diabetes_tests {
     /// had the match not dropped the action entirely first). `2`
     /// (formerly `Relax`) is now a deliberate gap — see `Action::to_u8`.
     #[test]
-    #[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 11"]
+    #[ignore = "v1 rules; replaced by BornPets v3 plan 1 task 11"]
     fn every_action_round_trips_through_save() {
         let all = [
             Action::Feed,

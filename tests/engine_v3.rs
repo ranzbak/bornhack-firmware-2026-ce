@@ -1,4 +1,4 @@
-//! BornPets v2 engine tests (plan 1).
+//! BornPets v3 engine tests (plan 1).
 
 use bornhack_aegg::game::bornpets_cfg::{apply_overrides, is_custom_set};
 use bornhack_aegg::game::engine::needs::{Need, build_edges};

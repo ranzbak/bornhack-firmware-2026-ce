@@ -1,4 +1,4 @@
-//! BornPets v2 "comfort band" model prototype. Integer math only.
+//! BornPets v3 "comfort band" model prototype. Integer math only.
 //! Step = 1 minute (6 engine ticks). Scale 0..=65535, P = 1 %.
 mod battle;
 const P: i32 = 655;

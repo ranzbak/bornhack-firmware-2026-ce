@@ -1,4 +1,4 @@
-//! Game engine tests: hatching and fresh-egg basics. The v2 rule tests live
+//! Game engine tests: hatching and fresh-egg basics. The v3 rule tests live
 //! in `engine_v3.rs`.
 
 use bornhack_aegg::game::engine::thresholds::*;

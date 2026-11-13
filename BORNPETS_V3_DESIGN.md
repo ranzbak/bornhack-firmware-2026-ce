@@ -1,8 +1,8 @@
-# BornPets design v2: comfort bands, trade-offs and a self-caring demo mode
+# BornPets design v3: comfort bands, trade-offs and a self-caring demo mode
 
 Report only. Nothing in the repo was changed. The audit of the current rules is in `bornpets-game-rules.md` next to this file; this document replaces its section 6 (proposals).
 
-The model was prototyped and tuned in a standalone integer-only Rust crate: `prototypes/bornpets-simv2/src/main.rs` (no dependency on the firmware engine, about 400 lines). Every number marked **(sim)** below is the value in that prototype and produced the result table in section 7. Everything marked **(guess)** has not been simulated.
+The model was prototyped and tuned in a standalone integer-only Rust crate: `prototypes/bornpets-simv3/src/main.rs` (no dependency on the firmware engine, about 400 lines). Every number marked **(sim)** below is the value in that prototype and produced the result table in section 7. Everything marked **(guess)** has not been simulated.
 
 **Current results are in section 18** (owner decisions of section 17 applied and re-simulated) and the NFC station format is in section 19.
 
@@ -30,7 +30,7 @@ Mood cannot be fixed with one press because it only drifts toward its target. He
 
 ### Stats: reused, re-meant, added, removed
 
-| v2 need | Existing field | Change |
+| v3 need | Existing field | Change |
 |---|---|---|
 | **Fullness** | `hunger` | inverted, and now two-sided: too full is a state too |
 | **Energy** | `tired` | inverted; sleep recovers it slowly; oversleep exists |
@@ -198,7 +198,7 @@ Chains the player will discover: beer at 23:00 then bed gives poor sleep, no "we
 
 The player must be able to find the optimum by looking, not by reading a table.
 
-1. **Bars with a band, on a two-page stats view (approved by the owner).** `stat_bar.rs` draws each bar with two small bracket ticks marking the comfort band; the fill is black inside the band and **red outside it** (the panel has red). The existing popover (`modal.rs` `draw_stats_view`, line 985: 132 x 132, margin 10, border 2, title 18 px, bars 15 px high at 15 px pitch, 60 px label column, 60 px bar, name / generation / age footer) holds five bars, so the nine v2 values go on two pages.
+1. **Bars with a band, on a two-page stats view (approved by the owner).** `stat_bar.rs` draws each bar with two small bracket ticks marking the comfort band; the fill is black inside the band and **red outside it** (the panel has red). The existing popover (`modal.rs` `draw_stats_view`, line 985: 132 x 132, margin 10, border 2, title 18 px, bars 15 px high at 15 px pitch, 60 px label column, 60 px bar, name / generation / age footer) holds five bars, so the nine v3 values go on two pages.
 
    - **Page 1 "Needs"** (what to act on now): Full, Water, Energy, Fun, Clean. Exactly five bars at today's geometry.
    - **Page 2 "Body"** (slow results): Health, Fit, Weight, Booze, Mood as five bars at the same geometry as page 1, then one condition line (the two most pressing of injured, hung over, groggy, well rested, diabetic, dependent, in rehab, uninsured, overdue) and the care score in the footer row. It grows out of today's `health_view.rs` (condition rows plus Fit and Sober bars).
@@ -298,7 +298,7 @@ Result: mood 98 %, health 95 %, fitness 91 %, 12.8 presses a day. Reading the pe
 
 ### 7.1 Setup
 
-`prototypes/bornpets-simv2`, run with `cargo run --offline -q`. Integer math only, 30 days. Every run is done twice, once with the one-minute step oracle and once with the delta driver, and printed side by side. Actions are instant, actions are instant, start state: fullness 60, hydration 65, energy 80, stimulation 50, fitness 60, dirt 10, mood 70, health 85. Player routines are deterministic. Demo runs use a xorshift32 PRNG with different seeds.
+`prototypes/bornpets-simv3`, run with `cargo run --offline -q`. Integer math only, 30 days. Every run is done twice, once with the one-minute step oracle and once with the delta driver, and printed side by side. Actions are instant, actions are instant, start state: fullness 60, hydration 65, energy 80, stimulation 50, fitness 60, dirt 10, mood 70, health 85. Player routines are deterministic. Demo runs use a xorshift32 PRNG with different seeds.
 
 ### 7.2 Results before the delta-engine rework
 
@@ -599,7 +599,7 @@ stateDiagram-v2
 Each phase builds and is testable on its own.
 
 **Phase 0. Port the prototype into the simulator. No firmware impact.**
-Copy the model from `prototypes/bornpets-simv2/src/main.rs` into a new `src/game/engine/v2.rs` behind the `simulator` feature only: `rates`, `thresholds`, `seg_len`, `advance(dt)`, `update_to`, the actions and the demo policy. Keep both drivers: `advance(1)` per minute as the **test oracle**, and the delta driver. Port the routines as `Policy` implementations in `engine/sim.rs`, with check-in jitter. Tests in `tests/game_engine_v2.rs`: (1) delta against oracle for every routine, tolerance one point on mood, health, fitness and identical counts of injuries, except the knife-edge routine noted in 13.5; (2) the design targets (five routines alive at 30 days; every spam routine below every balanced routine on mood; absent gone before day 3; demo never Leaving over 5 seeds); (3) a wake-up budget: engine wake-ups per day for the balanced routine and for a demo pet must stay under fixed limits, so a later rule change that adds boundaries is caught.
+Copy the model from `prototypes/bornpets-simv3/src/main.rs` into a new `src/game/engine/v3.rs` behind the `simulator` feature only: `rates`, `thresholds`, `seg_len`, `advance(dt)`, `update_to`, the actions and the demo policy. Keep both drivers: `advance(1)` per minute as the **test oracle**, and the delta driver. Port the routines as `Policy` implementations in `engine/sim.rs`, with check-in jitter. Tests in `tests/engine_v3.rs`: (1) delta against oracle for every routine, tolerance one point on mood, health, fitness and identical counts of injuries, except the knife-edge routine noted in 13.5; (2) the design targets (five routines alive at 30 days; every spam routine below every balanced routine on mood; absent gone before day 3; demo never Leaving over 5 seeds); (3) a wake-up budget: engine wake-ups per day for the balanced routine and for a demo pet must stay under fixed limits, so a later rule change that adds boundaries is caught.
 
 **Phase 1. Tuning-only fixes that can ship before the new engine. No save change.**
 These remove the worst of today's spam without the band model: Aspirine cooldown no longer suppresses the diabetes and alcoholism penalties (`engine/mod.rs:983`, `:1062`); `SICK_CONDITION_RATE`, `DIABETES_SICK_RATE`, `ALCOHOLIC_SICK_RATE` from 655 to 45 / 15 / 15; Only pets loses its mood bonus and its broke bonus (`engine/mod.rs:898`); mini-game reward only on a real win (`tictactoe.rs:162`, `bornjeweled.rs:117`); the wrong toast at `modal.rs:425`. Docs fixes from the audit's section 5.
@@ -610,7 +610,7 @@ These remove the worst of today's spam without the band model: Aspirine cooldown
 - `engine/food.rs`, `engine/drink.rs`: per-item dose table (fullness, hydration, fitness, treat mood, treat energy, load, dirt).
 - `engine/to_display.rs`: `DisplayAnim` selection from the largest penalty; re-map animation IDs `06`, `0A`, `0E` in `engine/anim_files.rs`.
 - `PetStats`: levels, band flags and a `status: StatusWord` enum for the UI.
-- **Save format v3.** `from_bytes` rejects anything but version 2 today (`engine/mod.rs:2010`), so without an upgrade path every pet is wiped. Proposal: bump `SAVE_FORMAT_VERSION` to 3, `SAVE_SIZE` 97 to 184 (87 new bytes appended: 13 for fitness and the five new timers plus one flag byte, 17 for hard mode (16.3), and the earlier 57: the 32 from before plus the demo pet's six scheduled times as `u32` ticks and its armed flag; they must be saved or a reboot would re-roll every pending delay) after `hard_mode`, existing offsets untouched). Add `from_bytes_v2(&[u8; 97]) -> GameState` and have `lifecycle::try_load` try v3 first, then v2. Conversion: fullness = clamp(100 % - hunger, 25 %, 80 %); energy = 100 % - tired; mood = 100 % - miserable; health = 100 % - sick; fitness = 60 % (new field, no old value); weight = 50 % + old overweight level / 2 (the old `weight` field counted up from lean to obese, so 0 maps to the middle of the new band and 100 to the top); booze = drunk; hydration 60 %; stimulation 50 %; dirt 20 %; all new timers 0; flags and money copied. Internally the fields can stay "bad-high" to keep the layout, as long as the accessors are consistent; decide once and note it at the top of the struct. Extend `tests/save_format.rs` with a v2 fixture.
+- **Save format v3.** `from_bytes` rejects anything but version 2 today (`engine/mod.rs:2010`), so without an upgrade path every pet is wiped. Proposal: bump `SAVE_FORMAT_VERSION` to 3, `SAVE_SIZE` 97 to 184 (87 new bytes appended: 13 for fitness and the five new timers plus one flag byte, 17 for hard mode (16.3), and the earlier 57: the 32 from before plus the demo pet's six scheduled times as `u32` ticks and its armed flag; they must be saved or a reboot would re-roll every pending delay) after `hard_mode`, existing offsets untouched). Add `from_bytes_v2(&[u8; 97]) -> GameState` and have `lifecycle::try_load` try save format 3 first, then format 2. The v3 save is written under the new kv key `state_v3`; the old `state` key is only read, never written or deleted, so the old firmware can be restored (owner, 18.9). Conversion: fullness = clamp(100 % - hunger, 25 %, 80 %); energy = 100 % - tired; mood = 100 % - miserable; health = 100 % - sick; fitness = 60 % (new field, no old value); weight = 50 % + old overweight level / 2 (the old `weight` field counted up from lean to obese, so 0 maps to the middle of the new band and 100 to the top); booze = drunk; hydration 60 %; stimulation 50 %; dirt 20 %; all new timers 0; flags and money copied. Internally the fields can stay "bad-high" to keep the layout, as long as the accessors are consistent; decide once and note it at the top of the struct. Extend `tests/save_format.rs` with a v2 fixture.
 - Unicorn Realm `PetRecord` gains care score and the self-raised flag: its own version byte and upgrade path in `lifecycle.rs`.
 
 **Phase 3. UI: reading the pet.**
@@ -645,7 +645,7 @@ Care score display, growth forms (text first), chronic conditions on the new lev
 9. **Should the demo pet follow the badge clock** (asleep at night, awake in office hours), or its own rhythm as simulated?
 10. **Chronic conditions:** keep diabetes and alcohol dependence as permanent flags on the new levels, or drop them now that health and the fitness ceiling carry the long-term consequences?
 11. **Time while powered off** (from the audit): still open, and it matters more now, because slow recovery only means something if time cannot be paused for free.
-12. **Save migration:** is the v2 to v3 upgrade path required, or may pets be reset once?
+12. **Save migration:** is the save format 2 to 3 upgrade path required, or may pets be reset once?
 13. ~~Hydration bar: its own bar or shared row?~~ **Resolved by the owner:** two-page stats view, Needs (Full, Water, Energy, Fun, Clean) and Body (Health, Fit, Treats, Mood, conditions). See section 5. Remaining small choice: drop the separate Health status menu entry (proposed) or keep it as a shortcut to page 2.
 14. **How much should drinks fill the belly?** At 4 to 5 points per drink a fixed diet plus three waters overshoots fullness. Lower it to 2, or keep it as the reason to drink between meals?
 15. **Has hydration made the party path too hard?** It dropped from mood 85 % to 77 % and from fitness 23 % to 0 %. Options: beer hydrates more (+20), or the thirst multiplier is halved again.
@@ -657,7 +657,7 @@ Care score display, growth forms (text first), chronic conditions on the new lev
 25. **Hard-mode diabetic.** One shift a day ends in eviction around day 28; two shifts are safe. Is "a chronically ill pet must work double" the intended joke, or too bleak?
 26. **Prior authorization appeal:** a button the player must press (one extra visit), or automatic as in the prototype?
 27. **Thin and unfit** (after Ozempic without sport) wins 2 % of battles. Too harsh?
-17. **Engine wake cap.** Keep today's 30 minutes (a v2 player's pet then wakes about as often as an idle pet does today, a demo pet about 40 % more), or raise it to 2 hours (everything drops below today)? The longer cap also means saves happen at most every 2 hours when nothing changes.
+17. **Engine wake cap.** Keep today's 30 minutes (a v3 player's pet then wakes about as often as an idle pet does today, a demo pet about 40 % more), or raise it to 2 hours (everything drops below today)? The longer cap also means saves happen at most every 2 hours when nothing changes.
 18. **Idle animation rate.** The engine is not what drains the battery on the pet screen; the 10-second animation frame is (up to 8640 refreshes a day against a few dozen from the game). Should the calm 5-minute idle proposed for demo mode apply to normal play as well, or only to single-frame idles?
 19. **Stepwise fitness ceiling and thirst.** Both were made stepwise so the delta engine can solve them. Acceptable, or is a smooth ceiling worth an extra boundary type (health against a moving line)?
 20. **Demo pet reaction time.** It now waits a random 10 to 90 minutes after a need turns uncomfortable, regardless of how bad it gets before the edge rule. Should the delay be shorter when the temperament is diligent?
@@ -666,7 +666,7 @@ Care score display, growth forms (text first), chronic conditions on the new lev
 
 ## 12. Battles
 
-Prototype: `prototypes/bornpets-simv2/src/battle.rs` (formula, win-rate matrix) and `lifestyle()` in `prototypes/bornpets-simv2/src/main.rs`. Run with `cargo run --offline -q -- battle`.
+Prototype: `prototypes/bornpets-simv3/src/battle.rs` (formula, win-rate matrix) and `lifestyle()` in `prototypes/bornpets-simv3/src/main.rs`. Run with `cargo run --offline -q -- battle`.
 
 ### 12.1 How a battle works today
 
@@ -697,7 +697,7 @@ flowchart TD
 
 Weak points for the redesign: the opponent takes no part; the result cannot be checked; stale stats; no cost, so it is a HAX tap (audit P14); the player cannot see why a fight was won or lost.
 
-### 12.2 Proposed battle on the v2 model
+### 12.2 Proposed battle on the v3 model
 
 **Principle.** A fight is a test of the pet's whole condition at that moment. A pet in good overall shape wins most often. Mass and drink are specialisations on top, each with a price inside the fight and a larger price in daily life. "Battling is here and now": the pet fights in the state it is in when challenged.
 
@@ -935,7 +935,7 @@ One partial refresh, text and bars only, 152 x 152. It reuses the bar drawing fr
 
 | Packet | Content | Size | Routing |
 |---|---|---|---|
-| Beacon v2 | today's 22 bytes, with the four existing stat bytes reused as power, guard, speed, HP, plus stamina, focus, 2 flag bytes | 26 | as today |
+| Beacon v3 | today's 22 bytes, with the four existing stat bytes reused as power, guard, speed, HP, plus stamina, focus, 2 flag bytes | 26 | as today |
 | CHALLENGE | type, challenger id, target id, snapshot A (8), nonce A (2) | 15 | zero hop |
 | ACCEPT | type, both ids, snapshot B (8), nonce B (2) | 15 | zero hop |
 | DECLINE | type, both ids | 5 | zero hop |
@@ -973,7 +973,7 @@ Seed = xorshift32 mix of nonce A, nonce B and both device ids. For the fallback 
 - **After the fight:** the existing result banner, plus one line naming the decisive factor when one side had a large penalty (`Lotte was sloppy`, `Bram ran out of steam in round 3`), and the cost toast (`sore`, `pulled a muscle`).
 - **Art:** nothing new is required; stand, won and lost sprites exist for every pet. Optional, one frame per pet each: a stumble for a sloppy miss, a puffed-up "courage" pose. Without them the text line carries it.
 
-### 12.7 Implementation: phase 6 (battle v2)
+### 12.7 Implementation: phase 6 (battle v3)
 
 Depends on phase 2 (engine v3), because the snapshot is built from the new needs.
 
@@ -985,7 +985,7 @@ Depends on phase 2 (engine v3), because the snapshot is built from the new needs
 - `engine/demo.rs`: auto-accept rule for demo-vs-demo challenges.
 - Mode separation: demo bit in beacon and snapshot (third flag byte); `battle.rs` refuses a CHALLENGE or fallback fight across modes on both sides; `battle_view.rs` greys out other-mode friends in the picker; `engine/mod.rs` keeps a separate demo win/loss count (2 bytes in the v3 layout); switching mode cancels a pending challenge.
 - **Pet save format:** no new fields beyond phase 2 (cooldown, wins and losses exist). A win-streak counter would add 1 byte; put it in the v3 layout if wanted.
-- Tests: port `prototypes/bornpets-simv2/src/battle.rs` as unit tests (determinism from the same seed and snapshots on "both sides"; the matrix as a regression table with a tolerance).
+- Tests: port `prototypes/bornpets-simv3/src/battle.rs` as unit tests (determinism from the same seed and snapshots on "both sides"; the matrix as a regression table with a tolerance).
 
 ### 12.8 Open questions (battle)
 
@@ -1002,7 +1002,7 @@ Depends on phase 2 (engine v3), because the snapshot is built from the new needs
 
 ---
 
-## 13. Running v2 on the existing delta engine
+## 13. Running v3 on the existing delta engine
 
 Owner constraint: battery matters, so the delta engine stays the algorithm that drives progress. This section replaces the earlier proposal of a one-minute step loop and the 10-minute demo poll. Both are gone from the design. The one-minute loop survives only as a test oracle in the simulator.
 
@@ -1021,9 +1021,9 @@ Read: `engine/mod.rs` `update` (540), `ticks_to_next_rate_change` (646), `consum
 2. Every change of a rate is tied to something whose time can be computed: a level reaching a threshold at its current rate (`distance / rate`), or a countdown reaching zero.
 3. Anything observable (animation, banner, buzzer) changes only at such a boundary, so the next wake can be scheduled exactly.
 
-### 13.2 The v2 rules, reshaped to fit
+### 13.2 The v3 rules, reshaped to fit
 
-The v2 model already has the right shape: needs move at fixed rates and everything interesting happens at band edges. Four rules did not fit and were changed; the rest map directly.
+The v3 model already has the right shape: needs move at fixed rates and everything interesting happens at band edges. Four rules did not fit and were changed; the rest map directly.
 
 **Needs.** Each of the eight needs (fullness, hydration, energy, stimulation, dirt, treat load, strain, fitness) has one rate per regime. The regime is the set of answers to "which side of each threshold is each level on" plus the flags (asleep, injured, groggy, well rested). Multipliers (sluggish, hung over, wired, fit, thirst) are regime properties, so they are constant inside a segment.
 
@@ -1086,20 +1086,20 @@ Today's engine was measured with the real firmware code in `scratchpad/simx`: `u
 |---|---|---|---|
 | **Today's engine**, untouched healthy pet | n/a | **50** (measured: the cap, plus two boundaries) | n/a |
 | **Today's engine**, cared for at 6 check-ins | n/a | **181** in my harness (12.6 presses a day; each action adds an action-end and a cooldown-end wake, and the harness's own session steps are included, so read this as an upper figure) | n/a |
-| v2 balanced / sporty / reactive player | 4 to 6 | 44 to 46 | 11 to 12 |
-| v2 lazy / party player | 10 to 14 | 49 to 51 | 15 to 19 |
-| v2 untouched pet (absent) | 12 | 56 | 19 |
-| v2 demo pet | 31 to 33 (about 12.5 self-care actions + 19 zone changes) | 67 to 70 | 34 to 37 |
+| v3 balanced / sporty / reactive player | 4 to 6 | 44 to 46 | 11 to 12 |
+| v3 lazy / party player | 10 to 14 | 49 to 51 | 15 to 19 |
+| v3 untouched pet (absent) | 12 | 56 | 19 |
+| v3 demo pet | 31 to 33 (about 12.5 self-care actions + 19 zone changes) | 67 to 70 | 34 to 37 |
 
-Add one wake per action for the end of its animation: about 12 a day for a player's pet, about 12.5 for a demo pet. v2 has no per-action cooldown timers, so the second wake per action that today's engine needs is gone.
+Add one wake per action for the end of its animation: about 12 a day for a player's pet, about 12.5 for a demo pet. v3 has no per-action cooldown timers, so the second wake per action that today's engine needs is gone.
 
 A sleeping pet was not measured on its own. From the model: an 8 h sleep has about 3 boundaries (hunger and thirst entering their low zones, energy full), so about 16 wake-ups with the 30 min cap and about 5 with the 2 h cap.
 
 Reading it:
 
-- **With today's 30-minute cap** a player's v2 pet wakes the CPU about as often as an untouched pet does today (44 to 51 against 50) and far less than a cared-for pet does today, because the cooldown wakes are gone. A demo pet is above today's idle figure (about 69) because it does things 12 times a day.
+- **With today's 30-minute cap** a player's v3 pet wakes the CPU about as often as an untouched pet does today (44 to 51 against 50) and far less than a cared-for pet does today, because the cooldown wakes are gone. A demo pet is above today's idle figure (about 69) because it does things 12 times a day.
 - **The cap is what dominates.** Because every observable change is a computed boundary, the 30-minute cap is no longer needed for correctness. With a 2-hour cap a player's pet is at 11 to 19 engine wake-ups a day and a demo pet at 34 to 37, all below today's 50. I recommend 2 hours; saves then happen on real events and at least every 2 hours.
-- **Display refreshes** are what actually cost energy. Today the game screen refreshes every 10 seconds whenever the shown animation has more than one frame: up to 8640 a day. v2 needs 4 to 14 refreshes a day for status changes plus two per action (start and end): about 30 to 40 a day for a player's pet and about 55 to 60 for a demo pet, before any idle animation. The idle animation is then the whole budget: at the calm rate of one frame per 5 minutes it is 288 a day; at one frame per 10 seconds it is 8640. The idle rate is a display decision, independent of the engine, and is the single largest battery lever on this screen.
+- **Display refreshes** are what actually cost energy. Today the game screen refreshes every 10 seconds whenever the shown animation has more than one frame: up to 8640 a day. v3 needs 4 to 14 refreshes a day for status changes plus two per action (start and end): about 30 to 40 a day for a player's pet and about 55 to 60 for a demo pet, before any idle animation. The idle animation is then the whole budget: at the calm rate of one frame per 5 minutes it is 288 a day; at one frame per 10 seconds it is 8640. The idle rate is a display decision, independent of the engine, and is the single largest battery lever on this screen.
 - Not measured: actual current draw. These are wake and refresh counts only.
 
 ### 13.5 Delta engine against the step oracle
@@ -1168,7 +1168,7 @@ These tables are the current results for the whole design. They supersede the nu
 
 ## 14. Backgrounds: day and night, clean, healthy
 
-Owner decisions (2026-11-13): pet sprites sit on top of backgrounds that combine as needed; dithered backgrounds; day and night follow the wall clock; ghosting handling stays simple and is only added if it shows up as a problem; the Jellyfish pet is removed as part of the v2 work.
+Owner decisions (2026-11-13): pet sprites sit on top of backgrounds that combine as needed; dithered backgrounds; day and night follow the wall clock; ghosting handling stays simple and is only added if it shows up as a problem; the Jellyfish pet is removed as part of the v3 work.
 
 ### 14.1 Sprite transparency (audited)
 
@@ -1224,7 +1224,7 @@ All layers are drawn in code with `embedded-graphics` primitives and pixel patte
 - Pet screen render (`src/game/mod.rs` / `to_display.rs`): call it before the sprite blit; `BackgroundState` derived from local time and the pet's levels.
 - Engine: sunrise/sunset times added to `next_wake_tick` when the clock is known.
 - Skip the background while hibernating. Floor items: five small item drawings (crumbs, peel, can, sock, pizza box) as code primitives or tiny PCX files, with fixed floor slots; dirt thresholds 40 / 55 / 70 / 95 added to the kind-A table.
-- Assets: no sprite fixes needed (owner accepted the Cat sleeping scene; hibernation has no background). **The Jellyfish pet is removed as part of the v2 work** (owner decision): delete `08xxxx.PCX`, its `PETS.CFG` line and `MANIFEST.TXT` entries and its sprite sheet sources, and check what a badge with a saved Jellyfish pet does on boot (it must fall back to pet selection, not crash).
+- Assets: no sprite fixes needed (owner accepted the Cat sleeping scene; hibernation has no background). **The Jellyfish pet is removed as part of the v3 work** (owner decision): delete `08xxxx.PCX`, its `PETS.CFG` line and `MANIFEST.TXT` entries and its sprite sheet sources, and check what a badge with a saved Jellyfish pet does on boot (it must fall back to pet selection, not crash).
 - Simulator: the same function draws into the simulator display, so backgrounds can be reviewed on the desktop before flashing.
 
 ---
@@ -1535,15 +1535,15 @@ Size: S = under a day, M = a few days, L = a week or more, for the fixer agent. 
 
 | # | Mechanic | Needs | Size | Risk | Battery | Screen and buttons | Abuse / multiplayer | Fun or just harder? | Verdict |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | Insulin price creep | engine rule, 1 save byte (doses this week), toast | S | low | none | price already shown in the menu row | none | fun: the toast is the joke, the weekly reset keeps it bounded | **ship with v2** |
-| 2 | Deductible and copay | engine rule in the pay path, 2 save bytes (care this week), 2 for the week timer | S | low; one place to get the arithmetic wrong | one timer per week | one line on the Body page: `Deductible 90/150` | none | adds a real choice (bundle care into one week) | **ship with v2** |
-| 3 | Insurance tied to work | timer (2 save bytes), status word | S | low | one timer event when cover lapses | status word `uninsured` | none | the core loop of hard mode: work or pay full price | **ship with v2** |
-| 4 | Surprise bills | one pending bill: due time and amount (4 save bytes), a small itemised screen, text table | M | medium: the text table costs flash (about 20 lines) | one scheduled event per treatment | full-screen bill, any button dismisses; one partial refresh | none | fun; the strongest joke per byte | **ship with v2** |
-| 5 | Medical debt | `money` becomes signed (same 4 bytes), every "can afford" check in `modal.rs` gets a hard-mode branch, balance drawn with a minus sign | M | medium: about ten affordability checks to touch | none | minus sign fits the existing balance text | none | necessary for the rest to have a stake | **ship with v2** |
-| 6 | Eviction | countdown (2 save bytes), three status words, a Realm record reason (1 bit), farewell text; hooks into the existing Leaving path | M | medium: second cause of Leaving, must not interfere with the health one | one timer while under the line; otherwise checked only when HAX changes | status words, three toasts, existing Gone screen with different text | none | gives debt its stake; avoidable by working | **ship with v2** |
-| 7 | Prior authorization | pending request: what and when (3 save bytes), menu rows show `(pending)` / `(denied: appeal)`, Appeal action | M | medium: three states per medicine in the menu | one scheduled event per request | menu suffixes; no new screen | none | funny once, then a delay; keep it to Ozempic and Rehab so it never blocks urgent care | **ship with v2**, after 1 to 6 |
-| 8 | Rationing (half dose) | one menu row, one constant | S | low | none | Heal menu grows by one row (it scrolls already) | none | a trap by design; teaches itself in one use | **ship with v2** |
-| 9 | Rehab as "28-day program, out of network" | text and a price constant | S | none | none | label length: `28-day program` fits the 19-character row | none | pure joke | **ship with v2** |
+| 1 | Insulin price creep | engine rule, 1 save byte (doses this week), toast | S | low | none | price already shown in the menu row | none | fun: the toast is the joke, the weekly reset keeps it bounded | **ship with v3** |
+| 2 | Deductible and copay | engine rule in the pay path, 2 save bytes (care this week), 2 for the week timer | S | low; one place to get the arithmetic wrong | one timer per week | one line on the Body page: `Deductible 90/150` | none | adds a real choice (bundle care into one week) | **ship with v3** |
+| 3 | Insurance tied to work | timer (2 save bytes), status word | S | low | one timer event when cover lapses | status word `uninsured` | none | the core loop of hard mode: work or pay full price | **ship with v3** |
+| 4 | Surprise bills | one pending bill: due time and amount (4 save bytes), a small itemised screen, text table | M | medium: the text table costs flash (about 20 lines) | one scheduled event per treatment | full-screen bill, any button dismisses; one partial refresh | none | fun; the strongest joke per byte | **ship with v3** |
+| 5 | Medical debt | `money` becomes signed (same 4 bytes), every "can afford" check in `modal.rs` gets a hard-mode branch, balance drawn with a minus sign | M | medium: about ten affordability checks to touch | none | minus sign fits the existing balance text | none | necessary for the rest to have a stake | **ship with v3** |
+| 6 | Eviction | countdown (2 save bytes), three status words, a Realm record reason (1 bit), farewell text; hooks into the existing Leaving path | M | medium: second cause of Leaving, must not interfere with the health one | one timer while under the line; otherwise checked only when HAX changes | status words, three toasts, existing Gone screen with different text | none | gives debt its stake; avoidable by working | **ship with v3** |
+| 7 | Prior authorization | pending request: what and when (3 save bytes), menu rows show `(pending)` / `(denied: appeal)`, Appeal action | M | medium: three states per medicine in the menu | one scheduled event per request | menu suffixes; no new screen | none | funny once, then a delay; keep it to Ozempic and Rehab so it never blocks urgent care | **ship with v3**, after 1 to 6 |
+| 8 | Rationing (half dose) | one menu row, one constant | S | low | none | Heal menu grows by one row (it scrolls already) | none | a trap by design; teaches itself in one use | **ship with v3** |
+| 9 | Rehab as "28-day program, out of network" | text and a price constant | S | none | none | label length: `28-day program` fits the 19-character row | none | pure joke | **ship with v3** |
 | 10 | Crowdfunding over the mesh | new SHDW message (fund open, donation; about 8 bytes each), a donate item on the friend detail screen, a received toast, anti-replay | L | high: first feature that moves value between badges | radio: one zero-hop packet per donation, one beacon flag while a fund is open; no extra wake-ups | donate from Friends: three amounts, Fire | SHDW is one shared key: any modified badge can mint donations to itself. Limits: donations only to a pet under a final notice, capped at 150 HAX received per game week, per-pair cap of 50 a day, duplicate packets ignored by a sequence number. Beyond that, accepted: it inflates only the cheater's own pet | very on theme (the system's real safety net is strangers), and it gives the mesh a purpose | **later phase** (with the battle protocol work) |
 | 11 | Pharmacy across the border | new SHDW message (request, grant), a "send insulin" item, a per-day cap | M to L | medium to high | one packet pair per dose | one item on the friend detail screen | a second badge in normal mode becomes a free pharmacy; that is the joke, but cap it at 2 doses per friend per day so it helps without replacing work | funny, and a reason to make friends; overlaps with crowdfunding | **later phase**; until then ship it as a text-only toast when a normal-mode friend is in range: `Bram pays 5 HAX for this.` |
 
@@ -1614,14 +1614,14 @@ Answers to the open questions of sections 11 and 12.8. These override earlier te
 | 28 | Engine wake cap | **2 hours.** |
 | 29 | Idle animation rate | **One idle frame every 5 minutes in normal play too**; action animations still play at full speed. |
 | 30 | Time while powered off | **Catch up at most 12 hours** on boot when the clock is known. |
-| 31 | Save migration | **v2 to v3 upgrade path**, no reset. |
+| 31 | Save migration | **save format 2 to 3 upgrade path**, no reset. |
 | 32 | Health status menu entry | **Dropped**; stats page 2 covers it, the battle record moves to the Friends / Battle screen. |
 
 ---
 
 ## 18. Owner decisions applied: current results
 
-**This section holds the current result tables for the whole design.** Tables in sections 6 to 8, 12.3, 13.5, 15.7 to 15.9 and 16.2 are history. Everything here was produced by `prototypes/bornpets-simv2` after applying section 17, on both drivers (step oracle / delta engine) where two numbers are shown. Simulations were run one at a time on two cores.
+**This section holds the current result tables for the whole design.** Tables in sections 6 to 8, 12.3, 13.5, 15.7 to 15.9 and 16.2 are history. Everything here was produced by `prototypes/bornpets-simv3` after applying section 17, on both drivers (step oracle / delta engine) where two numbers are shown. Simulations were run one at a time on two cores.
 
 ### 18.1 Status of every section 17 row
 
@@ -1658,7 +1658,7 @@ Answers to the open questions of sections 11 and 12.8. These override earlier te
 | 28 | Wake cap 2 h | yes | yes: 18.6 |
 | 29 | Idle frame every 5 min | counted in 18.6 | n/a |
 | 30 | Catch up at most 12 h on boot | design only | not simulated |
-| 31 | v2 to v3 upgrade path | design only | n/a |
+| 31 | save format 2 to 3 upgrade path | design only | n/a |
 | 32 | Health status entry dropped | design only | n/a |
 
 ### 18.2 What broke and how it was retuned
@@ -1867,7 +1867,7 @@ Still open after round 2: one fight a day out-earning a shift; the demo pet's we
 
 | Question | Answer |
 |---|---|
-| Keep the Casual preset and `BORNPETS.CFG` tuning? | **Yes:** "make the new engine tunable as well, copy new config in with new assets, copy old config to .bak". Every v2 value is a `Thresholds` field with Classic and Casual values and a config key; the new `BORNPETS.CFG` ships as a commented template with the assets; an update keeps the previous file as `BORNPETS.BAK`. Plan 1, tasks 1 and 15. |
+| Keep the Casual preset and config tuning? | **Yes**, revised by the owner (2026-11-13). First answer: "make the new engine tunable as well, copy new config in with new assets, copy old config to .bak". Revision: "we don't rename the current config to .bak, we create a new config file with v2 in the name, that way players can revert back to the old firmware if they want to", then "BPETS_V3.CFG". The new engine is named **BornPets v3** everywhere. Every v3 value is a `Thresholds` field with Classic and Casual values and a config key. The new file is `BPETS_V3.CFG`; it ships as a commented template with the assets, and the v3 firmware reads only that file. The old `BORNPETS.CFG` and the old `state` save are left untouched, so players can go back to the old firmware (the v3 save is written under the new key `state_v3`). No `.BAK` file and no backup logic. Plan 1, tasks 1, 11 and 15. |
 | Fresh-egg health `85 % - (MAX - vitality) / 8` | **OK.** |
 | Demo pet weight control is weak | **Tune it in plan 3 (demo mode).** |
 | One fight a day pays about two shifts | **Accepted.** |
@@ -1876,13 +1876,13 @@ Still open after round 2: one fight a day out-earning a shift; the demo pet's we
 
 ## 19. NFC magic stations
 
-Owner requirement: the magic places stay part of the game (tap the badge, the pet gets a fix), and the signed station message should carry v2 variable names and values instead of three fixed phrases that each reset one old stat.
+Owner requirement: the magic places stay part of the game (tap the badge, the pet gets a fix), and the signed station message should carry v3 variable names and values instead of three fixed phrases that each reset one old stat.
 
 ### 19.1 Today
 
 `station.rs` `apply()` receives the verified plaintext of a signed NFC command (`NFC_README.md`: the reader sends `plaintext || 64-byte signature`, the signature covers `challenge || plaintext`, `Lc` at most 255, so the plaintext is at most 191 bytes). It trims, lowercases, rejects anything over 32 bytes, and matches exactly three phrases: `more food` sets `hunger = 0`, `more drugs` sets `sick = 0`, `sleep like a bear` sets `tired = 0`. Each has its own cooldown of 30 ticks (5 minutes), held in RAM. Stations work for any pet that is not Gone.
 
-In v2 "hunger = 0" would mean a stuffed pet, and the three phrases cannot reach the new needs.
+In v3 "hunger = 0" would mean a stuffed pet, and the three phrases cannot reach the new needs.
 
 ### 19.2 The new plaintext
 
@@ -1991,7 +1991,7 @@ Stations help a lot and do not replace care: a pet that lives on stations alone 
 
 **Latest revision, guessed or not exercised:** surprise bills and prior-authorization denials are in the prototype but no simulated routine triggered them; half doses, crowdfunding and the cross-border pharmacy are design only; every hard-mode text; the size and risk estimates in 16.3; the Body page layout with five bars; reversal of diabetes; the save-size arithmetic (184 bytes) is a count of proposed fields, not a compiled struct.
 
-**Verified against the step oracle:** the delta driver for all player routines, demo mode (statistically, five seeds) and the battle lifestyles; engine wake-ups and status changes per day for v2; today's engine wake-ups (measured with the real firmware engine in `scratchpad/simx`).
+**Verified against the step oracle:** the delta driver for all player routines, demo mode (statistically, five seeds) and the battle lifestyles; engine wake-ups and status changes per day for v3; today's engine wake-ups (measured with the real firmware engine in `scratchpad/simx`).
 
 **From simulation (values are the prototype's):** all passive rates including hydration, its band, doses, the thirst-from-load and slow-load-clearing rules, the belly rule and the demo pet's drinking; all bands and penalty slopes; mood follow rate; food, drink, play, mini-game, friend, sport, wash, medicine doses; overeating rule; treat tolerance; the ten interaction rules; sleep recovery, quality, grumpy, oversleep, self-wake, well rested, collapse; injury threshold and duration; health damage and recovery rates; fitness ceiling; leaving countdown; the whole demo policy with its thresholds and probabilities; the 25 % clamp. Battle: the six quality formulas, the lean-pet drink multiplier, the fight loop, the win-rate matrix, the challenger's battle costs, and the brawler and fit-fighter lifestyle runs.
 

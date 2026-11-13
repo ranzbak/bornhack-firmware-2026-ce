@@ -36,7 +36,7 @@ const PHASE_OFS: usize = 1 + 18 + 8;
 const ACTION_OFS: usize = PHASE_OFS + 1 + 2 + 4 + 2;
 
 #[test]
-#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 11"]
+#[ignore = "v1 rules; replaced by BornPets v3 plan 1 task 11"]
 fn game_state_golden_bytes_round_trip() {
     assert_eq!(SAVE_SIZE, 97);
     assert_eq!(SAVE_FORMAT_VERSION, 2);
@@ -87,7 +87,7 @@ fn game_state_golden_bytes_round_trip() {
 }
 
 #[test]
-#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 11"]
+#[ignore = "v1 rules; replaced by BornPets v3 plan 1 task 11"]
 fn game_state_rejects_wrong_version_and_length() {
     let mut bad = GAME_GOLDEN;
     bad[0] = SAVE_FORMAT_VERSION + 1;
@@ -105,7 +105,7 @@ fn game_state_rejects_wrong_version_and_length() {
 }
 
 #[test]
-#[ignore = "v1 rules; replaced by BornPets v2 plan 1 task 11"]
+#[ignore = "v1 rules; replaced by BornPets v3 plan 1 task 11"]
 fn game_state_decode_normalises_out_of_range_bytes() {
     assert_eq!(GAME_GOLDEN[PHASE_OFS], 1);
     assert_eq!(GAME_GOLDEN[ACTION_OFS], 7);

@@ -43,13 +43,13 @@ Two built-in difficulty presets, picked via **Main → Bornagotchi → Mode**:
 
 The setting persists in flash. Changing it shows a `*` next to the mode name in the menu — that means the new mode is queued but the active engine is still running the old one. **Reboot the badge** (unplug + plug USB, or hit the factory-reset combo if you really want to start clean) for it to take effect.
 
-## Custom balance: `BORNPETS.CFG`
+## Custom balance: `BPETS_V3.CFG`
 
-If neither preset is your speed you can override individual numbers via a config file on the badge's USB drive.
+If neither preset is your speed you can override individual numbers via a config file on the badge's USB drive. The BornPets v3 firmware reads `BPETS_V3.CFG`. An old `BORNPETS.CFG` is left alone for the old firmware, so you can go back to the old firmware and keep your old settings. Updating the badge's assets never overwrites an existing `BPETS_V3.CFG`.
 
 1. Plug the badge in via USB-C.
 2. Open the `CYBR<4 hex>` drive on your computer.
-3. Create or edit `BORNPETS.CFG` in the root with one `KEY=VALUE` per line:
+3. Create or edit `BPETS_V3.CFG` in the root with one `KEY=VALUE` per line:
 
    ```
    # speed up hunger decay, slow down drained
@@ -59,7 +59,7 @@ If neither preset is your speed you can override individual numbers via a config
 
 4. Eject the drive and reboot the badge.
 
-When a `BORNPETS.CFG` is active, the pet name on the stats screen and traits screen gets a small `*` after it — so you can tell at a glance that your pet is running on a non-standard balance.
+When a `BPETS_V3.CFG` is active, the pet name on the stats screen and traits screen gets a small `*` after it — so you can tell at a glance that your pet is running on a non-standard balance.
 
 Known keys (everything else is silently ignored, so you don't have to keep your file up to date):
 
@@ -85,7 +85,7 @@ Known keys (everything else is silently ignored, so you don't have to keep your 
 
 Stat scale: `655 ≈ 1 %`, `65535 = 100 %`. Time scale: `1 tick = 10 seconds` (so 360 ticks = 1 hour). Values are clamped to sensible ranges (interval keys are floored to 1 so the engine can't divide by zero). Unknown keys are logged and skipped.
 
-To go back to a preset, delete `BORNPETS.CFG` from the drive and reboot.
+To go back to a preset, delete `BPETS_V3.CFG` from the drive and reboot.
 
 A few gotchas:
 

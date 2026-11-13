@@ -1,4 +1,4 @@
-//! BornPets v2 needs, tunable band edges and the threshold edge table.
+//! BornPets v3 needs, tunable band edges and the threshold edge table.
 //!
 //! Levels are `u16`-scale (`P` = one percent). Band edges come from the
 //! runtime [`Thresholds`] table; the other edges are fixed safety lines.
