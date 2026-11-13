@@ -51,12 +51,13 @@ fn extra_levels(s: &GameState, need: Need) -> ([i32; MAX_EXTRA], usize) {
             4
         }
         Need::Energy => {
-            v[..3].copy_from_slice(&[
-                lvl(t::DMG_ENERGY_PCT()),
-                lvl(t::OVERSLEEP_RESET_PCT()),
-                energy_cap(s),
-            ]);
-            3
+            v[..2].copy_from_slice(&[lvl(t::DMG_ENERGY_PCT()), lvl(t::OVERSLEEP_RESET_PCT())]);
+            if s.is_sleeping {
+                v[2] = energy_cap(s);
+                3
+            } else {
+                2
+            }
         }
         Need::Fun => {
             v[0] = lvl(t::SLEEP_FUN_FLOOR_PCT());
@@ -156,6 +157,10 @@ fn level_bound(s: &GameState) -> u32 {
             .map(|&p| lvl(p));
         let fixed = [0, MAX];
         for target in tabled.chain(extra[..extras].iter().copied()).chain(fixed) {
+            // The clamp it is leaving is behind it, not ahead.
+            if rate > 0 && target == 0 || rate < 0 && target == MAX {
+                continue;
+            }
             if let Some(n) = minutes_to(level, rate, target) {
                 best = best.min(n as u32);
             }
@@ -164,83 +169,81 @@ fn level_bound(s: &GameState) -> u32 {
     best
 }
 
-/// Minutes until a timer that is running expires (it is read as 0 after).
+/// Minutes until the first timer or counter event, so that `advance` over the
+/// segment equals stepping it.
+///
+/// `advance` evaluates the mood and health terms on the post-update state, so
+/// a timer, counter or flag those terms read must flip no earlier than the
+/// segment's last minute: it bounds the segment at `remaining - 1` (R20; 0
+/// becomes a one-minute crossing segment). Timers no regime term reads keep
+/// `remaining`.
 fn timer_bound(s: &GameState) -> u32 {
     let mut best = i64::MAX;
-    let mut running = |minutes: i64| {
+    // A running timer nothing derived reads.
+    let mut plain = |minutes: i64| {
         if minutes > 0 {
             best = best.min(minutes);
         }
     };
-    let asleep = s.is_sleeping;
-    let hangover_mult = if asleep {
-        t::HANGOVER_ASLEEP_MULT() as i64
+    for m in [s.rested_min, s.med_cd_min, s.junk_min, s.ozempic_min, s.ozempic_cd_min, s.recovering_min] {
+        plain(m as i64);
+    }
+    if s.health != 0 {
+        // Counting down; reaching 0 returns a Leaving pet to Active.
+        plain(s.leaving_min as i64);
     } else {
-        1
-    };
-    running(ceil_div(s.hangover_min as i64, hangover_mult));
-    for m in [
-        s.rested_min,
-        s.injured_min,
-        s.groggy_min,
-        s.med_cd_min,
-        s.recovering_min,
-        s.junk_min,
-        s.insulin_min,
-        s.ozempic_min,
-        s.ozempic_cd_min,
-        s.rehab_min,
-    ] {
-        running(m as i64);
+        plain(scaled_left(t::LEAVING_MIN(), LEAVING_SCALE, s.leaving_min));
+    }
+    let asleep = s.is_sleeping;
+    let at_cap = asleep && s.energy as i32 >= energy_cap(s);
+    if at_cap {
+        plain(t::GROGGY_LINE_MIN() as i64 + 1 - s.oversleep_min as i64);
     }
 
-    if asleep {
-        running(t::SELF_WAKE_MIN() as i64 - s.sleep_min as i64);
-        if s.energy as i32 >= energy_cap(s) {
-            running(t::OVERSLEEP_WAKE_MIN() as i64 - s.oversleep_min as i64);
-            running(t::GROGGY_LINE_MIN() as i64 + 1 - s.oversleep_min as i64);
+    // A running timer, or a counter heading for a line, that mood/health read.
+    let mut feeds = |minutes: i64| best = best.min((minutes - 1).max(0));
+    let hangover_mult = if asleep { t::HANGOVER_ASLEEP_MULT() as i64 } else { 1 };
+    for left in [
+        ceil_div(s.hangover_min as i64, hangover_mult),
+        s.injured_min as i64,
+        s.groggy_min as i64,
+        s.insulin_min as i64,
+        s.rehab_min as i64,
+    ] {
+        if left > 0 {
+            feeds(left);
         }
     }
-
-    let scaled_left = |line_min: u16, scale: u32, counter: u32| {
-        ceil_div(
-            line_min as i64 * scale as i64 - counter as i64,
-            scale as i64,
-        )
-    };
+    if asleep {
+        feeds(t::SELF_WAKE_MIN() as i64 - s.sleep_min as i64);
+        if at_cap {
+            feeds(t::OVERSLEEP_WAKE_MIN() as i64 - s.oversleep_min as i64);
+        }
+    }
     if s.booze as i32 > needs::booze_hi() && !s.dependent {
-        let line = if s.recovering_min > 0 {
-            t::DEPENDENCE_RELAPSE_MIN()
-        } else {
-            t::DEPENDENCE_ONSET_MIN()
-        };
-        running(scaled_left(line, SLOW_SCALE, s.dependence_min));
+        let line = if s.recovering_min > 0 { t::DEPENDENCE_RELAPSE_MIN() } else { t::DEPENDENCE_ONSET_MIN() };
+        feeds(scaled_left(line, SLOW_SCALE, s.dependence_min));
     }
     if s.weight as i32 > lvl(t::DIABETES_WEIGHT_HI_PCT()) && !s.diabetic {
-        running(scaled_left(
-            t::DIABETES_ONSET_MIN(),
-            SLOW_SCALE,
-            s.diabetes_min,
-        ));
+        feeds(scaled_left(t::DIABETES_ONSET_MIN(), SLOW_SCALE, s.diabetes_min));
     }
-    if s.diabetic
-        && (s.weight as i32) < lvl(t::DIABETES_WEIGHT_LO_PCT())
-        && s.fitness as i32 > lvl(t::REVERSAL_FIT_PCT())
-    {
-        running(t::DIABETES_REVERSAL_MIN() as i64 - s.reversal_min as i64);
-    }
-
-    if s.health == 0 {
-        running(scaled_left(t::LEAVING_MIN(), LEAVING_SCALE, s.leaving_min));
-    } else {
-        // Counting down; reaching 0 returns a Leaving pet to Active.
-        running(s.leaving_min as i64);
+    if s.diabetic && (s.weight as i32) < lvl(t::DIABETES_WEIGHT_LO_PCT()) && s.fitness as i32 > lvl(t::REVERSAL_FIT_PCT()) {
+        feeds(t::DIABETES_REVERSAL_MIN() as i64 - s.reversal_min as i64);
     }
     best.min(u32::MAX as i64) as u32
 }
 
+/// Whole minutes until a counter that rises by `scale` per minute reaches
+/// `line_min` minutes (0 when it already has).
+fn scaled_left(line_min: u16, scale: u32, counter: u32) -> i64 {
+    ceil_div(line_min as i64 * scale as i64 - counter as i64, scale as i64)
+}
+
 /// Longest segment (1..=`max` minutes) over which no threshold is crossed and
 /// no timer expires. Pure: reads the state, changes nothing.
+///
+/// `max == 0` (nothing to advance) also gives 1: callers never ask for it,
+/// the result is always at least 1.
 pub fn seg_len(s: &GameState, max: u32) -> u32 {
     if s.phase == Phase::Gone {
         return max.max(1);

@@ -839,7 +839,7 @@ mod solver {
         let mut s = calm();
         s.fullness = pct(60);
         s.injured_min = 7;
-        assert_eq!(seg_len(&s, 10_000), 7);
+        assert_eq!(seg_len(&s, 10_000), 6, "injured feeds mood: one minute early (R20)");
     }
 
     #[test]
@@ -849,7 +849,7 @@ mod solver {
         s.is_sleeping = true;
         s.energy = MAX as u16;
         s.sleep_min = 700;
-        assert_eq!(seg_len(&s, 10_000), 20, "only the sleep timer bounds it");
+        assert_eq!(seg_len(&s, 10_000), 19, "only the self-wake timer bounds it, one minute early");
     }
 
     #[test]
@@ -867,13 +867,13 @@ mod solver {
         let mut s = calm();
         s.fullness = pct(60);
         s.booze = pct(50);
-        s.dependence_min = 1200 * 4 - 5; // 5 quarter-minutes left: 2 minutes
-        assert_eq!(seg_len(&s, 10_000), 2);
+        s.dependence_min = 1200 * 4 - 5; // 5 quarter-minutes left: 2 minutes, bounded one early
+        assert_eq!(seg_len(&s, 10_000), 1);
         let mut s = calm();
         s.fullness = pct(60);
         s.weight = pct(85);
-        s.diabetes_min = 4320 * 4 - 9; // 3 minutes
-        assert_eq!(seg_len(&s, 10_000), 3);
+        s.diabetes_min = 4320 * 4 - 9; // 3 minutes, bounded one early
+        assert_eq!(seg_len(&s, 10_000), 2);
     }
 
     #[test]
@@ -975,5 +975,112 @@ mod solver {
                 advance(&mut s, 1);
             }
         }
+    }
+
+    fn at_target(mut s: GameState) -> GameState {
+        s.mood = bornhack_aegg::game::engine::regime::mood_target(&s) as u16;
+        s
+    }
+
+    /// R20: one closed-form call over a segment equals the same minutes stepped
+    /// one at a time, on the whole state.
+    #[test]
+    fn a_segment_equals_the_same_minutes_stepped() {
+        let mut cases: Vec<(&str, GameState)> = Vec::new();
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.injured_min = 7;
+        cases.push(("injured", at_target(s)));
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.diabetic = true;
+        s.insulin_min = 5;
+        cases.push(("insulin", s));
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.weight = pct(85);
+        s.diabetes_min = 4320 * 4 - 9;
+        cases.push(("diabetes onset", s));
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.groggy_min = 6;
+        cases.push(("groggy", at_target(s)));
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.hangover_min = 9;
+        cases.push(("hangover", at_target(s)));
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.rehab_min = 4;
+        cases.push(("rehab expiry", at_target(s)));
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.dependent = true;
+        s.rehab_min = 3;
+        s.dependence_min = 500;
+        cases.push(("rehab ends dependence", at_target(s)));
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.diabetic = true;
+        s.weight = pct(50);
+        s.fitness = pct(65);
+        s.reversal_min = 10080 - 5;
+        cases.push(("reversal near done", s));
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.booze = pct(50);
+        s.dependence_min = 1200 * 4 - 9;
+        cases.push(("dependence onset", s));
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.energy = pct(52);
+        s.sleep_min = 715;
+        cases.push(("self-wake", at_target(s)));
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.energy = MAX as u16;
+        s.oversleep_min = 236;
+        cases.push(("oversleep line", at_target(s)));
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.energy = MAX as u16;
+        s.oversleep_min = 296;
+        cases.push(("oversleep wake", at_target(s)));
+        for (name, s0) in cases {
+            let d = seg_len(&s0, 2000);
+            let mut closed = s0.clone();
+            advance(&mut closed, d);
+            let mut stepped = s0.clone();
+            for _ in 0..d {
+                advance(&mut stepped, 1);
+            }
+            assert_eq!(closed, stepped, "{name}: segment of {d} minutes differs from stepping");
+        }
+    }
+
+    #[test]
+    fn clamped_levels_do_not_force_one_minute_segments() {
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.dirt = 0; // rising from 0: the 0 line is behind it
+        assert!(seg_len(&s, 10_000) > 1);
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.dirt = MAX as u16; // rising, pinned at MAX
+        s.health = pct(70);
+        assert!(seg_len(&s, 10_000) > 1);
+        let mut s = calm();
+        s.fullness = pct(60);
+        s.hydration = MAX as u16; // falling from MAX: the MAX line is behind it
+        assert!(seg_len(&s, 10_000) > 1);
+    }
+
+    #[test]
+    fn max_zero_and_gone_pets_still_give_one() {
+        assert_eq!(seg_len(&calm(), 0), 1);
+        let mut s = calm();
+        s.phase = Phase::Gone;
+        assert_eq!(seg_len(&s, 0), 1);
+        assert_eq!(seg_len(&s, 50), 50);
     }
 }

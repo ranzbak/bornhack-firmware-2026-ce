@@ -210,7 +210,7 @@ pub enum MiniGame {
 }
 
 /// The complete game state.  Serialisable to ekv for save/restore.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GameState {
     // Pet kind.
     pub pet_kind: PetKind,
