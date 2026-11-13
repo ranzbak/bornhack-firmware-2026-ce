@@ -374,7 +374,7 @@ Spec 5.4: "After an action the toast says what happened and why when a rule fire
 ```rust
 // causes.rs
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum StrainWhy { Hungry, Thirsty, Tired, Heavy, WornOut, Sore }
+pub enum StrainWhy { Hungry, Thirsty, Tired, Heavy, WornOut, Overdone }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Unsettled { Drinks, Hungry, Stuffed, Thirsty, Waterlogged, Wired, Withdrawal, Unknown }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -412,7 +412,7 @@ pub fn preview_wake(&self) -> Option<causes::Cause>;   // first warning cause of
 | `eat` | `FoodComa` if `excess > 0`. For a treat: `NoTreatBuzz` if `ozempic_min > 0`, else `TreatTooSoon` if `junk_min > 0` before |
 | `sip`, alcoholic | `Relapse` if `rehab_min > 0`; `DrinkDulled` if `dim < 50` (the `dim` already computed); `DryMouth` if hydration before < `water_lo()`; `OneTooMany` if booze crosses `booze_hi()` upward |
 | `sip`, any drink | `Sloshing` if hydration crosses `water_hi()` upward or fullness crosses `full_hi()` upward |
-| `exercise` | `TornMuscle(why)` if injured by this session; else `Strained(why)` if any need, heavy or deprived multiplier applied. `why` is the first that held: Hungry (fullness < `full_lo`), Thirsty (hydration < `water_lo`), Tired (energy < `energy_lo`), Heavy (weight > `weight_hi`), WornOut (`deprived`), else Sore |
+| `exercise` | `TornMuscle(why)` if injured by this session; else `Strained(why)` if any need, heavy or deprived multiplier applied. `why` is the first that held: Hungry (fullness < `full_lo`), Thirsty (hydration < `water_lo`), Tired (energy < `energy_lo`), Heavy (weight > `weight_hi`), WornOut (`deprived`), else Overdone |
 | `heal` | `OnlyNumbed` if not injured and health > `DOSE_HEAL_HEALTHY_PCT` |
 | `relax` | `OverRelaxed` if fun crosses `fun_lo()` downward |
 | `fall_asleep` and collapse | set `bed_why = unsettled_by(s)` (no cause) |
@@ -828,7 +828,7 @@ Every new or renamed on-screen text in this plan, for the player's guide. Case a
   | `dry mouth` | `booze, no water` |
   | `relapse!` | `rehab lost` |
   | `sloshing` | `drank too much` |
-  | `torn muscle` / `strained` | `sport: hungry`, `sport: thirsty`, `sport: tired`, `sport: heavy`, `sport: worn out`, `sport: sore` |
+  | `torn muscle` / `strained` | `sport: hungry`, `sport: thirsty`, `sport: tired`, `sport: heavy`, `sport: worn out`, `sport: too much` |
   | `grumpy` | `woken too early` |
   | `bad night` | `late drinks`, `hungry`, `stuffed`, `thirsty`, `waterlogged`, `wired`, `withdrawal`, `slept badly` |
   | `groggy` | `overslept` |

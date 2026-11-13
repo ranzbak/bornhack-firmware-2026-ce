@@ -15,8 +15,8 @@ pub const MAX: i32 = 65535;
 pub const NEED_DANGER_LO_PCT: u8 = 15;
 /// Fullness and water above this are fixed edges; dirt above it is in danger.
 pub const NEED_HI_EDGE_PCT: u8 = 85;
-/// A fixed edge of the energy need (a segment never crosses it); the status
-/// word reads it as "well rested" territory.
+/// A fixed edge of the energy need (a segment never crosses it). A pet put to
+/// bed at or above it is not tired, so `preview_sleep` warns it will be groggy.
 pub const ENERGY_HI_EDGE_PCT: u8 = 85;
 /// Dirt above this is in danger.
 pub const DIRT_DANGER_PCT: u8 = NEED_HI_EDGE_PCT;

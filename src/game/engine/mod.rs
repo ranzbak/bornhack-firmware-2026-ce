@@ -42,9 +42,6 @@ thread_local! {
 
 /// Engine ticks per simulated minute.
 const TICKS_PER_MINUTE: u32 = 6;
-/// Most engine wakes `preview_sleep` steps through: a night is at most
-/// `SELF_WAKE_MIN` long and each wake is at least a segment.
-const PREVIEW_NIGHT_MAX_WAKES: u32 = 512;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -859,7 +856,9 @@ impl GameState {
     /// (`preview_wake`), so `Groggy` shows only for a pet that is not tired
     /// (energy at bedtime at or above `ENERGY_HI_EDGE_PCT`) and has no
     /// station rest (`no_groggy`). `None` when sleep is refused or the night
-    /// is fine. The run is bounded by `PREVIEW_NIGHT_MAX_WAKES`.
+    /// is fine. The run is bounded in time, not in steps: a pet always wakes
+    /// itself once it has slept `SELF_WAKE_MIN`, so the clone never runs past
+    /// that many minutes after bedtime.
     pub fn preview_sleep(&self) -> Option<causes::Cause> {
         if self.sleep_refusal().is_some() {
             return None;
@@ -869,13 +868,14 @@ impl GameState {
         if !c.sleep() {
             return None;
         }
-        for _ in 0..PREVIEW_NIGHT_MAX_WAKES {
-            if !c.is_sleeping || c.oversleep_min > 0 {
-                break;
-            }
-            let next = c.next_wake_tick().max(c.last_update_tick + 1);
+        let night_end = c
+            .last_update_tick
+            .saturating_add((SELF_WAKE_MIN() as u32 + 1) * TICKS_PER_MINUTE);
+        while c.is_sleeping && c.oversleep_min == 0 && c.last_update_tick < night_end {
+            let next = c.next_wake_tick().max(c.last_update_tick + 1).min(night_end);
             c.update(next);
         }
+        debug_assert!(!c.is_sleeping || c.oversleep_min > 0, "preview night ended asleep and unrested");
         let _ = doses::wake_up(&mut c);
         let warned = c.causes.iter().copied().find(|cause| cause.is_warning());
         let rested_at_bedtime = self.energy as i32 >= needs::ENERGY_HI_EDGE_PCT as i32 * needs::P;
