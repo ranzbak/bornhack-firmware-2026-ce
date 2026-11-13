@@ -1,7 +1,8 @@
 //! Shared "labelled stat bar with inline percentage" widget.
 //!
 //! Used by both the rolled-stats view (`game::traits_view`) and the
-//! live stats modal (`game::modal::draw_stats_view`).
+//! live stats modal (`game::modal::draw_stats_view`, through
+//! [`draw_band_bar`]).
 //!
 //! Layout:
 //!
@@ -21,16 +22,16 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Text};
 
-use crate::{BLACK, TriColor};
+use super::stats_pages::BarRow;
+use crate::{BLACK, RED, TriColor, WHITE};
 
 /// Draw a labelled bar with `pct%` (0–100) centred inside it.
 ///
 /// * `label_pos` — top-left of the label text (baseline `Top`).
 /// * `bar_origin` — top-left of the bar including the 1-px border.
 /// * `bar_size` — outer dimensions of the bar (border included).
-/// * `fill_color` — colour of the filled portion (usually `BLACK`, but the live
-///   stats view passes `RED` for values below 25 % so critical stats stand
-///   out).
+/// * `fill_color` — colour of the filled portion (`BLACK`, or `RED` for a
+///   value that is out of its band, see [`draw_band_bar`]).
 ///
 /// The bar must be at least 4 × 4 px or the inner fill region
 /// degenerates; the percentage label assumes the inner height is at
@@ -110,4 +111,97 @@ where
     }
 
     Ok(())
+}
+
+/// Length of the black stub a tick leaves at the top and bottom of the bar.
+const NOTCH_LEN: u32 = 3;
+
+/// X of the tick for `pct` on a bar at `bar_x` that is `bar_w` wide (border
+/// included): the inner width is mapped 0..=100 onto `bar_x + 1 ..`.
+pub fn tick_x(bar_x: i32, bar_w: u32, pct: u8) -> i32 {
+    bar_x + 1 + (pct.min(100) as u32 * bar_w.saturating_sub(2) / 100) as i32
+}
+
+/// [`draw_stat_bar`] for a [`BarRow`]: red fill when the row is out of its
+/// band, plus one tick for each of the band edges and the cap.
+pub fn draw_band_bar<D>(
+    display: &mut D,
+    row: &BarRow,
+    label_pos: Point,
+    bar_origin: Point,
+    bar_size: Size,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    let fill = if row.red { RED } else { BLACK };
+    draw_stat_bar(display, row.label, row.pct, label_pos, bar_origin, bar_size, fill)?;
+
+    let inner_w = bar_size.width.saturating_sub(2);
+    let fill_end = bar_origin.x + 1 + (row.pct.min(100) as u32 * inner_w / 100) as i32;
+    let inner_h = bar_size.height.saturating_sub(2);
+    let bottom = bar_origin.y + bar_size.height as i32 - 1;
+    for pct in [row.lo, row.hi, row.cap].into_iter().flatten() {
+        let x = tick_x(bar_origin.x, bar_size.width, pct);
+        let line_color = if x < fill_end { WHITE } else { BLACK };
+        let black = PrimitiveStyle::with_fill(BLACK);
+        // The line across the inner height, then a black stub at each end.
+        Rectangle::new(Point::new(x, bar_origin.y + 1), Size::new(1, inner_h))
+            .into_styled(PrimitiveStyle::with_fill(line_color))
+            .draw(display)?;
+        Rectangle::new(Point::new(x, bar_origin.y), Size::new(1, NOTCH_LEN))
+            .into_styled(black)
+            .draw(display)?;
+        Rectangle::new(Point::new(x, bottom + 1 - NOTCH_LEN as i32), Size::new(1, NOTCH_LEN))
+            .into_styled(black)
+            .draw(display)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::test_canvas::Canvas;
+
+    #[test]
+    fn tick_x_maps_percent_to_the_inner_bar() {
+        assert_eq!(tick_x(76, 60, 0), 77);
+        assert_eq!(tick_x(76, 60, 100), 135);
+        assert_eq!(tick_x(76, 60, 50), 106);
+    }
+
+    #[test]
+    fn band_bar_draws_ticks_and_red_fill() {
+        let row = BarRow { label: "Weight", pct: 70, lo: Some(38), hi: Some(63), cap: None, red: true };
+        let origin = Point::new(76, 40);
+        let size = Size::new(60, 15);
+        let mut c = Canvas::new();
+        draw_band_bar(&mut c, &row, Point::new(16, 41), origin, size).unwrap();
+        // The out-of-band fill is red, not black (row 2 below the top is
+        // clear of the text, left of the first tick).
+        assert_eq!(c.get(origin.x + 3, origin.y + 6), RED);
+        // The tick for hi: black notch on the top and bottom border rows
+        // and 2 px inside, white line over the red fill in between.
+        let hx = tick_x(origin.x, size.width, 63);
+        for dy in [0, 1, 2, 12, 13, 14] {
+            assert_eq!(c.get(hx, origin.y + dy), BLACK, "dy {dy}");
+        }
+        assert_eq!(c.get(hx, origin.y + 4), WHITE);
+        // The lo tick is inside the fill as well.
+        let lx = tick_x(origin.x, size.width, 38);
+        assert_eq!(c.get(lx, origin.y + 4), WHITE);
+        assert_eq!(c.get(lx, origin.y), BLACK);
+        // A black row stays black fill and ticks stay white; a cap past the
+        // fill is a black line over the empty part.
+        let row = BarRow { label: "Health", pct: 20, lo: Some(10), hi: None, cap: Some(80), red: false };
+        let mut c = Canvas::new();
+        draw_band_bar(&mut c, &row, Point::new(16, 41), origin, size).unwrap();
+        assert_eq!(c.get(origin.x + 3, origin.y + 6), BLACK);
+        let cx = tick_x(origin.x, size.width, 80);
+        assert_eq!(c.get(cx, origin.y + 4), BLACK);
+        assert_eq!(c.get(cx, origin.y + 12), BLACK);
+        let lx = tick_x(origin.x, size.width, 10);
+        assert_eq!(c.get(lx, origin.y + 4), WHITE);
+    }
 }

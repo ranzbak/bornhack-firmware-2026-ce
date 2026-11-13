@@ -1234,9 +1234,13 @@ pub struct PetStats {
     pub booze: u8,
     pub weight_pct: u8,
     pub fit: u8,
-    /// The pet's worst problem and whether it is in danger, see [`status`].
-    pub status: status::StatusWord,
-    pub danger: bool,
+    /// The status line under the pet (one source for the words and the
+    /// danger flag), see [`status::status_line`].
+    pub line: status::StatusLine,
+    /// The lasting conditions the stats view lists, see [`status::conditions`].
+    pub conditions: status::Conditions,
+    /// The highest health the pet can recover to, in percent.
+    pub ceiling: u8,
     /// Minutes slept in the current sleep.
     pub asleep_min: u16,
     /// Remaining minutes of the timers behind the menu's disabled rows:
@@ -1294,7 +1298,6 @@ impl GameState {
 
         let can = |a: Action| self.refusal_for(a, None).is_none();
         let can_game = |g: Option<MiniGame>| self.game_refusal(g).is_none();
-        let (status, danger) = status::status(self);
 
         PetStats {
             hunger: level_pct(self.fullness),
@@ -1309,8 +1312,9 @@ impl GameState {
             booze: level_pct(self.booze),
             weight_pct: level_pct(self.weight),
             fit: level_pct(self.fitness),
-            status,
-            danger,
+            line: status::status_line(self),
+            conditions: status::conditions(self),
+            ceiling: level_pct(regime::health_ceiling(self).clamp(0, u16::MAX as i32) as u16),
             asleep_min: self.sleep_min,
             med_cd_min: self.med_cd_min,
             ozempic_cd_min: self.ozempic_cd_min,

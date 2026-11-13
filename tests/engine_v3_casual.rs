@@ -43,3 +43,17 @@ fn casual_is_gentler_than_classic_on_the_lazy_pet() {
     // bands must not make it worse.
     assert!(lazy.end_health_pct >= 55, "{lazy:?}");
 }
+
+#[test]
+fn casual_bands_move_the_ticks() {
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase};
+    use bornhack_aegg::game::stats_pages::{Page, bars};
+    install_casual();
+    let mut g = GameState::new_egg(7, PetKind(0));
+    g.phase = Phase::Active;
+    let st = g.stats(0);
+    let needs = bars(Page::Needs, &st);
+    assert_eq!((needs[0].lo, needs[0].hi), (Some(33), Some(83)));
+    let body = bars(Page::Body, &st);
+    assert_eq!(body[1].lo, Some(38));
+}

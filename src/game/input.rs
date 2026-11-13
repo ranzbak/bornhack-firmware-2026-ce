@@ -148,7 +148,7 @@ pub fn dispatch(btn: ButtonId) -> bool {
             ButtonId::Up => modal::cursor_up(),
             ButtonId::Down => modal::cursor_down(),
             ButtonId::Fire | ButtonId::Execute => modal::activate(),
-            ButtonId::Left | ButtonId::Right => {}
+            ButtonId::Left | ButtonId::Right => modal::flip_page(),
         }
         true
     } else {

@@ -41,6 +41,7 @@ pub mod realm_view;
 pub mod settings;
 pub mod sprite_loader;
 pub mod stat_bar;
+pub mod stats_pages;
 pub mod station;
 pub mod tictactoe;
 #[cfg(test)]

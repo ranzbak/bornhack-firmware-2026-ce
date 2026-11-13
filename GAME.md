@@ -71,25 +71,36 @@ and `sloppy`. The badge buzzes only for a danger word or a real alarm
 
 ## Stats
 
-Your pet has six stats displayed as percentage bars (lower is better for
-you — 0% means the pet is perfectly content):
+Select the **Stats** icon (top-left) and choose "View stats" to open the
+stats view. It has two pages; **Left / Right** flips between them (the
+title shows `Needs 1/2` or `Body 2/2`), **Fire** or **Cancel** goes back
+to the menu. It always opens on page 1.
 
-| Stat          | What happens when it's high                                      | How to fix        |
-| ------------- | ---------------------------------------------------------------- | ----------------- |
-| **Hunger**    | Pet gets hungry, other stats worsen                              | Feed              |
-| **Tired**     | Pet is exhausted                                                 | Put to sleep      |
-| **Drained**   | Pet lacks inspiration                                            | Relax, mini-games |
-| **Sick**      | Pet's health deteriorates                                        | Give medicine     |
-| **Miserable** | Pet is unhappy; speeds up drained decay and sick-condition decay | Play              |
-| **Weight**    | Pet gets overweight; sustained overweight leads to diabetes      | Exercise          |
+| Page | Bars (each one is 0-100%, higher fills the bar)                          |
+| ---- | ------------------------------------------------------------------------ |
+| **Needs** | Full, Water, Energy, Fun, Clean (100% = spotless)                   |
+| **Body**  | Health, Fit, Weight, Booze, Mood, then a line with the pet's conditions |
 
-Stats interact: if multiple stats are bad, the pet becomes miserable
-faster, and miserable makes everything else worse too. Keep on top of
-things before they spiral!
+Every bar shows its comfort band as thin ticks: a value between the ticks
+is fine. Full, Water, Fun and Weight have a lower and an upper tick (too
+little and too much both hurt); Energy, Clean, Fit and Health have a lower
+tick only; Booze has an upper tick only; Mood has none. The Health bar has
+one more tick, the **ceiling**: the highest health the pet can recover to,
+which rises with fitness and drops for an untreated diabetic. When a value
+is outside its band the fill turns **red** (for Mood: below 20%). A black
+fill means that bar is fine. The ticks move with the game mode, so Casual
+bands are wider than Classic ones.
 
-Select the **Stats** icon (top-left) and choose "View stats" to see all
-six stat bars at once (labeled "Fit" for weight — 100% = lean, 0% =
-obese), "Health status" for a plain-language readout of Diabetic /
+The line at the bottom of the Body page names the lasting conditions, most
+pressing first: injured, sore, hung over, groggy, worn out, diabetic,
+dependent, in rehab, well rested. When more than two apply it names two and
+counts the rest ("injured, sore +1").
+
+Stats interact: if several are out of band, the pet becomes miserable
+faster, and a miserable pet is worse off everywhere. Keep on top of things
+before they spiral!
+
+The Stats menu also offers "Health status" for a plain-language readout of Diabetic /
 Overweight / Alcoholic / Fit% (plus your lifetime Battle win/loss
 record — see [Battles](#battles) below), with a short explanation of
 what triggers each, or "Friends" for the pets your badge has met over

@@ -23,7 +23,7 @@ use embedded_graphics::text::{Text};
 
 use super::engine::DebugPoke;
 use super::nav::Row;
-use crate::ui::{self, TEXT_BOLD_BLACK, TEXT_BOLD_WHITE};
+use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_BLACK, TEXT_BOLD_WHITE};
 use crate::{BLACK, TriColor};
 
 // ── Modal kind
@@ -523,6 +523,7 @@ impl Item {
         match self {
             Self::Cancel => close(),
             Self::ViewStats => {
+                STATS_PAGE.store(0, Ordering::Relaxed);
                 STATS_VIEW.store(true, Ordering::Relaxed);
                 super::note_live_view_drawn();
             }
@@ -673,6 +674,8 @@ static MODAL_KIND: AtomicU8 = AtomicU8::new(0);
 static MODAL_POS: AtomicU8 = AtomicU8::new(0);
 /// When true, the Stats modal shows stat bars instead of the menu list.
 static STATS_VIEW: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// Which stats page shows: 0 = Needs, 1 = Body. Opening the view resets it.
+static STATS_PAGE: AtomicU8 = AtomicU8::new(0);
 
 pub fn open(kind: ModalKind) {
     // Start on the first row that can be used, so a disabled first row
@@ -689,6 +692,7 @@ pub fn open(kind: ModalKind) {
 
 pub fn close() {
     STATS_VIEW.store(false, Ordering::Relaxed);
+    STATS_PAGE.store(0, Ordering::Relaxed);
     MODAL_KIND.store(ModalKind::None as u8, Ordering::Relaxed);
     MODAL_POS.store(0, Ordering::Relaxed);
     // Menu close → redraw the whole frame (remove the overlay cleanly).
@@ -699,6 +703,23 @@ pub fn close() {
 /// Task 5's diary and Task 9's hint view join it.
 pub fn live_modal_view_open() -> bool {
     STATS_VIEW.load(Ordering::Relaxed)
+}
+
+/// Show the other stats page. Only while the stats view shows.
+pub fn flip_page() {
+    if STATS_VIEW.load(Ordering::Relaxed) {
+        STATS_PAGE.store(stats_page().other() as u8, Ordering::Relaxed);
+    }
+}
+
+/// The stats page showing (or about to show).
+pub fn stats_page() -> super::stats_pages::Page {
+    use super::stats_pages::Page;
+    if STATS_PAGE.load(Ordering::Relaxed) == Page::Body as u8 {
+        Page::Body
+    } else {
+        Page::Needs
+    }
 }
 
 pub fn is_open() -> bool {
@@ -761,6 +782,7 @@ pub fn activate() {
     // If stats view is showing, any activation closes it.
     if STATS_VIEW.load(Ordering::Relaxed) {
         STATS_VIEW.store(false, Ordering::Relaxed);
+        STATS_PAGE.store(0, Ordering::Relaxed);
         return;
     }
 
@@ -1049,28 +1071,30 @@ where
 /// Bar width in pixels (modal inner is 128 px; subtract label width + margins).
 const BAR_MAX_W: u32 = 60;
 /// Bar height — the documented minimum for the 13px inline percentage
-/// font to fit without clipping.  Was 16 with 5 bars; had to shrink to
-/// this floor to fit 6 without the last bar (`Fit`) colliding with the
-/// footer text drawn below (that collision was a real bug — see the
-/// vertical budget note below).
+/// font to fit without clipping.
 const BAR_H: u32 = 15;
-/// Vertical spacing between bars (== BAR_H, zero extra gap). Six bars
-/// at 15px each, starting 2px below the title bar, land exactly on the
-/// same bottom edge (y=122) the original 5-bar/18px layout used —
-/// same proven clearance above the footer, just spread across one more
-/// row. The previous attempt kept BAR_H/BAR_SPACING at 16 with only a
-/// 2px reduction elsewhere, which undershot: the last bar ended up 8px
-/// into the footer's text, rendering black-on-white footer glyphs over
-/// the bar (looked like the bar had "no background").
+/// Vertical spacing between bars (== BAR_H, zero extra gap). Five bars
+/// at 15 px from 2 px below the title bar end at y = 107; page 2's
+/// condition row (13 px) and the footer follow, still above the frame.
 const BAR_SPACING: i32 = 15;
+/// Gap between the title bar and the first bar.
+const BARS_TOP_GAP: i32 = 2;
+/// Bars per stats page.
+const STAT_ROWS: i32 = 5;
+/// Width of the label column ("Energy", "Health", "Weight" fit with room).
+const LABEL_COL_W: i32 = 60;
+/// Gap between the last bar and the condition row on page 2.
+const CONDITION_GAP: i32 = 1;
+/// The condition row's width in columns (the popover body budget).
+const CONDITION_COLS: usize = 18;
 
 fn draw_stats_view<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
     use super::lifecycle;
-    use super::stat_bar::draw_stat_bar;
-    use crate::RED;
+    use super::stat_bar::draw_band_bar;
+    use super::stats_pages::{self, Page};
 
     super::note_live_view_drawn();
 
@@ -1088,41 +1112,39 @@ where
         BORDER,
     )?;
 
-    // Title bar.
+    // Title bar: the page name and its number.
+    let page = stats_page();
     let inner_x = MARGIN + BORDER as i32;
     let inner_y = MARGIN + BORDER as i32;
     let inner_w = MODAL_W - BORDER * 2;
-    ui::draw_title_bar(display, "Pet Stats", Point::new(inner_x, inner_y), inner_w)?;
+    ui::draw_title_bar(display, stats_pages::title(page), Point::new(inner_x, inner_y), inner_w)?;
 
-    // Stat bars.
-    let bars: [(&str, u8); 5] = [
-        ("Hunger", stats.hunger),
-        ("Rested", stats.tired),
-        ("Healthy", stats.healthy),
-        ("Happy", stats.happy),
-        ("Fit", stats.fit),
-    ];
-
-    // Layout: label at left margin, bar to the right of the longest
-    // label ("Healthy" = 7 chars × 7 px = 49 px from `label_x`).
+    // Layout: label at left margin, bar to the right of the label column.
     let label_x = inner_x + 4;
-    let bar_x = label_x + 60; // 4 px clearance after the longest label
+    let bar_x = label_x + LABEL_COL_W;
 
-    for (i, (label, value)) in bars.iter().enumerate() {
-        let y = inner_y + TITLE_H + 2 + i as i32 * BAR_SPACING;
+    for (i, row) in stats_pages::bars(page, &stats).iter().enumerate() {
+        let y = inner_y + TITLE_H + BARS_TOP_GAP + i as i32 * BAR_SPACING;
         // Label vertically centred against the bar.
         let label_y = y + (BAR_H as i32 - 13) / 2;
-        // Critical (< 25 %) values are highlighted in red.
-        let fill_color = if *value < 25 { RED } else { BLACK };
-
-        draw_stat_bar(
+        draw_band_bar(
             display,
-            label,
-            *value,
+            row,
             Point::new(label_x, label_y),
             Point::new(bar_x, y),
             Size::new(BAR_MAX_W, BAR_H),
-            fill_color,
+        )?;
+    }
+
+    // Page 2 ends with the lasting conditions, just below the last bar.
+    if page == Page::Body {
+        let y = inner_y + TITLE_H + BARS_TOP_GAP + STAT_ROWS * BAR_SPACING + CONDITION_GAP;
+        crate::ui::draw_text(
+            display,
+            stats.conditions.line(CONDITION_COLS).as_str(),
+            Point::new(label_x, y),
+            TEXT_BLACK,
+            crate::ui::TOP_LEFT,
         )?;
     }
 
@@ -1181,6 +1203,7 @@ mod tests {
     use super::{Item, ModalKind, cooldown_string, first_selectable, step_cursor};
     use crate::game::engine::{GameState, PetKind, Phase};
     use crate::game::lifecycle;
+    use crate::game::stats_pages::Page;
 
     fn active_pet() -> GameState {
         let mut s = GameState::new_egg(7, PetKind(0));
@@ -1422,5 +1445,66 @@ mod tests {
             labels,
             ["View stats", "Diary", "Rolled stats", "Health status", "Friends", "Cancel"]
         );
+    }
+
+    #[test]
+    fn left_right_flips_the_stats_pages() {
+        let _guard = crate::game::lock_test_state();
+        lifecycle::set_state_for_test(Some(active_pet()));
+        super::open(ModalKind::Stats);
+        super::flip_page();
+        assert_eq!(super::stats_page(), Page::Needs, "the list has no pages");
+        super::activate(); // first row: View stats
+        assert!(super::live_modal_view_open());
+        assert_eq!(super::stats_page(), Page::Needs);
+        crate::FULL_REFRESH_PENDING.store(false, core::sync::atomic::Ordering::Relaxed);
+        super::flip_page();
+        assert_eq!(super::stats_page(), Page::Body);
+        assert!(
+            !crate::FULL_REFRESH_PENDING.load(core::sync::atomic::Ordering::Relaxed),
+            "a flip is one partial refresh"
+        );
+        // The live-view deadline covers page 2: its condition row drifts.
+        crate::game::LIVE_DRAWN_TICK.store(1000, core::sync::atomic::Ordering::Relaxed);
+        assert!(crate::game::live_view_open());
+        assert_eq!(
+            crate::game::next_ui_deadline_tick(),
+            1000 + crate::game::pacing::IDLE_FRAME_TICKS
+        );
+        super::flip_page();
+        assert_eq!(super::stats_page(), Page::Needs);
+        super::flip_page();
+        assert_eq!(super::stats_page(), Page::Body);
+        super::activate(); // any activation closes the view, back to the list
+        assert!(!super::live_modal_view_open());
+        super::flip_page();
+        assert_eq!(super::stats_page(), Page::Needs, "no change on the list");
+        super::activate();
+        assert_eq!(super::stats_page(), Page::Needs, "reopening starts on page 1");
+        super::close();
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn the_body_page_draws_the_condition_row() {
+        use embedded_graphics::prelude::*;
+        use embedded_graphics::primitives::Rectangle;
+        let _guard = crate::game::lock_test_state();
+        let mut pet = active_pet();
+        pet.injured_min = 30;
+        lifecycle::set_state_for_test(Some(pet));
+        super::open(ModalKind::Stats);
+        super::activate();
+        // Inner y 12 + title 18 + gap 2 + five bars + 1: the row is 13 px tall.
+        let row = Rectangle::new(Point::new(14, 108), Size::new(124, 12));
+        let mut c = crate::game::test_canvas::Canvas::new();
+        super::draw_modal(&mut c).unwrap();
+        assert!(!c.any(row, crate::BLACK), "page 1 has no condition row");
+        super::flip_page();
+        let mut c = crate::game::test_canvas::Canvas::new();
+        super::draw_modal(&mut c).unwrap();
+        assert!(c.any(row, crate::BLACK), "page 2 names the injury");
+        super::close();
+        lifecycle::set_state_for_test(None);
     }
 }

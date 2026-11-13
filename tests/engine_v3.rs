@@ -2756,7 +2756,7 @@ mod status_wake {
             (st.water, st.fun, st.clean, st.booze, st.weight_pct, st.fit),
             (60, 55, 90, 20, 52, 45)
         );
-        assert_eq!((st.status, st.danger), (StatusWord::Content, false));
+        assert_eq!((st.line.first, st.line.danger), (Word::Tipsy, false));
         assert!(st.can_feed && st.can_play && st.can_sleep && !st.can_wake);
     }
 

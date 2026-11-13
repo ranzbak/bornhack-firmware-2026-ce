@@ -10,16 +10,11 @@ Hatch a snail or a cat, then keep it fed, healthy, rested and entertained.
 
 The very first time you open Game you see the hatchery. Push **EXE / Fire** to start. Pick **Snail** or **Cat**, then wait about a minute for the egg to hatch. After hatching you name your pet — up to 12 characters via the on-screen keyboard. The save persists across reboots.
 
-### Stats (the four things to watch)
+### Stats (two pages)
 
-Your pet has four decaying stats. Anything above 100% is bad — that's "starving / sick / drained / tired". The action menu icons (top row) let you reset each:
+Open the Stats icon and pick **View stats**. **Left / Right** flips between two pages of bars: **Needs** (Full, Water, Energy, Fun, Clean) and **Body** (Health, Fit, Weight, Booze, Mood, plus a line naming the pet's conditions such as "injured" or "hung over"). It always opens on page 1; Fire or CAN goes back.
 
-| Stat        | Reset by         | Notes                                              |
-| ----------- | ---------------- | -------------------------------------------------- |
-| Hunger      | **Feed**         | Costs nothing, daily                                |
-| Sick        | **Heal**         | Use when the sick icon appears                      |
-| Drained     | **Play** or mini-game | Most important — also resets "miserable"       |
-| Tired       | **Rest**         | Or **Hibernate** for long sleeps                    |
+Each bar has thin ticks marking its comfort band. A black fill between the ticks is fine; a **red** fill means the value is out of its band. The Health bar's extra tick is the ceiling, the most health the pet can recover to right now. Feed, water, play, sleep, wash, exercise and the rest of the action menu are how you bring a bar back into its band.
 
 The **status line** under the pet names the one or two things that need you most ("hungry, bored"; "no insulin" and "needs rehab" when medication or rehab has lapsed; "content" when all is well). It turns red only in a health danger zone, and the badge buzzes only for danger or a real alarm. The corner banners of earlier versions are gone.
 
