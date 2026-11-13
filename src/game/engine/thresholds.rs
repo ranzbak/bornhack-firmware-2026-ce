@@ -35,7 +35,7 @@ macro_rules! thresholds_table {
     ( $( $name:ident : $ty:ty ),* $(,)? ) => {
         /// Snapshot of all tunable game-balance values.  See module docs.
         #[allow(non_snake_case)]
-        #[derive(Clone, Copy, Debug)]
+        #[derive(Clone, Copy, Debug, PartialEq)]
         pub struct Thresholds {
             $( pub $name: $ty, )*
         }
@@ -148,6 +148,21 @@ thresholds_table! {
     REHAB_COOLDOWN: u16,
     // Battle — no duration (resolves instantly), just a cooldown between fights.
     BATTLE_COOLDOWN: u16,
+    // v2 need bands (percent, 1..=99); see engine::needs
+    FULL_LO_PCT: u8,
+    FULL_HI_PCT: u8,
+    WATER_LO_PCT: u8,
+    WATER_HI_PCT: u8,
+    ENERGY_LO_PCT: u8,
+    FUN_LO_PCT: u8,
+    FUN_HI_PCT: u8,
+    DIRT_HI_PCT: u8,
+    BOOZE_HI_PCT: u8,
+    BOOZE_DANGER_PCT: u8,
+    STRAIN_INJ_PCT: u8,
+    FIT_LO_PCT: u8,
+    WEIGHT_LO_PCT: u8,
+    WEIGHT_HI_PCT: u8,
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +271,21 @@ impl Thresholds {
         REHAB_COOLDOWN: 1440,
 
         BATTLE_COOLDOWN: 12,
+
+        FULL_LO_PCT: 38,
+        FULL_HI_PCT: 78,
+        WATER_LO_PCT: 38,
+        WATER_HI_PCT: 83,
+        ENERGY_LO_PCT: 33,
+        FUN_LO_PCT: 33,
+        FUN_HI_PCT: 73,
+        DIRT_HI_PCT: 58,
+        BOOZE_HI_PCT: 38,
+        BOOZE_DANGER_PCT: 70,
+        STRAIN_INJ_PCT: 60,
+        FIT_LO_PCT: 43,
+        WEIGHT_LO_PCT: 38,
+        WEIGHT_HI_PCT: 63,
     };
 
     /// Half-speed decay, doubled lifetimes, more generous action relief.
@@ -361,6 +391,21 @@ impl Thresholds {
         REHAB_COOLDOWN: 2880,
 
         BATTLE_COOLDOWN: 12,
+
+        FULL_LO_PCT: 33,
+        FULL_HI_PCT: 83,
+        WATER_LO_PCT: 33,
+        WATER_HI_PCT: 88,
+        ENERGY_LO_PCT: 28,
+        FUN_LO_PCT: 28,
+        FUN_HI_PCT: 78,
+        DIRT_HI_PCT: 63,
+        BOOZE_HI_PCT: 43,
+        BOOZE_DANGER_PCT: 75,
+        STRAIN_INJ_PCT: 65,
+        FIT_LO_PCT: 38,
+        WEIGHT_LO_PCT: 33,
+        WEIGHT_HI_PCT: 68,
     };
 }
 
@@ -431,6 +476,7 @@ pub fn install(values: Thresholds, mode: Mode, custom: bool) {
     unsafe {
         ACTIVE = values;
     }
+    super::needs::install_edges(&values);
     ACTIVE_MODE.store(matches!(mode, Mode::Casual), Ordering::SeqCst);
     IS_CUSTOM.store(custom, Ordering::SeqCst);
 }
@@ -515,6 +561,20 @@ pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
     ("MEDICATE_COOLDOWN", |t, v| {
         t.MEDICATE_COOLDOWN = clamp_u16(v)
     }),
+    ("FULL_LO_PCT", |t, v| t.FULL_LO_PCT = clamp_pct(v)),
+    ("FULL_HI_PCT", |t, v| t.FULL_HI_PCT = clamp_pct(v)),
+    ("WATER_LO_PCT", |t, v| t.WATER_LO_PCT = clamp_pct(v)),
+    ("WATER_HI_PCT", |t, v| t.WATER_HI_PCT = clamp_pct(v)),
+    ("ENERGY_LO_PCT", |t, v| t.ENERGY_LO_PCT = clamp_pct(v)),
+    ("FUN_LO_PCT", |t, v| t.FUN_LO_PCT = clamp_pct(v)),
+    ("FUN_HI_PCT", |t, v| t.FUN_HI_PCT = clamp_pct(v)),
+    ("DIRT_HI_PCT", |t, v| t.DIRT_HI_PCT = clamp_pct(v)),
+    ("BOOZE_HI_PCT", |t, v| t.BOOZE_HI_PCT = clamp_pct(v)),
+    ("BOOZE_DANGER_PCT", |t, v| t.BOOZE_DANGER_PCT = clamp_pct(v)),
+    ("STRAIN_INJ_PCT", |t, v| t.STRAIN_INJ_PCT = clamp_pct(v)),
+    ("FIT_LO_PCT", |t, v| t.FIT_LO_PCT = clamp_pct(v)),
+    ("WEIGHT_LO_PCT", |t, v| t.WEIGHT_LO_PCT = clamp_pct(v)),
+    ("WEIGHT_HI_PCT", |t, v| t.WEIGHT_HI_PCT = clamp_pct(v)),
 ];
 
 #[inline]
@@ -524,4 +584,33 @@ fn clamp_u16(v: u32) -> u16 {
     } else {
         v as u16
     }
+}
+
+/// Band edges are percentages; keep them inside 1..=99.
+#[inline]
+fn clamp_pct(v: u32) -> u8 {
+    v.clamp(1, 99) as u8
+}
+
+/// Per band pair (`lo < hi`): a pair that is not strictly ordered falls
+/// back, both values, to `preset`.
+pub fn validate(t: &Thresholds, preset: &Thresholds) -> Thresholds {
+    let mut r = *t;
+    if r.FULL_LO_PCT >= r.FULL_HI_PCT {
+        r.FULL_LO_PCT = preset.FULL_LO_PCT;
+        r.FULL_HI_PCT = preset.FULL_HI_PCT;
+    }
+    if r.WATER_LO_PCT >= r.WATER_HI_PCT {
+        r.WATER_LO_PCT = preset.WATER_LO_PCT;
+        r.WATER_HI_PCT = preset.WATER_HI_PCT;
+    }
+    if r.FUN_LO_PCT >= r.FUN_HI_PCT {
+        r.FUN_LO_PCT = preset.FUN_LO_PCT;
+        r.FUN_HI_PCT = preset.FUN_HI_PCT;
+    }
+    if r.WEIGHT_LO_PCT >= r.WEIGHT_HI_PCT {
+        r.WEIGHT_LO_PCT = preset.WEIGHT_LO_PCT;
+        r.WEIGHT_HI_PCT = preset.WEIGHT_HI_PCT;
+    }
+    r
 }

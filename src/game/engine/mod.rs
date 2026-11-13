@@ -13,6 +13,7 @@
 pub mod anim_files;
 pub mod drink;
 pub mod food;
+pub mod needs;
 #[cfg(feature = "simulator")]
 pub mod sim;
 pub mod thresholds;

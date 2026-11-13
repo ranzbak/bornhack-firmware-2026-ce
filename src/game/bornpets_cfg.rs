@@ -16,8 +16,8 @@
 //! creates any [`crate::game::engine::GameState`].
 
 #[cfg(feature = "embassy-core")]
-use crate::game::engine::thresholds::{self, Mode};
-use crate::game::engine::thresholds::{BORNPETS_CFG_KEYS, Thresholds};
+use crate::game::engine::thresholds;
+use crate::game::engine::thresholds::{BORNPETS_CFG_KEYS, Mode, Thresholds};
 
 #[cfg(feature = "embassy-core")]
 const READ_BUF_LEN: usize = 2048;
@@ -38,14 +38,21 @@ pub async fn load_and_install(mode: Mode) -> (Mode, bool) {
     };
 
     let applied = apply_overrides(&mut values, &buf[..n]);
+    let values = thresholds::validate(&values, &mode.preset());
     defmt::info!(
         "BORNPETS.CFG: applied {} override(s) on top of {}",
         applied,
         mode.label()
     );
 
-    thresholds::install(values, mode, applied > 0);
-    (mode, applied > 0)
+    let custom = is_custom_set(&values, mode);
+    thresholds::install(values, mode, custom);
+    (mode, custom)
+}
+
+/// `true` when `values` differ from the bare preset of `mode`.
+pub fn is_custom_set(values: &Thresholds, mode: Mode) -> bool {
+    *values != mode.preset()
 }
 
 /// Parse `data` as one KEY=VALUE per line and apply each known key to
