@@ -391,7 +391,8 @@ pub fn status_wants_full_refresh() -> bool {
         || DIABETES_ALERT.is_active()
         || ALCOHOLISM_ALERT.is_active()
         || lifecycle::display_anim() == engine::DisplayAnim::Gone
-        || lifecycle::status_line().is_some_and(|l| l.danger)
+        || (!lifecycle::is_hibernating()
+            && lifecycle::status_line().is_some_and(|l| l.danger))
         || battle_view::wants_full_refresh()
 }
 
@@ -981,31 +982,65 @@ mod tests {
         Rectangle::new(Point::new(0, y0), Size::new(152, (y1 - y0 + 1) as u32))
     }
 
+    /// Clears the installed test pet on drop, also after a failed assert.
+    struct ClearPet;
+    impl Drop for ClearPet {
+        fn drop(&mut self) {
+            crate::game::lifecycle::set_state_for_test(None);
+        }
+    }
+
+    fn line_of(first: Word, danger: bool) -> StatusLine {
+        StatusLine {
+            first,
+            second: None,
+            danger,
+        }
+    }
+
+    /// A one-line status line drawn over a `ink` backdrop (the sprite): the
+    /// backing strip around the glyphs must be white, the rest untouched.
+    fn assert_backing(first: Word, danger: bool, ink: crate::TriColor) {
+        let mut c = Canvas::new();
+        c.fill(ink);
+        draw_status_line(&mut c, &line_of(first, danger)).unwrap();
+        // Text width + STATUS_BACKING_PAD, centred, rows 97..=109.
+        let w = first.text().len() as i32 * super::STATUS_CHAR_W + super::STATUS_BACKING_PAD;
+        let x0 = super::STATUS_CENTER_X - w / 2;
+        let y0 = super::STATUS_BASE_Y - (super::STATUS_LINE_H - 1);
+        let pad = super::STATUS_BACKING_PAD / 2;
+        for y in y0..=super::STATUS_BASE_Y {
+            for x in (x0..x0 + pad).chain(x0 + w - pad..x0 + w) {
+                assert_eq!(c.get(x, y), crate::WHITE, "backing margin at ({x},{y})");
+            }
+        }
+        for x in x0..x0 + w {
+            assert_eq!(c.get(x, y0), crate::WHITE, "backing top at x={x}");
+        }
+        assert_eq!(c.get(x0 - 1, y0 + 5), ink, "backing is no wider");
+        assert_eq!(c.get(x0 + w, y0 + 5), ink, "backing is no wider");
+        assert_eq!(c.get(x0 + 10, y0 - 1), ink, "backing is no taller");
+    }
+
     #[test]
     fn status_line_draws_at_the_pets_feet() {
+        assert_backing(Word::Hungry, false, BLACK);
         let mut c = Canvas::new();
-        let line = StatusLine {
-            first: Word::Hungry,
-            second: None,
-            danger: false,
-        };
-        draw_status_line(&mut c, &line).unwrap();
-        assert!(c.any(rows(96, 110), BLACK));
-        assert!(!c.any(rows(0, 83), BLACK));
+        draw_status_line(&mut c, &line_of(Word::Hungry, false)).unwrap();
+        assert!(c.any(rows(97, 109), BLACK));
+        assert!(!c.any(rows(0, 96), BLACK));
         assert!(!c.any(rows(0, 151), RED));
-        assert!(!c.any(rows(SEP_BOT, 151), BLACK));
+        assert!(!c.any(rows(SEP_BOT - 1, 151), BLACK));
     }
 
     #[test]
     fn danger_line_is_red() {
+        assert_backing(Word::Starving, true, BLACK);
         let mut c = Canvas::new();
-        let line = StatusLine {
-            first: Word::Starving,
-            second: None,
-            danger: true,
-        };
-        draw_status_line(&mut c, &line).unwrap();
-        assert!(c.any(rows(96, 110), RED));
+        draw_status_line(&mut c, &line_of(Word::Starving, true)).unwrap();
+        assert!(c.any(rows(97, 109), RED));
+        assert!(!c.any(rows(0, 96), RED));
+        assert!(!c.any(rows(SEP_BOT - 1, 151), RED));
         assert!(!c.any(rows(0, 151), BLACK));
     }
 
@@ -1019,10 +1054,10 @@ mod tests {
         };
         assert_eq!(line.text().as_str(), "waterlogged\nunderweight");
         draw_status_line(&mut c, &line).unwrap();
-        assert!(c.any(rows(83, 95), BLACK));
-        assert!(c.any(rows(96, 109), BLACK));
-        assert!(!c.any(rows(0, 81), BLACK));
-        assert!(!c.any(rows(SEP_BOT, 151), BLACK));
+        assert!(c.any(rows(84, 96), BLACK));
+        assert!(c.any(rows(97, 109), BLACK));
+        assert!(!c.any(rows(0, 83), BLACK));
+        assert!(!c.any(rows(SEP_BOT - 1, 151), BLACK));
     }
 
     #[test]
@@ -1030,18 +1065,25 @@ mod tests {
         use crate::game::engine::needs::P;
         use crate::game::engine::{GameState, PetKind, Phase};
         let _guard = super::lock_test_state();
-        let mut s = GameState::new_egg(7, PetKind(0));
-        s.phase = Phase::Active;
+        let _clear = ClearPet;
+        let pet = || {
+            let mut s = GameState::new_egg(7, PetKind(0));
+            s.phase = Phase::Active;
+            s
+        };
         // 75 % weight was the old OVERWEIGHT banner: no longer a red message.
+        let mut s = pet();
         s.weight = (75 * P) as u16;
-        crate::game::lifecycle::set_state_for_test(Some(s.clone()));
-        assert!(!super::status_wants_full_refresh());
-        let mut s = GameState::new_egg(7, PetKind(0));
-        s.phase = Phase::Active;
-        s.fullness = (10 * P) as u16;
         crate::game::lifecycle::set_state_for_test(Some(s));
+        assert!(!super::status_wants_full_refresh());
+        let mut s = pet();
+        s.fullness = (10 * P) as u16;
+        crate::game::lifecycle::set_state_for_test(Some(s.clone()));
         assert!(super::status_wants_full_refresh());
-        crate::game::lifecycle::set_state_for_test(None);
+        // The line is not drawn while hibernating, so nothing red to seat.
+        s.hibernating = true;
+        crate::game::lifecycle::set_state_for_test(Some(s));
+        assert!(!super::status_wants_full_refresh());
     }
 
     #[test]

@@ -21,6 +21,11 @@ impl Canvas {
         }
     }
 
+    /// Fill the whole canvas, standing in for the sprite behind the UI.
+    pub fn fill(&mut self, c: TriColor) {
+        self.px.fill(c);
+    }
+
     /// The colour at (x, y); white outside the canvas.
     pub fn get(&self, x: i32, y: i32) -> TriColor {
         if (0..SIDE).contains(&x) && (0..SIDE).contains(&y) {
