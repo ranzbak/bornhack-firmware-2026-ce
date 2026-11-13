@@ -629,6 +629,6 @@ mod title_tests {
     #[test]
     fn the_battle_picker_shows_your_record() {
         assert_eq!(picker_title(3, 1).as_str(), "Battle 3W-1L");
-        assert!(picker_title(9999, 9999).len() <= 21);
+        assert!(picker_title(u16::MAX, u16::MAX).len() <= 21);
     }
 }

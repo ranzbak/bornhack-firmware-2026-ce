@@ -109,9 +109,9 @@ lifetime Battle win/loss record shows in the title of the Battle picker
 
 **Permanent conditions.** Diabetes (from sustained overweight) and
 dependence (from sustained heavy drinking) do not wear off on their own.
-They stay until treated: Rehab clears dependence once it has run its
-course, and diabetes only reverses after the pet has been lean and fit
-for a sustained period. Until then, neglect leaves them in place.
+Rehab clears dependence once it has run its course. No treatment cures
+diabetes: Insulin only manages it, and it reverses after the pet has been
+lean and fit for a sustained period. Until then, neglect leaves them in place.
 
 "Diary" lists the last 6 things that went wrong (or well), newest first,
 three per page (Left / Right flips the page, any other button closes).
@@ -236,8 +236,9 @@ If weight stays overweight (Fit below ~40%) for a sustained period —
 several days of neglecting exercise — your pet develops **type 2
 diabetes**. The moment it happens, a buzzer sounds and the badge shows
 a full-screen "TYPE 2 DIABETES — Give medication soon" alert for at
-least 3 seconds before returning to normal. This is permanent: there's
-no cure, only management. Once diabetic, **Insulin** appears as a new
+least 3 seconds before returning to normal. It does not wear off: only a
+long lean, fit stretch reverses it (see "Permanent conditions"), and
+until then it needs management. Once diabetic, **Insulin** appears as a new
 option under the **Heal** icon. Skipping it for too long makes sick
 decay faster; a dose protects the pet for a while before it needs
 another.
@@ -253,9 +254,9 @@ repeated drinking, not just one binge.
 
 If your pet stays drunk (past a threshold) for a sustained period —
 several days of repeated heavy drinking — it develops permanent
-**alcoholism**, exactly like diabetes: no cure, only management via
-**Rehab**, a new option under the **Heal** icon (alongside Give
-medicine, Insulin, and Ozempic). Skipping it makes sick decay faster,
+**dependence**. It does not wear off on its own; a full course of
+**Rehab**, an option under the **Heal** icon (alongside Give
+medicine, Insulin, and Ozempic), clears it. Skipping it makes sick decay faster,
 same as skipping Insulin; a session protects the pet for a while.
 
 **Ozempic**, also under Heal, is a separate, stronger weight-loss

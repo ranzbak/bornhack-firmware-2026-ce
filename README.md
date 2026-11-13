@@ -13,8 +13,8 @@ here's what changed:
 ### New BornPets mechanics
 
 - **Weight & Type 2 Diabetes** — a slow, multi-day weight stat. Sustained
-  neglect (skipping Exercise) triggers permanent diabetes, managed with
-  a new **Insulin** treatment.
+  neglect (skipping Exercise) triggers diabetes. **Insulin** manages it;
+  only a long lean, fit stretch reverses it.
 - **Food choice** — Feed now offers five options (Salad/Apple/Frikandel/
   Pizza/Cake) with different hunger-relief-vs-weight-gain tradeoffs.
 - **Exercise** — a new action that burns off weight.
@@ -22,7 +22,7 @@ here's what changed:
   any time (not gated on being diabetic).
 - **Drinks & Alcoholism** — a second permanent-condition track, parallel
   to weight/diabetes: choose from Water/Cola/Beer/Wine/Whiskey; sustained
-  heavy drinking triggers permanent alcoholism, managed with **Rehab**.
+  heavy drinking triggers dependence, cleared by a full **Rehab** course.
 - **Two-page stats view** (Stats menu) — page 1 shows the needs, page 2
   the conditions (diabetic, alcoholic, Fit and Booze). Your lifetime mesh
   Battle win/loss record shows in the title of the Battle picker.
