@@ -403,22 +403,30 @@ Fire** — a Konami-code-style sequence adapted to this badge's button
 set. A mistimed press just resets the tracker; arrow presses still move
 the nav cursor normally while you're attempting it.
 
-Opens a **Debug** menu with:
+Opens a **Debug** menu with, in order:
 
-- **Force overweight** — pushes weight just over the 60% trigger
-- **Trigger diabetes** — flips the pet diabetic immediately, skipping
-  the multi-day onset timer
-- **Clear diabetes** — resets diabetic status and overweight progress,
-  so the arc can be re-tested without starting a new pet
-- **Force drunk** — pushes drunk just over its trigger
-- **Trigger alcoholism** — flips the pet alcoholic immediately, skipping
-  the multi-day onset timer
-- **Clear alcoholism** — resets alcoholic status and drunk progress
+- **Engine info** — a toast with the status word (`!` in danger, `zz`
+  asleep, `nt` night), mood / mood target, health and the time to the
+  engine's next wake ("23m", "2h05"): how a tester checks the wake
+  scheduler
+- **Skip 10 min** / **Skip 1 hour** / **Skip 1 day** — fast-forward the
+  engine through the normal update path, like real time
+- **Comfort** — every need mid-band, mood and health 70 %
+- **Hungry**, **Thirsty**, **Stuffed**, **Tired**, **Bored**, **Dirty**,
+  **Fat**, **Thin**, **Unfit**, **Drunk** — put that need just past its
+  line so the status word names it
+- **Hung over**, **Groggy**, **Injured** — start that timer at its dose
+  value
+- **Diabetic**, **Dependent** — set the condition directly
+- **Clear conditions** — clears injury, hangover, grogginess, dependence,
+  diabetes, rehab and reversal
+- **Clear cooldowns** — clears the medicine, Ozempic, insulin, mini-game
+  and battle cooldowns
 - **Reset battle record** — zeroes your own wins/losses and every
   known friend's cached head-to-head record, useful for verifying
   battle-sync fixes without waiting for old data to age out
-- **Skip 1 hour** / **Skip 1 day** — fast-forwards the engine, useful
-  for any time-based mechanic, not just this one
+
+A poke on a pet that is hatching, gone or hibernating shows its reason.
 
 This is a developer tool, not part of normal play — no cooldowns, no
 gating beyond having an active pet.

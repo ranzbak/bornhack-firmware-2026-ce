@@ -670,35 +670,35 @@ pub fn rehab() -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Debug cheats — see engine::GameState's debug_* methods for what each does.
+// Debug menu — see `engine::debug` for what each poke does.
 // ---------------------------------------------------------------------------
 
-pub fn debug_force_overweight() {
-    with_game(|s| s.debug_force_overweight());
+/// Run a debug change on the active game, brought up to now first so it
+/// lands on the pet as it is. The change asks for a save itself; the frame
+/// loop re-reads `next_wake_tick` on the redraw that follows the menu
+/// closing, the same way it does after a care action, so no extra re-arm is
+/// needed.
+fn with_debug<T>(f: impl FnOnce(&mut GameState) -> T) -> Option<T> {
+    let state = unsafe { (*GAME.get()).as_mut()? };
+    state.update(now_tick());
+    Some(f(state))
 }
 
-pub fn debug_force_diabetic() {
-    with_game(|s| s.debug_force_diabetic());
+/// Set one thing on the pet. `Err` carries the reason it did not apply.
+pub fn debug_poke(p: super::engine::DebugPoke) -> Result<(), super::engine::doses::Reason> {
+    with_debug(|s| s.debug_poke(p)).unwrap_or(Err(super::engine::doses::Reason::Refused(
+        super::engine::doses::Refusal::NoNeed,
+    )))
 }
 
-pub fn debug_clear_diabetes() {
-    with_game(|s| s.debug_clear_diabetes());
+/// Fast-forward the pet `minutes`, through `update` like real time.
+pub fn debug_skip_minutes(minutes: u32) {
+    with_debug(|s| s.debug_skip_minutes(minutes));
 }
 
-pub fn debug_skip_ticks(ticks: u32) {
-    with_game(|s| s.debug_skip_ticks(ticks));
-}
-
-pub fn debug_force_drunk() {
-    with_game(|s| s.debug_force_drunk());
-}
-
-pub fn debug_force_alcoholic() {
-    with_game(|s| s.debug_force_alcoholic());
-}
-
-pub fn debug_clear_alcoholism() {
-    with_game(|s| s.debug_clear_alcoholism());
+/// What the engine is doing now (None without a game).
+pub fn debug_info() -> Option<super::engine::DebugInfo> {
+    with_debug(|s| s.debug_info())
 }
 
 /// Reset both halves of the mesh Battle record — this pet's own

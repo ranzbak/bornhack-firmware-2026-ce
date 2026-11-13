@@ -21,6 +21,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle, Triangle};
 use embedded_graphics::text::{Text};
 
+use super::engine::DebugPoke;
 use super::nav::Row;
 use crate::ui::{self, TEXT_BOLD_BLACK, TEXT_BOLD_WHITE};
 use crate::{BLACK, TriColor};
@@ -113,18 +114,7 @@ impl ModalKind {
                 Item::Cancel,
             ],
             Self::Exercise => &[Item::ExerciseNow, Item::Cancel],
-            Self::Debug => &[
-                Item::CheatForceOverweight,
-                Item::CheatForceDiabetic,
-                Item::CheatClearDiabetes,
-                Item::CheatForceDrunk,
-                Item::CheatForceAlcoholic,
-                Item::CheatClearAlcoholism,
-                Item::CheatResetBattleRecord,
-                Item::CheatSkipHour,
-                Item::CheatSkipDay,
-                Item::Cancel,
-            ],
+            Self::Debug => &DEBUG_ITEMS,
             Self::Drink => &[
                 Item::DrinkChoice(super::engine::DrinkKind::Water),
                 Item::DrinkChoice(super::engine::DrinkKind::Cola),
@@ -204,15 +194,8 @@ enum Item {
     GiveMedication,
     Ozempic,
     ExerciseNow,
-    CheatForceOverweight,
-    CheatForceDiabetic,
-    CheatClearDiabetes,
-    CheatSkipHour,
-    CheatSkipDay,
-    CheatForceDrunk,
-    CheatForceAlcoholic,
-    CheatClearAlcoholism,
-    CheatResetBattleRecord,
+    /// A row of [`DEBUG_ROWS`] (the hidden Konami-code page).
+    Debug(u8),
     DrinkChoice(super::engine::DrinkKind),
     Rehab,
     Sleep,
@@ -234,6 +217,79 @@ enum Item {
     WakeUp,
 }
 
+/// What a debug row does.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DebugRow {
+    /// Show `engine::DebugInfo` as a toast.
+    Info,
+    /// Fast-forward this many minutes.
+    Skip(u32),
+    Poke(DebugPoke),
+    /// Zero the Battle record, this pet's and every friend's.
+    ResetBattle,
+}
+
+/// The hidden debug page: label and action of every row, in menu order. The
+/// page list and the dispatch both read this one table.
+const DEBUG_ROWS: [(&str, DebugRow); 23] = [
+    ("Engine info", DebugRow::Info),
+    ("Skip 10 min", DebugRow::Skip(10)),
+    ("Skip 1 hour", DebugRow::Skip(60)),
+    ("Skip 1 day", DebugRow::Skip(24 * 60)),
+    ("Comfort", DebugRow::Poke(DebugPoke::Comfort)),
+    ("Hungry", DebugRow::Poke(DebugPoke::Hungry)),
+    ("Thirsty", DebugRow::Poke(DebugPoke::Thirsty)),
+    ("Stuffed", DebugRow::Poke(DebugPoke::Stuffed)),
+    ("Tired", DebugRow::Poke(DebugPoke::Tired)),
+    ("Bored", DebugRow::Poke(DebugPoke::Bored)),
+    ("Dirty", DebugRow::Poke(DebugPoke::Dirty)),
+    ("Fat", DebugRow::Poke(DebugPoke::Fat)),
+    ("Thin", DebugRow::Poke(DebugPoke::Thin)),
+    ("Unfit", DebugRow::Poke(DebugPoke::Unfit)),
+    ("Drunk", DebugRow::Poke(DebugPoke::Drunk)),
+    ("Hung over", DebugRow::Poke(DebugPoke::HungOver)),
+    ("Groggy", DebugRow::Poke(DebugPoke::Groggy)),
+    ("Injured", DebugRow::Poke(DebugPoke::Injured)),
+    ("Diabetic", DebugRow::Poke(DebugPoke::Diabetic)),
+    ("Dependent", DebugRow::Poke(DebugPoke::Dependent)),
+    ("Clear conditions", DebugRow::Poke(DebugPoke::ClearConditions)),
+    ("Clear cooldowns", DebugRow::Poke(DebugPoke::ClearCooldowns)),
+    ("Reset battle record", DebugRow::ResetBattle),
+];
+
+/// The debug page's items: one per table row, then Cancel.
+static DEBUG_ITEMS: [Item; DEBUG_ROWS.len() + 1] = {
+    let mut items = [Item::Cancel; DEBUG_ROWS.len() + 1];
+    let mut i = 0;
+    while i < DEBUG_ROWS.len() {
+        items[i] = Item::Debug(i as u8);
+        i += 1;
+    }
+    items
+};
+
+/// Do one debug row. A poke the pet cannot take shows its reason (the one
+/// every refused action shows) and leaves the menu open.
+fn run_debug_row(row: DebugRow) {
+    use super::lifecycle;
+    match row {
+        DebugRow::Info => super::show_toast(super::Toast::DebugInfo),
+        DebugRow::Skip(minutes) => {
+            lifecycle::debug_skip_minutes(minutes);
+            super::show_toast(super::Toast::DebugCheat);
+        }
+        DebugRow::Poke(poke) => match lifecycle::debug_poke(poke) {
+            Ok(()) => super::show_toast(super::Toast::DebugCheat),
+            Err(why) => return super::show_reason(why),
+        },
+        DebugRow::ResetBattle => {
+            lifecycle::debug_reset_battle_record();
+            super::show_toast(super::Toast::DebugCheat);
+        }
+    }
+    close();
+}
+
 impl Item {
     fn label(self) -> &'static str {
         match self {
@@ -248,15 +304,7 @@ impl Item {
             Self::GiveMedication => "Insulin",
             Self::Ozempic => "Ozempic",
             Self::ExerciseNow => "Exercise now",
-            Self::CheatForceOverweight => "Force overweight",
-            Self::CheatForceDiabetic => "Trigger diabetes",
-            Self::CheatClearDiabetes => "Clear diabetes",
-            Self::CheatSkipHour => "Skip 1 hour",
-            Self::CheatSkipDay => "Skip 1 day",
-            Self::CheatForceDrunk => "Force drunk",
-            Self::CheatForceAlcoholic => "Trigger alcoholism",
-            Self::CheatClearAlcoholism => "Clear alcoholism",
-            Self::CheatResetBattleRecord => "Reset battle record",
+            Self::Debug(row) => DEBUG_ROWS[row as usize].0,
             Self::DrinkChoice(drink) => drink.label(),
             Self::Rehab => "Rehab",
             Self::Sleep => "Sleep",
@@ -313,7 +361,9 @@ impl Item {
     /// RolledStats).  The pet must be defrosted before mini-games or
     /// stat actions can run again.
     fn available(self, stats: &super::engine::PetStats) -> bool {
-        if stats.hibernating {
+        // Debug rows are always selectable: a poke the pet cannot take says
+        // why when it runs, and the skips work on a hibernating pet too.
+        if stats.hibernating && !matches!(self, Self::Debug(_)) {
             return matches!(
                 self,
                 Self::Cancel | Self::ViewStats | Self::RolledStats | Self::WakeUp,
@@ -327,15 +377,7 @@ impl Item {
             | Self::Friends
             | Self::PlayMusic
             | Self::Song(_)
-            | Self::CheatForceOverweight
-            | Self::CheatForceDiabetic
-            | Self::CheatClearDiabetes
-            | Self::CheatSkipHour
-            | Self::CheatSkipDay
-            | Self::CheatForceDrunk
-            | Self::CheatForceAlcoholic
-            | Self::CheatClearAlcoholism
-            | Self::CheatResetBattleRecord => true,
+            | Self::Debug(_) => true,
             Self::DrinkChoice(drink) => {
                 stats.can_drink
                     && (drink != super::engine::DrinkKind::Water || stats.can_drink_water)
@@ -508,51 +550,7 @@ impl Item {
             Self::ExerciseNow => {
                 self.started(lifecycle::exercise(), super::Toast::Exercise);
             }
-            Self::CheatForceOverweight => {
-                lifecycle::debug_force_overweight();
-                super::show_toast(super::Toast::DebugCheat);
-                close();
-            }
-            Self::CheatForceDiabetic => {
-                lifecycle::debug_force_diabetic();
-                super::show_toast(super::Toast::DebugCheat);
-                close();
-            }
-            Self::CheatClearDiabetes => {
-                lifecycle::debug_clear_diabetes();
-                super::show_toast(super::Toast::DebugCheat);
-                close();
-            }
-            Self::CheatSkipHour => {
-                lifecycle::debug_skip_ticks(360);
-                super::show_toast(super::Toast::DebugCheat);
-                close();
-            }
-            Self::CheatSkipDay => {
-                lifecycle::debug_skip_ticks(8640);
-                super::show_toast(super::Toast::DebugCheat);
-                close();
-            }
-            Self::CheatForceDrunk => {
-                lifecycle::debug_force_drunk();
-                super::show_toast(super::Toast::DebugCheat);
-                close();
-            }
-            Self::CheatForceAlcoholic => {
-                lifecycle::debug_force_alcoholic();
-                super::show_toast(super::Toast::DebugCheat);
-                close();
-            }
-            Self::CheatClearAlcoholism => {
-                lifecycle::debug_clear_alcoholism();
-                super::show_toast(super::Toast::DebugCheat);
-                close();
-            }
-            Self::CheatResetBattleRecord => {
-                lifecycle::debug_reset_battle_record();
-                super::show_toast(super::Toast::DebugCheat);
-                close();
-            }
+            Self::Debug(row) => run_debug_row(DEBUG_ROWS[row as usize].1),
             Self::DrinkChoice(drink) => {
                 let toast = if drink.is_alcoholic() { super::Toast::Drink } else { super::Toast::Refreshed };
                 self.started(lifecycle::drink(drink), toast);
@@ -1224,6 +1222,39 @@ mod tests {
     }
 
     #[test]
+    fn debug_page_is_the_v3_table() {
+        let want = [
+            "Engine info", "Skip 10 min", "Skip 1 hour", "Skip 1 day", "Comfort", "Hungry",
+            "Thirsty", "Stuffed", "Tired", "Bored", "Dirty", "Fat", "Thin", "Unfit", "Drunk",
+            "Hung over", "Groggy", "Injured", "Diabetic", "Dependent", "Clear conditions",
+            "Clear cooldowns", "Reset battle record",
+        ];
+        let items = ModalKind::Debug.items();
+        let labels: std::vec::Vec<&str> = items.iter().map(|i| i.label()).collect();
+        assert_eq!(labels[..want.len()], want);
+        assert_eq!(labels.len(), want.len() + 1);
+        assert!(items[want.len()] == Item::Cancel);
+    }
+
+    #[test]
+    fn a_refused_poke_says_why() {
+        let _guard = crate::game::lock_test_state();
+        lifecycle::start_new_game(PetKind(0), false, false);
+        // A fresh egg is still hatching: no poke applies.
+        let hungry = ModalKind::Debug
+            .items()
+            .iter()
+            .copied()
+            .find(|i| i.label() == "Hungry")
+            .unwrap();
+        let before = lifecycle::cycle().unwrap();
+        hungry.activate();
+        let after = lifecycle::cycle().unwrap();
+        assert_eq!(before.hunger, after.hunger);
+        super::close();
+    }
+
+    #[test]
     fn a_day_through_the_menu() {
         let _guard = crate::game::lock_test_state();
         lifecycle::start_new_game(PetKind(0), false, false);
@@ -1242,7 +1273,7 @@ mod tests {
             assert!(item.available(&stats), "{} unavailable", item.label());
             item.activate();
             super::close();
-            lifecycle::debug_skip_ticks(30);
+            lifecycle::debug_skip_minutes(5);
         };
         let before = st();
         ok(Item::FeedFood(crate::game::engine::FoodKind::Apple));
@@ -1253,7 +1284,7 @@ mod tests {
         assert!(st().clean > before.clean);
         ok(Item::Sleep);
         assert!(st().is_sleeping);
-        lifecycle::debug_skip_ticks(360);
+        lifecycle::debug_skip_minutes(60);
         let slept = st();
         assert!(slept.tired > before.tired);
         ok(Item::WakeFromSleep);
@@ -1262,7 +1293,7 @@ mod tests {
         Item::Relax.activate();
         super::close();
         assert_eq!(st().active_action, Some(crate::game::engine::Action::Relax));
-        lifecycle::debug_skip_ticks(30);
+        lifecycle::debug_skip_minutes(5);
         let after_relax = st();
         assert!(after_relax.active_action.is_none());
         assert!(after_relax.tired > before_relax.tired, "relax restores energy");

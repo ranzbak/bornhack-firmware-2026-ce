@@ -103,6 +103,8 @@ pub enum Toast {
     Reason = 27,
     /// Started a wash — see `engine::Action::Wash`.
     Wash = 28,
+    /// Debug menu "Engine info": two lines read from the engine at draw time.
+    DebugInfo = 29,
 }
 
 impl Toast {
@@ -136,6 +138,7 @@ impl Toast {
             26 => Self::MinigameWin,
             27 => Self::Reason,
             28 => Self::Wash,
+            29 => Self::DebugInfo,
             _ => Self::None,
         }
     }
@@ -173,6 +176,8 @@ impl Toast {
             Toast::MinigameWin => "nice game!",
             // Dynamic — handled in the renderer.
             Toast::Reason => "",
+            // Dynamic — handled in the renderer.
+            Toast::DebugInfo => "",
         }
     }
 }
@@ -667,13 +672,20 @@ where
         // Dynamic toasts (station cooldown) format their text at draw
         // time from a small atomic; everything else uses the static
         // message table.
-        let mut dyn_buf: heapless::String<24> = heapless::String::new();
+        let mut dyn_buf: heapless::String<48> = heapless::String::new();
         let msg: &str = if let Toast::Reason = toast {
             let why = engine::doses::Reason::unpack(
                 REASON_KIND.load(Ordering::Relaxed),
                 REASON_SECS.load(Ordering::Relaxed),
             );
             dyn_buf.push_str(why.text().as_str()).ok();
+            dyn_buf.as_str()
+        } else if let Toast::DebugInfo = toast {
+            // Read live: the toast shows what the engine is doing now.
+            if let Some(info) = lifecycle::debug_info() {
+                let line = info.line();
+                dyn_buf.push_str(line.as_str()).ok();
+            }
             dyn_buf.as_str()
         } else if let Toast::StationCooldown = toast {
             let secs = STATION_COOLDOWN_SECS.load(Ordering::Relaxed);

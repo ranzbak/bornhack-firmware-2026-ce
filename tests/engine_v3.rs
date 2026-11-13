@@ -3096,3 +3096,260 @@ fn every_cfg_key_sets_its_own_field() {
         }
     }
 }
+
+mod debug_menu {
+    use bornhack_aegg::game::engine::doses::{self, Reason};
+    use bornhack_aegg::game::engine::needs::{P, pct};
+    use bornhack_aegg::game::engine::status::{StatusWord, status};
+    use bornhack_aegg::game::engine::thresholds::HATCHING_TICKS;
+    use bornhack_aegg::game::engine::{
+        Action, DebugInfo, DebugPoke, GameState, PetKind, Phase, regime,
+    };
+
+    const NEED_POKES: [(DebugPoke, StatusWord, bool); 13] = [
+        (DebugPoke::Hungry, StatusWord::Hungry, true),
+        (DebugPoke::Thirsty, StatusWord::Thirsty, true),
+        (DebugPoke::Stuffed, StatusWord::Stuffed, false),
+        (DebugPoke::Tired, StatusWord::Tired, false),
+        (DebugPoke::Bored, StatusWord::Bored, false),
+        (DebugPoke::Dirty, StatusWord::Grubby, true),
+        (DebugPoke::Fat, StatusWord::Overweight, false),
+        (DebugPoke::Thin, StatusWord::Underweight, false),
+        (DebugPoke::Unfit, StatusWord::Unfit, false),
+        (DebugPoke::Drunk, StatusWord::Sloppy, true),
+        (DebugPoke::HungOver, StatusWord::HungOver, false),
+        (DebugPoke::Groggy, StatusWord::Groggy, false),
+        (DebugPoke::Injured, StatusWord::Injured, false),
+    ];
+
+    fn pet() -> GameState {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        assert_eq!(s.phase, Phase::Active);
+        s.is_sleeping = false;
+        s.tick_rem = 0;
+        s.money_enabled = false;
+        s
+    }
+
+    fn comfy() -> GameState {
+        let mut s = pet();
+        s.debug_poke(DebugPoke::Comfort).unwrap();
+        s
+    }
+
+    #[test]
+    fn each_poke_shows_its_status_word() {
+        for (poke, word, danger) in NEED_POKES {
+            let mut s = comfy();
+            s.debug_poke(poke).unwrap();
+            assert_eq!(status(&s), (word, danger), "{poke:?}");
+        }
+    }
+
+    #[test]
+    fn pokes_never_start_actions_or_charge() {
+        for (poke, _, _) in NEED_POKES.into_iter().chain([
+            (DebugPoke::Comfort, StatusWord::Content, false),
+            (DebugPoke::Diabetic, StatusWord::Content, false),
+            (DebugPoke::Dependent, StatusWord::Content, false),
+            (DebugPoke::ClearConditions, StatusWord::Content, false),
+            (DebugPoke::ClearCooldowns, StatusWord::Content, false),
+        ]) {
+            let mut s = pet();
+            s.money_enabled = true;
+            s.money = 123;
+            s.mark_saved();
+            assert!(!s.needs_save());
+            s.debug_poke(poke).unwrap();
+            assert_eq!(s.active_action, None, "{poke:?}");
+            assert_eq!(s.money, 123, "{poke:?}");
+            assert!(s.needs_save(), "{poke:?} must request a save");
+        }
+        // A running action is left running.
+        let mut s = pet();
+        assert!(s.play());
+        s.debug_poke(DebugPoke::Hungry).unwrap();
+        assert_eq!(s.active_action, Some(Action::Play));
+    }
+
+    #[test]
+    fn comfort_is_content() {
+        let mut s = pet();
+        s.debug_poke(DebugPoke::Hungry).unwrap();
+        s.debug_poke(DebugPoke::Comfort).unwrap();
+        assert_eq!(status(&s), (StatusWord::Content, false));
+        assert_eq!(pct(s.mood as i32), 70);
+        assert_eq!(pct(s.health as i32), 70);
+        // And the pet stays content when time passes.
+        let t = s.last_update_tick;
+        s.update(t + 60);
+        assert_eq!(status(&s).0, StatusWord::Content);
+    }
+
+    #[test]
+    fn skip_minutes_equals_update() {
+        for m in [10u32, 60, 1440] {
+            let mut a = pet();
+            a.debug_poke(DebugPoke::Hungry).unwrap();
+            let mut b = a.clone();
+            let last = a.last_update_tick;
+            a.debug_skip_minutes(m);
+            b.update(last + m * 6);
+            assert_eq!(a.last_update_tick, last, "skip must not move the tick base");
+            b.last_update_tick = last;
+            assert_eq!(a, b, "skip {m}");
+        }
+    }
+
+    #[test]
+    fn skip_does_not_freeze_the_next_real_update() {
+        let mut s = pet();
+        let last = s.last_update_tick;
+        s.debug_skip_minutes(60);
+        let age = s.age_ticks;
+        s.update(last + 6);
+        assert_eq!(s.age_ticks, age + 6);
+    }
+
+    #[test]
+    fn clear_conditions_and_cooldowns() {
+        let mut s = comfy();
+        s.injured_min = 900;
+        s.hangover_min = 300;
+        s.groggy_min = 100;
+        s.dependent = true;
+        s.dependence_min = 77;
+        s.diabetic = true;
+        s.diabetes_min = 99;
+        s.rehab_min = 50;
+        s.reversal_min = 40;
+        s.med_cd_min = 500;
+        s.ozempic_cd_min = 500;
+        s.insulin_min = 5000;
+        s.cooldown_tictactoe = 5;
+        s.cooldown_lightsout = 5;
+        s.cooldown_blackhole = 5;
+        s.cooldown_nim = 5;
+        s.cooldown_bornjeweled = 5;
+        s.cooldown_battle = 5;
+        assert!(s.refusal_for(Action::Heal, None).is_some());
+        assert!(s.refusal_for(Action::Ozempic, None).is_some());
+        assert!(s.refusal_for(Action::Medicate, None).is_some());
+
+        s.debug_poke(DebugPoke::ClearCooldowns).unwrap();
+        assert_eq!(s.med_cd_min, 0);
+        assert_eq!(s.ozempic_cd_min, 0);
+        assert_eq!(s.insulin_min, 0);
+        for g in [
+            s.cooldown_tictactoe,
+            s.cooldown_lightsout,
+            s.cooldown_blackhole,
+            s.cooldown_nim,
+            s.cooldown_bornjeweled,
+            s.cooldown_battle,
+        ] {
+            assert_eq!(g, 0);
+        }
+        assert_eq!(s.refusal_for(Action::Heal, None), None);
+        assert_eq!(s.refusal_for(Action::Ozempic, None), None);
+        assert_eq!(s.refusal_for(Action::Medicate, None), None);
+
+        s.debug_poke(DebugPoke::ClearConditions).unwrap();
+        assert_eq!(
+            (
+                s.injured_min,
+                s.hangover_min,
+                s.groggy_min,
+                s.rehab_min,
+                s.reversal_min
+            ),
+            (0, 0, 0, 0, 0)
+        );
+        assert!(!s.dependent && !s.diabetic);
+        assert_eq!((s.dependence_min, s.diabetes_min), (0, 0));
+    }
+
+    #[test]
+    fn diabetic_and_dependent_set_the_flags() {
+        let mut s = comfy();
+        s.debug_poke(DebugPoke::Diabetic).unwrap();
+        s.debug_poke(DebugPoke::Dependent).unwrap();
+        assert!(s.diabetic && s.dependent);
+    }
+
+    #[test]
+    fn pokes_refuse_a_pet_that_cannot_take_them() {
+        let mut hatching = GameState::new_egg(7, PetKind(0));
+        assert_eq!(hatching.phase, Phase::Hatching);
+        let before = hatching.clone();
+        assert!(hatching.debug_poke(DebugPoke::Hungry).is_err());
+        assert_eq!(hatching, before);
+
+        let mut gone = pet();
+        gone.phase = Phase::Gone;
+        assert!(gone.debug_poke(DebugPoke::Hungry).is_err());
+
+        let mut asleep_in_ice = pet();
+        asleep_in_ice.hibernating = true;
+        assert_eq!(
+            asleep_in_ice.debug_poke(DebugPoke::Comfort),
+            Err(Reason::Hibernating)
+        );
+        // The reason is the one every refused action shows.
+        assert_eq!(
+            asleep_in_ice.refusal_for(Action::Wash, None),
+            Some(Reason::Hibernating)
+        );
+    }
+
+    #[test]
+    fn debug_info_matches_engine() {
+        for poke in [
+            DebugPoke::Comfort,
+            DebugPoke::Hungry,
+            DebugPoke::Drunk,
+            DebugPoke::Injured,
+        ] {
+            let mut s = comfy();
+            s.debug_poke(poke).unwrap();
+            let i = s.debug_info();
+            let (word, danger) = status(&s);
+            assert_eq!((i.status, i.danger), (word, danger));
+            assert_eq!(i.mood_target as i32, pct(regime::mood_target(&s)));
+            assert_eq!(i.mood as i32, pct(s.mood as i32));
+            assert_eq!(i.health as i32, pct(s.health as i32));
+            let wake = s.next_wake_tick();
+            let want = (wake != u32::MAX).then(|| (wake - s.last_update_tick).div_ceil(6));
+            assert_eq!(i.wake_in_min, want);
+            assert_eq!((i.asleep, i.night), (s.is_sleeping, s.night));
+        }
+        let _ = (P, doses::fmt_wait(0));
+    }
+
+    #[test]
+    fn debug_info_line_is_short() {
+        let mut i = DebugInfo {
+            status: StatusWord::Hungry,
+            danger: true,
+            mood: 62,
+            mood_target: 70,
+            health: 80,
+            wake_in_min: Some(23),
+            asleep: false,
+            night: false,
+        };
+        assert_eq!(i.line().as_str(), "Hungry!\nm62/70 h80 wake 23m");
+        i.wake_in_min = Some(125);
+        i.danger = false;
+        i.status = StatusWord::Underweight;
+        i.asleep = true;
+        assert_eq!(i.line().as_str(), "Underweight zz\nm62/70 h80 wake 2h05");
+        i.wake_in_min = None;
+        assert!(i.line().as_str().ends_with("wake -"));
+        // 7 px font on a 152 px screen: 21 columns per line.
+        for l in i.line().as_str().lines() {
+            assert!(l.len() <= 21, "{l}");
+        }
+    }
+}

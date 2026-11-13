@@ -12,6 +12,7 @@
 
 pub mod advance;
 pub mod anim_files;
+pub mod debug;
 pub mod doses;
 pub mod drink;
 pub mod food;
@@ -27,6 +28,7 @@ pub mod to_display;
 use advance::SLOW_SCALE;
 use needs::{MAX, P};
 use thresholds::*;
+pub use debug::{DebugInfo, DebugPoke};
 pub use drink::DrinkKind;
 pub use food::FoodKind;
 pub use to_display::DisplayAnim;
@@ -840,68 +842,6 @@ impl GameState {
     /// Total hours the pet has spent in hibernation during its life.
     pub fn hibernate_hours(&self) -> u32 {
         self.hibernate_ticks / 360 // 360 ticks = 1 hour
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Debug cheats — reachable only via the hidden button sequence in
-// `crate::game::debug_cheats`. Not part of normal gameplay; exist purely so
-// the multi-day weight/diabetes arc can be tested in seconds instead of days.
-// ---------------------------------------------------------------------------
-
-impl GameState {
-    /// Push `weight` just over the overweight trigger.
-    pub fn debug_force_overweight(&mut self) {
-        self.weight = (needs::weight_hi() as u16).saturating_add(1);
-    }
-
-    /// Flip `diabetic` on directly, skipping the sustained-overweight timer.
-    pub fn debug_force_diabetic(&mut self) {
-        self.diabetic = true;
-    }
-
-    /// Clear diabetes and the overweight-duration counter, so the arc can
-    /// be re-tested from scratch without starting a new pet.
-    pub fn debug_clear_diabetes(&mut self) {
-        self.diabetic = false;
-        self.diabetes_min = 0;
-    }
-
-    /// Fast-forward the engine by `ticks` in one shot — runs the same
-    /// `update()` path real time would, just compressed. Used for "Skip
-    /// 1 hour" / "Skip 1 day" cheat items.
-    pub fn debug_skip_ticks(&mut self, ticks: u32) {
-        let target = self.last_update_tick.saturating_add(ticks);
-        self.update(target);
-    }
-
-    /// Push `drunk` just over the alcoholism trigger.
-    pub fn debug_force_drunk(&mut self) {
-        self.booze = (needs::booze_danger() as u16).saturating_add(1);
-    }
-
-    /// Flip `alcoholic` on directly, skipping the sustained-drunk timer.
-    pub fn debug_force_alcoholic(&mut self) {
-        self.dependent = true;
-    }
-
-    /// Clear alcoholism and the drunk-duration counter, so the arc can
-    /// be re-tested from scratch without starting a new pet.
-    pub fn debug_clear_alcoholism(&mut self) {
-        self.dependent = false;
-        self.dependence_min = 0;
-    }
-
-    /// Zero this pet's lifetime mesh Battle record and cooldown. Paired
-    /// with `crate::game::friends::reset_all_battle_records` (which
-    /// zeros the per-friend head-to-head numbers) by the
-    /// `lifecycle::debug_reset_battle_record` wrapper — a badge that
-    /// picked up inflated counts from a duplicate-delivery bug before it
-    /// was fixed has no other way to get back to a clean baseline.
-    pub fn debug_reset_battle_record(&mut self) {
-        self.wins = 0;
-        self.losses = 0;
-        self.cooldown_battle = 0;
     }
 }
 
