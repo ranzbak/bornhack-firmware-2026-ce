@@ -102,6 +102,9 @@ const PROBE_NEW: Probe = Probe {
     min_health: u16::MAX,
 };
 
+// Like `ADVANCE_CALLS`, this records every advanced minute, previews on clones
+// included. Only `run_full` resets and reads it, and nothing inside a run
+// calls a preview.
 thread_local! {
     static PROBE: Cell<Probe> = const { Cell::new(PROBE_NEW) };
 }

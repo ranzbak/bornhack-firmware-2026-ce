@@ -3,9 +3,10 @@
 //! One table, derived from the status line: the subject is the line's first
 //! word (danger first), with the egg, a gone pet and hibernation in front and
 //! "worn out" ahead of an info word while awake. The ask is the first remedy the
-//! engine would accept ([`GameState::remedy_reason`]), so the pet never asks
-//! for something the menu would refuse; when every remedy is refused it says
-//! why instead.
+//! engine would accept ([`GameState::remedy_reason`]) and does not warn
+//! ([`GameState::remedy_warning`]), else the first one it would accept, so
+//! the pet never asks for something the menu would refuse; when every remedy
+//! is refused it says why instead.
 
 use super::GameState;
 use super::Phase;
@@ -214,7 +215,15 @@ fn subject(s: &GameState) -> Subject {
 pub fn hint(s: &GameState) -> Hint {
     let subject = subject(s);
     let list = remedies(subject);
-    let ask = match list.iter().find(|&&r| s.remedy_reason(r).is_none()) {
+    let mut accepted = list.iter().filter(|&&r| s.remedy_reason(r).is_none());
+    // The first accepted remedy that goes well, else the first accepted one:
+    // the pet does not ask for what the menu would mark risky while another
+    // way out is clean, but it still asks when every way has a catch.
+    let pick = accepted
+        .clone()
+        .find(|&&r| s.remedy_warning(r).is_none())
+        .or_else(|| accepted.next());
+    let ask = match pick {
         Some(&r) => Ask::Do(r),
         None => match list.first().and_then(|&r| s.remedy_reason(r)) {
             Some(why) => Ask::Refused(why),

@@ -96,9 +96,9 @@ pressing first: injured, sore, hung over, groggy, worn out, diabetic,
 dependent, in rehab, well rested. When more than two apply it names two and
 counts the rest ("injured, sore +1").
 
-Stats interact: if several are out of band, the pet becomes miserable
-faster, and a miserable pet is worse off everywhere. Keep on top of things
-before they spiral!
+Stats interact: every need that is out of its band drags the mood target
+down, and a low mood slows the recovery of health and, when it is very low,
+wears health down. Keep on top of things before they spiral!
 
 The Stats menu reads View stats, Hint, Diary, Rolled stats, Friends, Cancel.
 "View stats" is a two-page view (page 2 covers the conditions, Fit and
@@ -110,9 +110,8 @@ lifetime Battle win/loss record shows in the title of the Battle picker
 "Hint": your pet tells you its most pressing need and what helps (for
 example "I'm hungry! / Please feed me."). It never asks for something the
 game would refuse: when the action is not possible it says why ("but busy",
-"but wait 2h00", "but can't afford"). It also works for an egg ("I'm
-hatching!") and while hibernating ("Brrr, frozen! / Defrost me!"). Any
-button returns to the menu.
+"but wait 2h00", "but can't afford"). It also works while hibernating
+("Brrr, frozen! / Defrost me!"). Any button returns to the menu.
 
 **Permanent conditions.** Diabetes (from sustained overweight) and
 dependence (from sustained heavy drinking) do not wear off on their own.
@@ -260,9 +259,9 @@ a full-screen "TYPE 2 DIABETES — Give medication soon" alert for at
 least 3 seconds before returning to normal. It does not wear off: only a
 long lean, fit stretch reverses it (see "Permanent conditions"), and
 until then it needs management. Once diabetic, **Insulin** appears as a new
-option under the **Heal** icon. Skipping it for too long makes sick
-decay faster; a dose protects the pet for a while before it needs
-another.
+option under the **Heal** icon. Without a dose the pet's health ceiling
+drops and the status line says "no insulin"; a dose protects the pet for a
+while before it needs another.
 
 ## Drinks & Alcoholism
 
@@ -274,11 +273,12 @@ hours — no action needed — so staying alcoholic-track-worthy requires
 repeated drinking, not just one binge.
 
 If your pet stays drunk (past a threshold) for a sustained period —
-several days of repeated heavy drinking — it develops permanent
-**dependence**. It does not wear off on its own; a full course of
-**Rehab**, an option under the **Heal** icon (alongside Give
-medicine, Insulin, and Ozempic), clears it. Skipping it makes sick decay faster,
-same as skipping Insulin; a session protects the pet for a while.
+several days of repeated heavy drinking — it develops **dependence**. It
+does not wear off on its own; a full course of **Rehab**, an option under
+the **Heal** icon (alongside Give medicine, Insulin, and Ozempic), clears
+it. A dependent pet clears alcohol more slowly and, when it is nearly sober
+and awake, craves a drink: its mood drops until it drinks or has been
+through rehab.
 
 **Ozempic**, also under Heal, is a separate, stronger weight-loss
 treatment — usable any time, not just once diabetic — but on a much
@@ -336,7 +336,7 @@ nothing extra to manage:
 | HP          | Vitality trait, reduced if the pet is sick      |
 
 Being diabetic or alcoholic takes a flat toll on Attack/Defense/Speed —
-the same permanent conditions that hurt everyday care also make your
+the same lasting conditions that hurt everyday care also make your
 pet a weaker fighter.
 
 Select **Battle** — now the first option under the **Play** icon — to
@@ -353,7 +353,7 @@ if they weren't looking at the Battle screen.
 
 **Battle HP is entirely separate from your pet's real health** — it's
 computed fresh for each fight and discarded afterward. Losing a battle
-never affects `sick`, `miserable`, or anything else about the pet's
+never affects its health, mood, or anything else about the pet's
 actual wellbeing; the worst that happens is you lose the bragging
 rights. Wins and losses are tracked two ways: a simple lifetime counter
 on your pet overall (visible in the title of the Battle picker, as

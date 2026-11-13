@@ -215,13 +215,9 @@ impl Word {
         )
     }
 
-    /// Whether `info_word` can return this word: what the line says when no
-    /// penalty term is large enough to be named.
+    /// Whether `info_word` can return this word (see [`INFO_WORDS`]).
     pub fn is_info(self) -> bool {
-        matches!(
-            self,
-            Word::Asleep | Word::Sore | Word::Tipsy | Word::WellRested | Word::Content
-        )
+        INFO_WORDS.contains(&self)
     }
 
     pub fn text(self) -> &'static str {
@@ -365,6 +361,16 @@ pub fn status_line(s: &GameState) -> StatusLine {
     }
 }
 
+/// Every word `info_word` can return: what the line says when no penalty term
+/// is large enough to be named. The one list; `Word::is_info` reads it.
+pub const INFO_WORDS: [Word; 5] = [
+    Word::Asleep,
+    Word::Sore,
+    Word::Tipsy,
+    Word::WellRested,
+    Word::Content,
+];
+
 /// What to say when nothing is out of line.
 fn info_word(s: &GameState) -> Word {
     if s.is_sleeping {
@@ -487,4 +493,31 @@ pub fn conditions(s: &GameState) -> Conditions {
         bits.into_iter()
             .fold(0, |b, (c, on)| b | (on as u16) << c as u8),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::engine::PetKind;
+
+    #[test]
+    fn info_words_are_exactly_what_info_word_returns() {
+        let mut seen = [false; INFO_WORDS.len()];
+        for bits in 0u32..32 {
+            let mut s = GameState::new_egg(7, PetKind(0));
+            s.is_sleeping = bits & 1 != 0;
+            s.strain = if bits & 2 != 0 { 90 * P as u16 } else { 0 };
+            s.booze = if bits & 4 != 0 { 60 * P as u16 } else { 0 };
+            s.rested_min = if bits & 8 != 0 { 100 } else { 0 };
+            s.injured_min = if bits & 16 != 0 { 100 } else { 0 };
+            let w = info_word(&s);
+            assert!(INFO_WORDS.contains(&w), "{w:?} is not in INFO_WORDS");
+            assert!(w.is_info());
+            seen[INFO_WORDS.iter().position(|&i| i == w).unwrap()] = true;
+        }
+        assert!(seen.iter().all(|&b| b), "INFO_WORDS lists a word info_word never says: {seen:?}");
+        for w in Word::ALL {
+            assert_eq!(w.is_info(), INFO_WORDS.contains(&w));
+        }
+    }
 }

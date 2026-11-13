@@ -1107,6 +1107,24 @@ pub(crate) fn lock_test_state() -> TestState {
     TestState(TEST_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+/// Every full-screen view the lib.rs and game draw dispatch handles under the
+/// game feature (the firmware qwiic overlay aside): name, open, close.
+#[cfg(test)]
+const FULL_SCREEN_VIEWS: [(&str, fn(), fn()); 12] = [
+    ("text_entry", || crate::text_entry::begin(b"", 1, |_| {}, "t", false), crate::text_entry::close_for_test),
+    ("realm", realm_view::open, realm_view::close),
+    ("traits", traits_view::open, traits_view::close),
+    ("diary", diary_view::open, diary_view::close),
+    ("friends", friends_view::open, friends_view::close),
+    ("battle", battle_view::open, battle_view::close),
+    ("pet_select", pet_select::open_new_game, pet_select::close),
+    ("tictactoe", tictactoe::open, tictactoe::close),
+    ("lightsout", lightsout::open, lightsout::close),
+    ("blackhole", blackhole::open, blackhole::close),
+    ("nim", nim::open, nim::close),
+    ("bornjeweled", bornjeweled::open, bornjeweled::close),
+];
+
 #[cfg(test)]
 impl Drop for TestState {
     fn drop(&mut self) {
@@ -1118,11 +1136,26 @@ impl Drop for TestState {
         diary_view::close();
         modal::close();
         lifecycle::clear_diary();
+        for (_, _, close) in FULL_SCREEN_VIEWS {
+            close();
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_full_screen_view_is_in_the_predicate() {
+        let _guard = super::lock_test_state();
+        assert!(!super::full_screen_view_up());
+        for (name, open, close) in super::FULL_SCREEN_VIEWS {
+            open();
+            assert!(super::full_screen_view_up(), "{name} is not in full_screen_view_up");
+            close();
+            assert!(!super::full_screen_view_up(), "{name} did not close");
+        }
+    }
+
     fn active_test_pet() -> crate::game::engine::GameState {
         use crate::game::engine::{GameState, PetKind, Phase};
         let mut s = GameState::new_egg(7, PetKind(0));

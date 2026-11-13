@@ -20,7 +20,7 @@ here's what changed:
 - **Exercise** — a new action that burns off weight.
 - **Ozempic** — a stronger, longer-cooldown weight-loss treatment, usable
   any time (not gated on being diabetic).
-- **Drinks & Alcoholism** — a second permanent-condition track, parallel
+- **Drinks & Alcoholism** — a second lasting-condition track, parallel
   to weight/diabetes: choose from Water/Cola/Beer/Wine/Whiskey; sustained
   heavy drinking triggers dependence, cleared by a full **Rehab** course.
 - **Two-page stats view** (Stats menu) — page 1 shows the needs, page 2

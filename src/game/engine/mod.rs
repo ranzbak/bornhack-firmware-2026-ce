@@ -35,7 +35,10 @@ pub use drink::DrinkKind;
 pub use food::FoodKind;
 pub use to_display::DisplayAnim;
 
-/// Test hook: `advance` calls made by `update` (trials included).
+/// Test hook: `advance` calls made by `update` (trials included). Preview
+/// clones (`preview`, `preview_sleep`, `next_wake_tick`) count too; only
+/// `sim::run_full` reads it, as a delta around its own `next_wake_tick`, and
+/// nothing a run does draws or previews, so the counts stay its own.
 #[cfg(feature = "simulator")]
 thread_local! {
     pub static ADVANCE_CALLS: core::cell::Cell<u32> = const { core::cell::Cell::new(0) };
@@ -1102,6 +1105,35 @@ impl GameState {
             Remedy::Rehab => gate(Action::Rehab, None),
             Remedy::Defrost => (!self.hibernating)
                 .then_some(doses::Reason::Refused(doses::Refusal::NoNeed)),
+        }
+    }
+
+    /// The warning cause that doing `r` now would produce, or `None` when it
+    /// goes well or is no dose (a game, a defrost). The same previews the menu
+    /// marks its rows with; a Feed is clean when any food is.
+    pub fn remedy_warning(&self, r: hint::Remedy) -> Option<causes::Cause> {
+        use hint::Remedy;
+        match r {
+            Remedy::Feed => {
+                let mut first = None;
+                for f in FoodKind::ALL {
+                    match self.preview(Action::Feed, Some(f), None) {
+                        None => return None,
+                        warned => first = first.or(warned),
+                    }
+                }
+                first
+            }
+            Remedy::Water => self.preview(Action::Drink, None, Some(DrinkKind::Water)),
+            Remedy::Sleep => self.preview_sleep(),
+            Remedy::Play => self.preview(Action::Play, None, None),
+            Remedy::Relax => self.preview(Action::Relax, None, None),
+            Remedy::Wash => self.preview(Action::Wash, None, None),
+            Remedy::Exercise => self.preview(Action::Exercise, None, None),
+            Remedy::Medicine => self.preview(Action::Heal, None, None),
+            Remedy::Insulin => self.preview(Action::Medicate, None, None),
+            Remedy::Rehab => self.preview(Action::Rehab, None, None),
+            Remedy::Game | Remedy::Defrost => None,
         }
     }
 

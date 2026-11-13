@@ -2146,7 +2146,7 @@ mod cooldown_countdown {
 
 mod status_wake {
     use bornhack_aegg::game::engine::needs::P;
-    use bornhack_aegg::game::engine::status::{StatusLine, StatusWord, Word, status, status_line};
+    use bornhack_aegg::game::engine::status::{INFO_WORDS, StatusLine, StatusWord, Word, status, status_line};
     use bornhack_aegg::game::engine::thresholds::{HATCHING_TICKS, MAX_SLEEP_TICKS};
     use bornhack_aegg::game::engine::{
         Action, DisplayAnim, GameState, MiniGame, PetKind, Phase, doses,
@@ -2286,10 +2286,7 @@ mod status_wake {
     ];
 
     fn is_info(w: Word) -> bool {
-        matches!(
-            w,
-            Word::Asleep | Word::Sore | Word::Tipsy | Word::WellRested | Word::Content
-        )
+        INFO_WORDS.contains(&w)
     }
 
     fn is_prompt(w: Word) -> bool {
@@ -4930,6 +4927,38 @@ mod hint {
         for r in ALL_REMEDIES {
             assert!(asked.contains(&r), "{r:?} never suggested");
         }
+    }
+
+    /// The hint prefers an accepted remedy that goes well, falls back to an
+    /// accepted one with a catch, and never asks for a refused one.
+    #[test]
+    fn the_hint_prefers_a_remedy_without_a_warning() {
+        // A wasted pet that is not thirsty: Water is refused, Sleep is the only
+        // accepted remedy. Its forecast is a bad night, and it is still asked.
+        let mut s = comfy();
+        s.booze = pct(50);
+        s.hydration = pct(90);
+        assert!(matches!(hint(&s).subject, Subject::Word(Word::Sloppy | Word::Wasted)));
+        assert!(s.remedy_reason(Remedy::Water).is_some());
+        assert_eq!(s.remedy_reason(Remedy::Sleep), None);
+        assert!(s.preview_sleep().is_some(), "a bad night is forecast");
+        assert_eq!(hint(&s).ask, Ask::Do(Remedy::Sleep));
+        // Everywhere: an asked remedy with a warning means no accepted
+        // remedy of the same subject is clean; and the sweep must meet a
+        // pet that skips the first remedy for a clean second one.
+        let mut skipped = false;
+        for (name, s) in states() {
+            let h = hint(&s);
+            let Ask::Do(asked) = h.ask else { continue };
+            let accepted = |r: &&Remedy| s.remedy_reason(**r).is_none();
+            let clean = |r: &&Remedy| s.remedy_warning(**r).is_none();
+            let first = remedies(h.subject).iter().find(accepted).unwrap();
+            if s.remedy_warning(asked).is_some() {
+                assert!(!remedies(h.subject).iter().filter(accepted).any(|r| clean(&r)), "{name}");
+            }
+            skipped |= *first != asked;
+        }
+        assert!(skipped, "no state in the sweep skips a risky first remedy");
     }
 
     /// Run the real starter for what the pet asks, on a clone: it must start

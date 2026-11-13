@@ -886,6 +886,12 @@ pub fn begin(
     TEXT_ENTRY.lock(|cell| cell.replace(Some(entry)));
 }
 
+/// End the active entry without completing it (test cleanup).
+#[cfg(test)]
+pub(crate) fn close_for_test() {
+    TEXT_ENTRY.lock(|cell| cell.replace(None));
+}
+
 /// Returns true when text entry is active.
 pub fn is_active() -> bool {
     TEXT_ENTRY.with(|e| e.is_some())
