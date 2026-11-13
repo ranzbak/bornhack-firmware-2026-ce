@@ -164,11 +164,9 @@ pub fn advance(s: &mut GameState, dt: u32) {
         }
     }
 
-    // Mood chases its target; health follows damage, recovery and the ceiling.
-    let reach = t::MOOD_STEP() as i64 * dt as i64;
-    let mood = s.mood as i64;
-    s.mood = (mood_target(s) as i64).clamp(mood - reach, mood + reach).clamp(0, MAX as i64) as u16;
-
+    // Health follows damage, recovery and the ceiling (on the mood zone at the
+    // start of the segment); then mood chases its target, which reads the new
+    // health, so a segment matches stepping (R22).
     let ceiling = health_ceiling(s) as i64;
     let mut h = s.health as i64 - health_damage(s) as i64 * dt as i64;
     h = if h < ceiling {
@@ -177,6 +175,10 @@ pub fn advance(s: &mut GameState, dt: u32) {
         (h - t::HEALTH_EXCESS_DECAY_PM() as i64 * dt as i64).max(ceiling)
     };
     s.health = h.clamp(0, MAX as i64) as u16;
+
+    let reach = t::MOOD_STEP() as i64 * dt as i64;
+    let mood = s.mood as i64;
+    s.mood = (mood_target(s) as i64).clamp(mood - reach, mood + reach).clamp(0, MAX as i64) as u16;
 
     // Leaving.
     if s.health == 0 {

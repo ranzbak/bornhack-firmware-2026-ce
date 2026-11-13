@@ -9,7 +9,7 @@
 
 use super::advance::{LEAVING_SCALE, SLOW_SCALE};
 use super::needs::{self, MAX, NEEDS, Need, P};
-use super::regime::{energy_cap, rates};
+use super::regime::{energy_cap, health_ceiling, rates};
 use super::thresholds as t;
 use super::{GameState, Phase};
 
@@ -249,4 +249,58 @@ pub fn seg_len(s: &GameState, max: u32) -> u32 {
         return max.max(1);
     }
     max.min(level_bound(s)).min(timer_bound(s)).max(1)
+}
+
+/// Signature of every mood and health line a term reads, plus the flags that
+/// switch terms on, packed into one word. `update` halves a segment while
+/// advancing it changes the signature, so mood and health never cross one of
+/// their own lines inside a segment (R18, R20).
+///
+/// Mood lines (`mood >= line`):
+/// - 80 %: top zone (brief; no term reads it yet);
+/// - `REC_GOOD_MOOD_PCT`, `REC_FAIR_MOOD_PCT`: `health_recovery` tiers;
+/// - `DMG_MOOD_PCT`: `health_damage` mood term (`mood < line`);
+/// - `CARE_GOOD_MOOD_PCT`: `care_good_min` in `advance`.
+///
+/// Health lines (`health > line`, and `== 0`):
+/// - 0: leaving, `health_damage` floor;
+/// - 25 % and 45 % (brief; no term reads them yet);
+/// - `DMG_ENERGY_HEALTH_PCT`: energy damage stops at this floor;
+/// - `COLLAPSE_HEALTH_FLOOR_PCT`: collapse damage applies above it;
+/// - `MOOD_HEALTH_FLOOR_PCT`: `mood_target` term `floor - health`;
+/// - `sign(health - health_ceiling)`: recovery up to the ceiling, decay above.
+///
+/// Flags: asleep, gone, dependent, diabetic, hangover, deprived.
+pub fn sig(s: &GameState) -> u32 {
+    let (mood, health) = (s.mood as i32, s.health as i32);
+    let mood_lines = [
+        lvl(80),
+        lvl(t::REC_GOOD_MOOD_PCT()),
+        lvl(t::REC_FAIR_MOOD_PCT()),
+        lvl(t::CARE_GOOD_MOOD_PCT()),
+        lvl(t::DMG_MOOD_PCT()),
+    ];
+    let health_lines = [
+        lvl(25),
+        lvl(t::DMG_ENERGY_HEALTH_PCT()),
+        lvl(t::COLLAPSE_HEALTH_FLOOR_PCT()),
+        lvl(45),
+        lvl(t::MOOD_HEALTH_FLOOR_PCT()),
+    ];
+    let flags = [
+        s.is_sleeping,
+        s.phase == Phase::Gone,
+        s.dependent,
+        s.diabetic,
+        s.hangover_min > 0,
+        s.deprived,
+        health == 0,
+    ];
+    let mut bits = 0u32;
+    let mut push = |on: bool| bits = bits << 1 | on as u32;
+    mood_lines.iter().for_each(|&l| push(mood >= l));
+    health_lines.iter().for_each(|&l| push(health > l));
+    flags.iter().for_each(|&f| push(f));
+    // Three-way: below, on, above the ceiling.
+    bits << 2 | (health - health_ceiling(s)).signum().rem_euclid(3) as u32
 }

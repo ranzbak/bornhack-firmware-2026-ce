@@ -24,12 +24,12 @@ pub mod to_display;
 
 use needs::{MAX, P};
 use thresholds::*;
-
-/// Engine ticks per simulated minute.
-const TICKS_PER_MINUTE: u32 = 6;
 pub use drink::DrinkKind;
 pub use food::FoodKind;
 pub use to_display::DisplayAnim;
+
+/// Engine ticks per simulated minute.
+const TICKS_PER_MINUTE: u32 = 6;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -494,7 +494,7 @@ impl GameState {
     /// remainder is carried in `tick_rem`.  A backwards clock counts as zero
     /// elapsed.  Each loop pass advances one solver segment, so a long gap
     /// costs a handful of closed-form steps, not one per minute.
-        pub fn update(&mut self, now_tick: u32) {
+    pub fn update(&mut self, now_tick: u32) {
         let total_delta = now_tick.saturating_sub(self.last_update_tick);
         if total_delta == 0 {
             return;
@@ -538,7 +538,23 @@ impl GameState {
         let mut minutes = ticks / TICKS_PER_MINUTE;
         self.tick_rem = (ticks % TICKS_PER_MINUTE) as u8;
         while minutes > 0 {
-            let dt = solver::seg_len(self, minutes).clamp(1, minutes);
+            let mut dt = solver::seg_len(self, minutes).clamp(1, minutes);
+            // Mood and health crossing a line of their own is not bounded by
+            // the solver: halve the segment while a trial advance changes the
+            // signature. At most log2(dt) trials, each a closed-form step on a
+            // copy, so a long gap on the badge still costs a handful of steps.
+            let before = solver::sig(self);
+            while dt > 1 {
+                let mut trial = self.clone();
+                advance::advance(&mut trial, dt);
+                // A target moving faster than mood can follow also needs
+                // shorter segments (R22).
+                let drift = (regime::mood_target(&trial) - regime::mood_target(self)).unsigned_abs();
+                if solver::sig(&trial) == before && drift <= thresholds::MOOD_STEP() as u32 * dt {
+                    break;
+                }
+                dt = dt.div_ceil(2);
+            }
             advance::advance(self, dt);
             minutes -= dt;
         }

@@ -1084,3 +1084,164 @@ mod solver {
         assert_eq!(seg_len(&s, 50), 50);
     }
 }
+
+mod zone_check {
+    use bornhack_aegg::game::engine::advance::advance;
+    use bornhack_aegg::game::engine::needs::{MAX, P};
+    use bornhack_aegg::game::engine::regime::mood_target;
+    use bornhack_aegg::game::engine::solver::sig;
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase};
+
+    fn pct(p: i32) -> u16 {
+        (p * P) as u16
+    }
+
+    fn calm() -> GameState {
+        let mut s = GameState::new_egg(1, PetKind(0));
+        s.phase = Phase::Active;
+        s.hatching_countdown = 0;
+        s.is_sleeping = false;
+        s.fullness = pct(60);
+        s.hydration = pct(65);
+        s.energy = pct(80);
+        s.fun = pct(50);
+        s.dirt = pct(20);
+        s.booze = 0;
+        s.strain = pct(20);
+        s.fitness = pct(55);
+        s.weight = pct(50);
+        s.mood = MAX as u16;
+        s.health = pct(70);
+        s
+    }
+
+    /// `update` over `minutes` must equal `minutes` x `advance(1)` on the full
+    /// state (ruling R21), apart from the clock fields only `update` touches.
+    fn equivalent(name: &str, s0: &GameState, minutes: u32) {
+        let mut fast = s0.clone();
+        fast.update(fast.last_update_tick + minutes * 6);
+        let mut slow = s0.clone();
+        for _ in 0..minutes {
+            advance(&mut slow, 1);
+        }
+        slow.age_ticks = fast.age_ticks;
+        slow.last_update_tick = fast.last_update_tick;
+        assert_eq!(fast, slow, "{name}: update over {minutes} min != stepped");
+    }
+
+    #[test]
+    fn sig_packs_the_zones() {
+        let mut s = calm();
+        let mut seen = std::collections::HashSet::new();
+        for mood in [100, 80, 79, 60, 59, 40, 39, 20, 19, 0] {
+            s.mood = pct(mood);
+            seen.insert(sig(&s));
+        }
+        assert_eq!(seen.len(), 5, "mood zones 80/60/40/20");
+        let mut seen = std::collections::HashSet::new();
+        for health in [0, 1, 24, 25, 29, 30, 32, 33, 44, 45, 49, 50, 60] {
+            let mut s = calm();
+            s.health = pct(health);
+            s.mood = 0;
+            seen.insert(sig(&s));
+        }
+        assert!(seen.len() >= 7, "health zones: {}", seen.len());
+        let (mut a, mut b) = (calm(), calm());
+        a.is_sleeping = true;
+        b.diabetic = true;
+        assert_ne!(sig(&a), sig(&calm()));
+        assert_ne!(sig(&b), sig(&calm()));
+        let mut c = calm();
+        c.health = 65535;
+        assert_ne!(sig(&c), sig(&calm()), "above vs below the ceiling");
+    }
+
+    #[test]
+    fn mood_crossing_60_splits_the_segment() {
+        let mut s = calm();
+        s.fun = 0;
+        s.mood = pct(90);
+        equivalent("fun 0, mood 90", &s, 600);
+    }
+
+    #[test]
+    fn health_zero_at_mood_target_is_exact() {
+        let mut s = calm();
+        s.health = 0;
+        s.mood = mood_target(&s) as u16;
+        equivalent("health 0 at target", &s, 40);
+        equivalent("health 0 at target, long", &s, 600);
+    }
+
+    #[test]
+    fn update_equals_stepping_near_every_line() {
+        let mut cases: Vec<(&str, GameState)> = Vec::new();
+        for (name, mood) in [("mood 60+", 60), ("mood 40+", 40), ("mood 20+", 20), ("mood 80+", 80)] {
+            let mut s = calm();
+            s.fun = 0;
+            s.mood = pct(mood) + 30;
+            cases.push((name, s));
+        }
+        let mut s = calm();
+        s.energy = pct(20);
+        s.health = pct(30) + 40;
+        cases.push(("health 30+ with tired", s));
+        let mut s = calm();
+        s.health = pct(50) + 10;
+        s.fitness = pct(30);
+        cases.push(("health near mood floor", s));
+        let mut s = calm();
+        s.health = pct(65) - 20;
+        s.fitness = pct(30);
+        cases.push(("health just under ceiling", s));
+        let mut s = calm();
+        s.health = pct(80);
+        s.fitness = pct(30);
+        cases.push(("health above ceiling", s));
+        let mut s = calm();
+        s.hydration = 0;
+        s.fullness = 0;
+        s.health = pct(10);
+        s.mood = pct(30);
+        cases.push(("starving", s));
+        for (name, s) in &cases {
+            for minutes in [1, 7, 40, 300, 2000] {
+                equivalent(name, s, minutes);
+            }
+        }
+    }
+}
+
+mod zone_check_fast_target {
+    use bornhack_aegg::game::engine::advance::advance;
+    use bornhack_aegg::game::engine::needs::{MAX, P};
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase};
+
+    #[test]
+    fn target_moving_faster_than_mood_step_stays_exact() {
+        let mut s = GameState::new_egg(1, PetKind(0));
+        s.phase = Phase::Active;
+        s.hatching_countdown = 0;
+        s.is_sleeping = false;
+        let p = |x: i32| (x * P) as u16;
+        // Several needs out of band at once, mood right on its target.
+        s.fullness = p(37);
+        s.hydration = p(40);
+        s.fun = p(20);
+        s.dirt = p(70);
+        s.energy = p(45);
+        s.health = p(45);
+        s.mood = (MAX / 2) as u16;
+        for minutes in [1, 3, 10, 60, 500] {
+            let mut fast = s.clone();
+            fast.update(minutes * 6);
+            let mut slow = s.clone();
+            for _ in 0..minutes {
+                advance(&mut slow, 1);
+            }
+            slow.age_ticks = fast.age_ticks;
+            slow.last_update_tick = fast.last_update_tick;
+            assert_eq!(fast, slow, "{minutes} min");
+        }
+    }
+}
