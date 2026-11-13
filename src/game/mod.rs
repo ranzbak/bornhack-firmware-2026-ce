@@ -147,6 +147,7 @@ impl Toast {
             Toast::Heal => "-sick",
             Toast::Sleep => "-tired",
             Toast::Relax => "-drained",
+            Toast::Wash => "-dirty",
             Toast::Play => "-miserable",
             Toast::Inspired => "+inspired",
             Toast::Hibernate => "hibernating",
@@ -171,7 +172,6 @@ impl Toast {
             Toast::OnlyPets => "Only pets!",
             Toast::MinigameWin => "nice game!",
             // Dynamic — handled in the renderer.
-            Toast::Wash => "-dirty",
             Toast::Reason => "",
         }
     }
@@ -880,23 +880,37 @@ mod battle_anim_tests {
     }
 }
 
-/// Tests that drive the game-global UI state (toasts, sleep-animation floor,
-/// the pet) take this lock so they cannot see each other's changes.
+/// The one lock for every test that touches game-global state (`GAME`, the
+/// toast, the sleep-animation floor, `battle_view`, alerts). Hold the guard
+/// for the whole test; dropping it (also on a failed assert) clears the UI
+/// statics so the next test starts clean.
 #[cfg(test)]
-pub(crate) static UI_STATE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) struct TestState(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
 
-/// Drop the toast and the sleep-animation floor a test left behind.
 #[cfg(test)]
-pub(crate) fn clear_ui_state_for_test() {
-    TOAST.clear();
-    lifecycle::clear_sleep_anim_for_test();
+static TEST_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn lock_test_state() -> TestState {
+    TestState(TEST_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+#[cfg(test)]
+impl Drop for TestState {
+    fn drop(&mut self) {
+        TOAST.clear();
+        DIABETES_ALERT.clear();
+        ALCOHOLISM_ALERT.clear();
+        lifecycle::clear_sleep_anim_for_test();
+        battle_view::reset_for_test();
+    }
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn the_battle_result_card_needs_no_wake_loop() {
-        let _guard = super::UI_STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = super::lock_test_state();
         // The card waits for a button press; the press redraws. Polling it
         // every tick would wake the badge for as long as it is left up.
         super::battle_view::show_result_for_test();

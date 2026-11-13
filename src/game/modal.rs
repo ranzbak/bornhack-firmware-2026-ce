@@ -1174,6 +1174,17 @@ mod tests {
     }
 
     #[test]
+    fn countdowns_are_readable_up_to_three_days() {
+        assert_eq!(cooldown_string(0), None);
+        assert_eq!(cooldown_string(5).as_deref(), Some(" (50s)"));
+        assert_eq!(cooldown_string(59 * 6).as_deref(), Some(" (59m)"));
+        assert_eq!(cooldown_string(2 * 360).as_deref(), Some(" (2h00)"));
+        assert_eq!(cooldown_string(2 * 360 + 30).as_deref(), Some(" (2h05)"));
+        // Rehab: 4320 minutes = 72 h = 25920 ticks (x10 s overflowed u16).
+        assert_eq!(cooldown_string(25920).as_deref(), Some(" (72h00)"));
+    }
+
+    #[test]
     fn rest_menu_offers_sleep_relax_wash_wake() {
         let items = ModalKind::Rest.items();
         for want in [Item::Sleep, Item::Relax, Item::Wash, Item::WakeFromSleep, Item::Cancel] {
@@ -1193,7 +1204,7 @@ mod tests {
 
     #[test]
     fn wash_row_follows_the_engine_refusal() {
-        let _guard = crate::game::UI_STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::game::lock_test_state();
         use crate::game::engine::doses::{Reason, Refusal};
         lifecycle::start_new_game(PetKind(0), false, false);
         lifecycle::with_state(|s| {
@@ -1210,12 +1221,11 @@ mod tests {
             true
         });
         assert!(Item::Wash.available(&lifecycle::cycle().unwrap()));
-        crate::game::clear_ui_state_for_test();
     }
 
     #[test]
     fn a_day_through_the_menu() {
-        let _guard = crate::game::UI_STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::game::lock_test_state();
         lifecycle::start_new_game(PetKind(0), false, false);
         lifecycle::with_state(|s| {
             s.phase = Phase::Active;
@@ -1248,9 +1258,14 @@ mod tests {
         assert!(slept.tired > before.tired);
         ok(Item::WakeFromSleep);
         assert!(!st().is_sleeping);
-        ok(Item::Relax);
-        assert!(st().active_action.is_none());
-        crate::game::clear_ui_state_for_test();
+        let before_relax = st();
+        Item::Relax.activate();
+        super::close();
+        assert_eq!(st().active_action, Some(crate::game::engine::Action::Relax));
+        lifecycle::debug_skip_ticks(30);
+        let after_relax = st();
+        assert!(after_relax.active_action.is_none());
+        assert!(after_relax.tired > before_relax.tired, "relax restores energy");
     }
 
     /// Rows 0 and 2 disabled, like a Play list with Battle and a

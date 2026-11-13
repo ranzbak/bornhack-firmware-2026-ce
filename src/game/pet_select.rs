@@ -280,16 +280,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     /// All tests in this module poke the same process-wide statics
     /// (`SELECTION`/`PHASE`/`ACTIVE`/`MODE`/`CHOSEN_KIND_IDX`, plus, for
     /// the full-flow tests, `lifecycle`'s global `GAME`). `cargo test`
     /// runs test functions on multiple threads by default, so without
-    /// serialization these would race each other. Every test takes this
-    /// lock first and resets the statics it touches before returning it.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
+    /// serialization these would race each other. Every test takes the shared
+    /// game-wide test lock first and resets the statics it touches.
     /// Stand in for the boot-time `PETS.CFG` load: with no built-in pets the
     /// roster is empty until something installs one, and every test below
     /// needs at least two rows to move a cursor over.  `install` is
@@ -312,7 +309,7 @@ mod tests {
     /// every scrollable menu on the badge.
     #[test]
     fn cursor_wraps_at_both_ends() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = crate::game::lock_test_state();
         install_test_roster();
         let max = PetKind::roster().len() as u8;
         assert!(max > 0, "roster must be installed for the cursor to move");
@@ -334,7 +331,7 @@ mod tests {
     /// than walking the pet roster.
     #[test]
     fn money_phase_cursor_wraps_over_three_options() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = crate::game::lock_test_state();
         PHASE.store(PHASE_MONEY, Ordering::Relaxed);
         SELECTION.store(0, Ordering::Relaxed);
 
@@ -365,7 +362,7 @@ mod tests {
     /// mode before the game actually starts.
     #[test]
     fn confirm_advances_pet_phase_to_money_phase() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = crate::game::lock_test_state();
         install_test_roster();
         open_new_game();
         assert_eq!(PHASE.load(Ordering::Relaxed), PHASE_PET);
@@ -386,7 +383,7 @@ mod tests {
     /// game should start with money mode off (and hard mode off).
     #[test]
     fn full_flow_money_off_starts_game_without_money() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = crate::game::lock_test_state();
         install_test_roster();
         open_new_game();
         confirm(); // pet phase (SELECTION=0) -> money phase
@@ -410,7 +407,7 @@ mod tests {
     /// starting 100 HAX.
     #[test]
     fn full_flow_money_on_starts_game_with_money() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = crate::game::lock_test_state();
         install_test_roster();
         open_new_game();
         confirm(); // pet phase (SELECTION=0) -> money phase, default SELECTION=0
@@ -433,7 +430,7 @@ mod tests {
     /// phase: the game should start with money mode on AND hard mode on.
     #[test]
     fn full_flow_hard_mode_starts_hard() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = crate::game::lock_test_state();
         install_test_roster();
         open_new_game();
         confirm(); // pet phase (SELECTION=0) -> money phase

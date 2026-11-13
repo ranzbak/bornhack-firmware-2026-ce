@@ -68,6 +68,13 @@ pub fn wants_full_refresh() -> bool {
     ACTIVE.load(Ordering::Relaxed) && STATE.load(Ordering::Relaxed) == STATE_RESULT
 }
 
+/// Test hook: back to the idle, closed state.
+#[cfg(test)]
+pub(crate) fn reset_for_test() {
+    ACTIVE.store(false, Ordering::Relaxed);
+    STATE.store(STATE_PICKING, Ordering::Relaxed);
+}
+
 /// Test hook: show the result card as a finished battle would.
 #[cfg(test)]
 pub(crate) fn show_result_for_test() {
