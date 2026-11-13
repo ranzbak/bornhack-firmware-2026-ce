@@ -2036,6 +2036,39 @@ mod tests {
                 assert_eq!(reason.is_none(), menu, "{name}: {r:?} reason {reason:?}");
             }
         }
+        // Money one under, on and one over every price, in both modes.
+        let edges = [
+            0u32, 1, 2, 9, 10, 11, 14, 15, 16, 19, 20, 21, 44, 45, 46, 74, 75, 76,
+        ];
+        for hard in [false, true] {
+            for money in edges {
+                for injured in [false, true] {
+                    let stats = menu_pet(true, hard, move |s| {
+                        s.money = money;
+                        s.fullness = pct(20);
+                        s.hydration = pct(20);
+                        s.diabetic = true;
+                        s.dependent = true;
+                        if injured {
+                            s.injured_min = 600;
+                        }
+                    });
+                    for r in ALL_REMEDIES {
+                        let mut reason = None;
+                        lifecycle::with_state(|s| {
+                            reason = s.remedy_reason(r);
+                            false
+                        });
+                        let menu = rows_of(r).iter().any(|i| i.available(&stats));
+                        assert_eq!(
+                            reason.is_none(),
+                            menu,
+                            "hard={hard} money={money} injured={injured}: {r:?} reason {reason:?}"
+                        );
+                    }
+                }
+            }
+        }
         lifecycle::set_state_for_test(None);
     }
 

@@ -102,15 +102,17 @@ before they spiral!
 
 The Stats menu reads View stats, Hint, Diary, Rolled stats, Friends, Cancel.
 "View stats" is a two-page view (page 2 covers the conditions, Fit and
-Booze). "Hint": your pet tells you its most pressing need and what helps
-(for example "I'm hungry! / Please feed me."). It never asks for something
-the game would refuse: when the action is not possible it says why ("but
-busy", "but wait 2h00", "but can't afford"). Any button returns to the
-menu. "Friends" lists the
-pets your badge has met over the mesh (see
+Booze). "Friends" lists the pets your badge has met over the mesh (see
 [Friends & the SHDW Channel](#friends--the-shdw-channel) below). Your
 lifetime Battle win/loss record shows in the title of the Battle picker
 (see [Battles](#battles) below).
+
+"Hint": your pet tells you its most pressing need and what helps (for
+example "I'm hungry! / Please feed me."). It never asks for something the
+game would refuse: when the action is not possible it says why ("but busy",
+"but wait 2h00", "but can't afford"). It also works for an egg ("I'm
+hatching!") and while hibernating ("Brrr, frozen! / Defrost me!"). Any
+button returns to the menu.
 
 **Permanent conditions.** Diabetes (from sustained overweight) and
 dependence (from sustained heavy drinking) do not wear off on their own.

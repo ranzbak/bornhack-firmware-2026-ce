@@ -215,6 +215,15 @@ impl Word {
         )
     }
 
+    /// Whether `info_word` can return this word: what the line says when no
+    /// penalty term is large enough to be named.
+    pub fn is_info(self) -> bool {
+        matches!(
+            self,
+            Word::Asleep | Word::Sore | Word::Tipsy | Word::WellRested | Word::Content
+        )
+    }
+
     pub fn text(self) -> &'static str {
         match self {
             Word::Peckish => "peckish",

@@ -4637,11 +4637,11 @@ mod hint {
     use bornhack_aegg::game::engine::hint::{
         Ask, Hint, Remedy, Subject, hint, otherwise, remedies, subject_line,
     };
-    use bornhack_aegg::game::engine::needs::P;
+    use bornhack_aegg::game::engine::needs::{self, MAX, P};
     use bornhack_aegg::game::engine::status::{Condition, Word, conditions};
     use bornhack_aegg::game::engine::thresholds::HATCHING_TICKS;
     use bornhack_aegg::game::engine::{
-        Action, DrinkKind, FoodKind, GameState, PetKind, Phase, doses,
+        Action, DrinkKind, FoodKind, GameState, MiniGame, PetKind, Phase, doses,
     };
 
     const POPOVER_COLS: usize = 18;
@@ -4665,6 +4665,11 @@ mod hint {
         s.debug_poke(DebugPoke::Comfort).unwrap();
         s
     }
+
+    /// Each price (1, 10, 15, 20, 45, 75) one under, on and one over.
+    const MONEY_EDGES: [u32; 18] = [
+        0, 1, 2, 9, 10, 11, 14, 15, 16, 19, 20, 21, 44, 45, 46, 74, 75, 76,
+    ];
 
     const POKES: [DebugPoke; 15] = [
         DebugPoke::Hungry,
@@ -4767,7 +4772,9 @@ mod hint {
     fn states() -> Vec<(String, GameState)> {
         let mut out: Vec<(String, GameState)> = Vec::new();
         for hard in [false, true] {
-            for money in [None, Some(0), Some(5), Some(1000)] {
+            let mut moneys = vec![None, Some(1000)];
+            moneys.extend(MONEY_EDGES.iter().map(|&m| Some(m)));
+            for money in moneys {
                 let mut base = comfy();
                 base.hard_mode = hard;
                 if let Some(m) = money {
@@ -4817,6 +4824,50 @@ mod hint {
                 let mut s = base.clone();
                 s.hibernating = true;
                 out.push((format!("{tag} hibernating"), s));
+                let shaped: [(&str, fn(&mut GameState)); 12] = [
+                    ("sore", |s| s.strain = pct(60)),
+                    ("wired", |s| s.fun = (needs::fun_hi() + 8 * P).min(MAX) as u16),
+                    ("poorly", |s| s.health = pct(5)),
+                    ("underweight", |s| s.weight = pct(5)),
+                    ("in rehab", |s| {
+                        s.dependent = true;
+                        s.rehab_min = 3000;
+                    }),
+                    ("leaving", |s| s.phase = Phase::Leaving),
+                    ("injured fat", |s| {
+                        s.injured_min = 600;
+                        s.weight = pct(95);
+                    }),
+                    ("injured unfit", |s| {
+                        s.injured_min = 600;
+                        s.fitness = pct(5);
+                    }),
+                    ("running feed", |s| {
+                        s.active_action = Some(Action::Feed);
+                        s.active_food = Some(FoodKind::Pizza);
+                        s.action_ticks_remaining = 30;
+                        s.fullness = pct(20);
+                    }),
+                    ("running drink", |s| {
+                        s.active_action = Some(Action::Drink);
+                        s.active_drink = Some(DrinkKind::Water);
+                        s.action_ticks_remaining = 30;
+                        s.hydration = pct(20);
+                    }),
+                    ("drunk full of water", |s| {
+                        s.booze = pct(60);
+                        s.hydration = pct(86);
+                    }),
+                    ("dependent untreated", |s| {
+                        s.dependent = true;
+                        s.rehab_min = 0;
+                    }),
+                ];
+                for (what, f) in shaped {
+                    let mut s = base.clone();
+                    f(&mut s);
+                    out.push((format!("{tag} {what}"), s));
+                }
             }
         }
         out.push(("egg".into(), GameState::new_egg(7, PetKind(0))));
@@ -4843,10 +4894,93 @@ mod hint {
                 Ask::Say(_) => assert!(remedies(h.subject).is_empty(), "{name}"),
             }
         }
-        // The state list is wide enough to reach most remedies.
-        for r in [Remedy::Feed, Remedy::Water, Remedy::Sleep, Remedy::Game, Remedy::Wash] {
+        // The state list is wide enough to ask for every remedy.
+        for r in ALL_REMEDIES {
             assert!(asked.contains(&r), "{r:?} never suggested");
         }
+    }
+
+    /// Run the real starter for what the pet asks, on a clone: it must start
+    /// and charge exactly the table price (nothing when money is off).
+    #[test]
+    fn what_the_pet_asks_the_starter_accepts() {
+        for (name, s) in states() {
+            let Ask::Do(r) = hint(&s).ask else { continue };
+            let mut c = s.clone();
+            let cheapest = *FoodKind::ALL
+                .iter()
+                .min_by_key(|&&f| doses::price(Action::Feed, Some(f), None, s.hard_mode))
+                .unwrap();
+            let (started, price) = match r {
+                Remedy::Feed => (
+                    c.feed(cheapest),
+                    doses::price(Action::Feed, Some(cheapest), None, s.hard_mode),
+                ),
+                Remedy::Water => (
+                    c.drink(DrinkKind::Water),
+                    doses::price(Action::Drink, None, Some(DrinkKind::Water), s.hard_mode),
+                ),
+                Remedy::Sleep => (c.sleep(), None),
+                Remedy::Play => (c.play(), doses::price(Action::Play, None, None, s.hard_mode)),
+                Remedy::Game => (
+                    MiniGame::ALL.iter().any(|&g| s.game_refusal(Some(g)).is_none()),
+                    None,
+                ),
+                Remedy::Relax => (c.relax(), None),
+                Remedy::Wash => (c.wash(), None),
+                Remedy::Exercise => (c.exercise(), None),
+                Remedy::Medicine => (c.heal(), doses::price(Action::Heal, None, None, s.hard_mode)),
+                Remedy::Insulin => (
+                    c.medicate(),
+                    doses::price(Action::Medicate, None, None, s.hard_mode),
+                ),
+                Remedy::Rehab => (c.rehab(), doses::price(Action::Rehab, None, None, s.hard_mode)),
+                Remedy::Defrost => (c.wake_from_hibernation(), None),
+            };
+            assert!(started, "{name}: the starter refused {r:?}");
+            let charged = if s.money_enabled { price.unwrap_or(0) } else { 0 };
+            assert_eq!(s.money - c.money, charged, "{name}: {r:?} charge");
+        }
+    }
+
+    #[test]
+    fn worn_out_speaks_over_info_words_only_while_awake() {
+        let mut s = comfy();
+        s.deprived = true;
+        s.is_sleeping = true;
+        assert_eq!(hint(&s).subject, Subject::Word(Word::Asleep));
+        assert_eq!(lines(&s), ("Zzz...".into(), "Let me sleep.".into()));
+        // Awake, it beats every info word.
+        let cases: [(&str, fn(&mut GameState)); 4] = [
+            ("sore", |s| s.strain = pct(60)),
+            ("tipsy", |s| s.booze = pct(20)),
+            ("well rested", |s| s.rested_min = 100),
+            ("content", |_| {}),
+        ];
+        for (what, f) in cases {
+            let mut s = comfy();
+            f(&mut s);
+            s.deprived = true;
+            assert_eq!(hint(&s).subject, Subject::WornOut, "{what}");
+        }
+        // A real penalty word still comes first.
+        let mut s = comfy();
+        s.deprived = true;
+        s.fullness = pct(20);
+        assert_eq!(hint(&s).subject, Subject::Word(Word::Hungry));
+    }
+
+    #[test]
+    fn sloppy_and_wasted_may_sleep_it_off() {
+        for w in [Word::Sloppy, Word::Wasted] {
+            assert_eq!(remedies(Subject::Word(w)), [Remedy::Water, Remedy::Sleep], "{w:?}");
+        }
+        // Too full of water for more: sleep is the way out, not "not thirsty".
+        let mut s = comfy();
+        s.booze = pct(60);
+        s.hydration = pct(86);
+        assert_eq!(hint(&s).subject, Subject::Word(Word::Sloppy));
+        assert_eq!(hint(&s).ask, Ask::Do(Remedy::Sleep));
     }
 
     #[test]

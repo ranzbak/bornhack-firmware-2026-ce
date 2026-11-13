@@ -2,7 +2,7 @@
 //!
 //! One table, derived from the status line: the subject is the line's first
 //! word (danger first), with the egg, a gone pet and hibernation in front and
-//! "worn out" ahead of a mere info word. The ask is the first remedy the
+//! "worn out" ahead of an info word while awake. The ask is the first remedy the
 //! engine would accept ([`GameState::remedy_reason`]), so the pet never asks
 //! for something the menu would refuse; when every remedy is refused it says
 //! why instead.
@@ -113,8 +113,9 @@ pub fn remedies(subject: Subject) -> &'static [Remedy] {
         Subject::Word(w) => match w {
             Word::Peckish | Word::Hungry | Word::Starving | Word::Underweight => &[Feed],
             Word::Thirsty | Word::Parched => &[Water],
-            // Water lowers booze.
-            Word::Sloppy | Word::Wasted => &[Water],
+            // Water lowers booze; so does sleep (and it is open when the pet
+            // is too full of water to take more).
+            Word::Sloppy | Word::Wasted => &[Water, Sleep],
             Word::Sleepy | Word::Exhausted => &[Sleep],
             Word::Bored => &[Play, Game],
             Word::Wired | Word::Sore => &[Relax],
@@ -201,8 +202,8 @@ fn subject(s: &GameState) -> Subject {
         Phase::Active | Phase::Leaving => {}
     }
     let first = status_line(s).first;
-    let only_info = matches!(first, Word::Asleep | Word::WellRested | Word::Content);
-    if s.deprived && only_info {
+    // Worn out speaks over any info word, except an asleep pet's "Zzz...".
+    if s.deprived && !s.is_sleeping && first.is_info() {
         Subject::WornOut
     } else {
         Subject::Word(first)
