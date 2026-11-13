@@ -117,6 +117,14 @@ mod tests {
     }
 
     #[test]
+    fn ages_are_right_aligned_in_three_columns() {
+        let e = Entry { cause: Cause::Groggy, at_min: 0 };
+        assert_eq!(entry_lines(&e, 5).0.as_str(), " 5m groggy");
+        assert_eq!(entry_lines(&e, 0).0.as_str(), "now groggy");
+        assert_eq!(entry_lines(&e, 59).0.as_str(), "59m groggy");
+    }
+
+    #[test]
     fn diary_lines_fit_the_screen() {
         for cause in Cause::all() {
             let e = Entry {

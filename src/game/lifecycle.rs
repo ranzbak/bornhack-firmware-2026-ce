@@ -403,7 +403,9 @@ fn log_causes(state: &mut GameState) {
     for cause in causes.iter() {
         log_cause(*cause, at_min);
     }
-    if let Some(first) = causes.iter().next() {
+    if let Some(first) = causes.iter().next()
+        && !super::full_screen_view_up()
+    {
         super::show_cause(*first);
     }
 }

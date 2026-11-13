@@ -39,8 +39,11 @@ pub fn close() {
     ACTIVE.store(false, Ordering::Relaxed);
 }
 
-/// Show the other page (wraps).
+/// Show the other page (wraps); a diary of one page has no other page.
 pub fn flip() {
+    if super::lifecycle::diary().len() <= PER_PAGE {
+        return;
+    }
     let next = (PAGE.load(Ordering::Relaxed) + 1) % PAGES;
     PAGE.store(next, Ordering::Relaxed);
 }
@@ -118,6 +121,46 @@ mod tests {
         assert_eq!(super::page(), 0, "reopening starts at page 1");
         super::close();
         crate::game::lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn a_short_diary_has_no_second_page() {
+        use crate::game::engine::causes::Cause;
+        let _guard = crate::game::lock_test_state();
+        crate::game::lifecycle::start_new_game(PetKind(0), false, false);
+        for _ in 0..3 {
+            crate::game::lifecycle::log_cause(Cause::Groggy, 0);
+        }
+        super::open();
+        super::flip();
+        assert_eq!(super::page(), 0);
+        crate::game::lifecycle::log_cause(Cause::Groggy, 0);
+        super::flip();
+        assert_eq!(super::page(), 1);
+        super::close();
+    }
+
+    #[test]
+    fn a_cause_behind_a_full_screen_view_is_logged_but_not_toasted() {
+        use crate::game::engine::causes::Cause;
+        let _guard = crate::game::lock_test_state();
+        crate::game::lifecycle::start_new_game(PetKind(0), false, false);
+        crate::game::lifecycle::with_state(|s| {
+            s.phase = Phase::Active;
+            s.causes.push(Cause::FoodComa);
+            true
+        });
+        super::open();
+        assert!(crate::game::full_screen_view_up());
+        let before = crate::game::next_ui_deadline_tick();
+        crate::game::lifecycle::cycle();
+        assert_eq!(crate::game::lifecycle::diary().len(), 1);
+        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::None);
+        let now = crate::game::lifecycle::now_tick();
+        assert!(crate::game::next_ui_deadline_tick() > now + 1);
+        assert_eq!(crate::game::next_ui_deadline_tick(), before);
+        super::close();
+        assert!(!crate::game::full_screen_view_up());
     }
 
     #[test]

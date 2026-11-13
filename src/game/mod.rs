@@ -433,6 +433,23 @@ pub fn show_reason(why: engine::doses::Reason) {
     show_toast(Toast::Reason);
 }
 
+/// True while a full-screen view replaces the main game screen. Only the
+/// main screen clears a toast, so none may be raised behind one.
+pub fn full_screen_view_up() -> bool {
+    diary_view::is_active()
+        || traits_view::is_active()
+        || health_view::is_active()
+        || friends_view::is_active()
+        || battle_view::is_active()
+        || realm_view::is_active()
+        || pet_select::is_active()
+        || tictactoe::is_active()
+        || lightsout::is_active()
+        || blackhole::is_active()
+        || nim::is_active()
+        || bornjeweled::is_active()
+}
+
 /// Tell the player what went wrong and why (silent: no buzz).
 pub fn show_cause(c: engine::causes::Cause) {
     CAUSE_CODE.store(c.pack(), Ordering::Relaxed);
@@ -486,7 +503,8 @@ fn live_deadline(drawn: u32, now: u32) -> u32 {
 /// view is refreshed at least once per idle frame (display pacing, not
 /// engine polling). A Gone pet shows no live view.
 pub fn live_view_open() -> bool {
-    (modal::live_modal_view_open() || diary_view::is_active()) && lifecycle::display_anim() != engine::DisplayAnim::Gone
+    (modal::live_modal_view_open() || diary_view::is_active())
+        && lifecycle::display_anim() != engine::DisplayAnim::Gone
 }
 
 /// Next tick the frame loop must wake for UI-only timed state, whatever the
@@ -543,7 +561,6 @@ const STATUS_CHAR_W: i32 = 7;
 /// Status line: extra white backing width, split evenly left and right.
 const STATUS_BACKING_PAD: i32 = 4;
 
-/// First display row of the pet/sprite area.
 /// The HAX balance: right-aligned, top baseline, ending at x = 150.
 const HAX_POS: Point = Point::new(150, 33);
 /// The toast's first line, top-left. It shares the HAX row, so the cause
@@ -551,6 +568,7 @@ const HAX_POS: Point = Point::new(150, 33);
 const TOAST_POS: Point = Point::new(2, SEP_TOP + 2);
 /// Distance from a toast's first line to its second.
 const TOAST_LINE_DY: i32 = 13;
+/// First display row of the pet/sprite area.
 pub const PET_AREA_TOP: usize = SEP_TOP as usize + 1;
 
 // ── Public entry point
