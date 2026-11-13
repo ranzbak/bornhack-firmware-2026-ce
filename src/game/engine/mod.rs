@@ -871,14 +871,15 @@ impl GameState {
     /// First warning cause of a night slept until rested: the pet is put to
     /// bed through the real starter on a clone, driven by the engine's own
     /// next-wake computation (event boundaries, no fixed step) until it wakes
-    /// itself or is rested (`oversleep_min > 0`), then woken the way the
+    /// itself or is rested (`oversleep_min` grew past its bedtime value), then woken the way the
     /// player's Wake-up does. Oversleeping itself is Wake-up's business
     /// (`preview_wake`), so `Groggy` shows only for a pet that is not tired
     /// (energy at bedtime at or above `ENERGY_HI_EDGE_PCT`) and has no
-    /// station rest (`no_groggy`). `None` when sleep is refused or the night
-    /// is fine. The run is bounded in time, not in steps: a pet always wakes
-    /// itself once it has slept `SELF_WAKE_MIN`, so the clone never runs past
-    /// that many minutes after bedtime.
+    /// station rest (`no_groggy`). `None` when sleep is refused, the night
+    /// is fine, or the pet does not survive it (Gone). The run is bounded in
+    /// time, not in steps: a living pet always wakes itself once it has slept
+    /// `SELF_WAKE_MIN`, so the clone never runs past that many minutes after
+    /// bedtime.
     pub fn preview_sleep(&self) -> Option<causes::Cause> {
         if self.sleep_refusal().is_some() {
             return None;
@@ -891,11 +892,25 @@ impl GameState {
         let night_end = c
             .last_update_tick
             .saturating_add((SELF_WAKE_MIN() as u32 + 1) * TICKS_PER_MINUTE);
-        while c.is_sleeping && c.oversleep_min == 0 && c.last_update_tick < night_end {
+        // Rested means the oversleep grew past what carried into bedtime, so a
+        // re-nap with a carried oversleep is still simulated.
+        let carried = self.oversleep_min;
+        while c.is_sleeping
+            && c.phase != Phase::Gone
+            && c.oversleep_min <= carried
+            && c.last_update_tick < night_end
+        {
             let next = c.next_wake_tick().max(c.last_update_tick + 1).min(night_end);
             c.update(next);
         }
-        debug_assert!(!c.is_sleeping || c.oversleep_min > 0, "preview night ended asleep and unrested");
+        if c.phase == Phase::Gone {
+            // The pet does not survive the night: nothing to forecast.
+            return None;
+        }
+        debug_assert!(
+            !c.is_sleeping || c.oversleep_min > carried,
+            "preview night ended asleep and unrested"
+        );
         let _ = doses::wake_up(&mut c);
         let warned = c.causes.iter().copied().find(|cause| cause.is_warning());
         let rested_at_bedtime = self.energy as i32 >= needs::ENERGY_HI_EDGE_PCT as i32 * needs::P;

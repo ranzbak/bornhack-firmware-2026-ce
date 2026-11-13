@@ -4374,6 +4374,38 @@ mod causes {
     }
 
     #[test]
+    fn preview_sleep_of_a_pet_that_dies_in_the_night_is_none() {
+        let mut s = pet();
+        s.phase = bornhack_aegg::game::engine::Phase::Leaving;
+        s.health = 0;
+        s.fullness = 0;
+        s.leaving_min = 720 * 2 - 120;
+        let before = s.clone();
+        assert_eq!(s.preview_sleep(), None);
+        assert_eq!(s, before);
+    }
+
+    #[test]
+    fn preview_sleep_simulates_a_renap_with_carried_oversleep() {
+        let mut s = pet();
+        s.energy = pct(30);
+        s.booze = pct(50);
+        s.oversleep_min = 10;
+        // The real re-nap: sleep until the oversleep grows past the carry.
+        let mut c = s.clone();
+        c.take_causes();
+        assert!(c.sleep());
+        while c.is_sleeping && c.oversleep_min <= s.oversleep_min {
+            let next = c.next_wake_tick().max(c.last_update_tick + 1);
+            c.update(next);
+        }
+        let _ = c.wake();
+        let want = first_warning(&c.take_causes());
+        assert!(want.is_some(), "the real re-nap warns: {want:?}");
+        assert_eq!(s.preview_sleep(), want);
+    }
+
+    #[test]
     fn a_station_rest_night_is_not_a_bad_night() {
         let mut s = pet();
         s.station_rest();
