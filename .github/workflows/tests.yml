@@ -66,3 +66,7 @@ jobs:
           key: firmware
       - run: cargo install flip-link --locked
       - run: cargo build --bin embassy --no-default-features --features embassy-game --target thumbv7em-none-eabihf
+      - run: cargo build --bin embassy --no-default-features --features embassy-1680-full --target thumbv7em-none-eabihf
+      - run: rustup component add llvm-tools
+      - run: cargo build --release --bin embassy --no-default-features --features embassy-1680-full --target thumbv7em-none-eabihf
+      - run: python3 scripts/flash_size.py target/thumbv7em-none-eabihf/release/embassy --limit-kib 960

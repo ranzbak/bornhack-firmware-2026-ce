@@ -893,8 +893,7 @@ impl GameState {
 
 /// Everything on screen the engine can change by itself.
 type Visible = (
-    status::StatusWord,
-    bool,
+    status::StatusLine,
     DisplayAnim,
     bool,
     Phase,
@@ -963,10 +962,8 @@ impl GameState {
     }
 
     fn visible(&self) -> Visible {
-        let (word, danger) = status::status(self);
         (
-            word,
-            danger,
+            status::status_line(self),
             self.display_anim(),
             self.is_sleeping,
             self.phase,
@@ -976,7 +973,7 @@ impl GameState {
     }
 
     /// The tick at which the engine must run next: when something the
-    /// player can see (status word and danger, animation, sleep, phase,
+    /// player can see (the [`status::StatusLine`] with its danger flag, animation, sleep, phase,
     /// action) first changes, but never later than `MAX_SLEEP_TICKS`.
     ///
     /// The bisection is exact only while these hold, so keep them true:

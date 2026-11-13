@@ -2146,7 +2146,7 @@ mod cooldown_countdown {
 
 mod status_wake {
     use bornhack_aegg::game::engine::needs::P;
-    use bornhack_aegg::game::engine::status::{StatusWord, status};
+    use bornhack_aegg::game::engine::status::{StatusLine, StatusWord, status, status_line};
     use bornhack_aegg::game::engine::thresholds::{HATCHING_TICKS, MAX_SLEEP_TICKS};
     use bornhack_aegg::game::engine::{
         Action, DisplayAnim, GameState, MiniGame, PetKind, Phase, doses,
@@ -2167,21 +2167,9 @@ mod status_wake {
     }
 
     /// What a wake-up would have to show: any change here is a visible event.
-    fn obs(
-        s: &GameState,
-    ) -> (
-        StatusWord,
-        bool,
-        DisplayAnim,
-        bool,
-        Phase,
-        Option<Action>,
-        u8,
-    ) {
-        let (w, d) = status(s);
+    fn obs(s: &GameState) -> (StatusLine, DisplayAnim, bool, Phase, Option<Action>, u8) {
         (
-            w,
-            d,
+            status_line(s),
             s.display_anim(),
             s.is_sleeping,
             s.phase,
@@ -2254,7 +2242,65 @@ mod status_wake {
         s.booze = pct(50);
         s.dependence_min = 4 * 1199;
         v.push(("dependence onset", s));
+        let mut s = pet();
+        s.fullness = pct(26);
+        v.push(("peckish turns hungry", s));
+        let mut s = pet();
+        s.fullness = pct(40);
+        s.fun = pct(20);
+        v.push(("second word appears", s));
+        let mut s = pet();
+        s.booze = pct(11);
+        v.push(("tipsy fades", s));
+        let mut s = pet();
+        s.strain = pct(42);
+        v.push(("sore fades", s));
+        let mut s = pet();
+        s.rested_min = 30;
+        v.push(("well rested ends", s));
+        let mut s = pet();
+        s.diabetic = true;
+        s.insulin_min = 20;
+        v.push(("prompt appears", s));
         v
+    }
+
+    /// Seeded LCG states: the wake must land on the first minute the whole
+    /// view differs, including a top-two word order flip from rounding.
+    #[test]
+    fn wake_is_exact_on_random_states() {
+        const SEED: u64 = 1;
+        const STATES: usize = 2000;
+        const MAX_PCT: u64 = 100;
+        const MAX_TIMER_MIN: u64 = 200;
+        const LOOKAHEAD_MIN: u32 = 120;
+        let mut rng = SEED;
+        let mut next = |bound: u64| {
+            rng = rng
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (rng >> 33) % (bound + 1)
+        };
+        for i in 0..STATES {
+            let mut s = pet();
+            s.fullness = pct(next(MAX_PCT) as i32);
+            s.hydration = pct(next(MAX_PCT) as i32);
+            s.energy = pct(next(MAX_PCT) as i32);
+            s.fun = pct(next(MAX_PCT) as i32);
+            s.dirt = pct(next(MAX_PCT) as i32);
+            s.booze = pct(next(MAX_PCT) as i32);
+            s.strain = pct(next(MAX_PCT) as i32);
+            s.fitness = pct(next(MAX_PCT) as i32);
+            s.weight = pct(next(MAX_PCT) as i32);
+            s.is_sleeping = next(1) == 1;
+            s.rested_min = next(MAX_TIMER_MIN) as u16;
+            s.hangover_min = next(MAX_TIMER_MIN) as u16;
+            s.injured_min = next(MAX_TIMER_MIN) as u16;
+            s.insulin_min = next(MAX_TIMER_MIN) as u16;
+            let t0 = s.last_update_tick;
+            let expect = first_change_min(&s).map_or(t0 + LOOKAHEAD_MIN * 6, |m| t0 + m * 6);
+            assert_eq!(s.next_wake_tick(), expect, "random state {i} (seed {SEED})");
+        }
     }
 
     #[test]
@@ -3640,5 +3686,175 @@ mod sleep_while_busy {
         assert!(s.stats(0).can_sleep);
         assert!(s.sleep());
         assert!(s.sleep_refusal().is_some());
+    }
+}
+
+mod status_line {
+    use bornhack_aegg::game::engine::needs::P;
+    use bornhack_aegg::game::engine::status::{
+        Condition, Conditions, StatusLine, Word, conditions, status_line,
+    };
+    use bornhack_aegg::game::engine::thresholds::HATCHING_TICKS;
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase};
+
+    const LINE_COLS: usize = 21;
+    const CONDITION_COLS: usize = 18;
+    const CONDITION_WORD_COLS: usize = 11;
+
+    fn pct(v: i32) -> u16 {
+        (v * P) as u16
+    }
+
+    fn pet() -> GameState {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(HATCHING_TICKS() as u32);
+        assert_eq!(s.phase, Phase::Active);
+        s.is_sleeping = false;
+        s.tick_rem = 0;
+        s.money_enabled = false;
+        s
+    }
+
+    #[test]
+    fn graded_words_follow_the_fixed_edges() {
+        let cases: [(&str, fn(&mut GameState, u16), i32, Word, bool); 11] = [
+            ("fullness", |s, v| s.fullness = v, 30, Word::Peckish, false),
+            ("fullness", |s, v| s.fullness = v, 20, Word::Hungry, false),
+            ("fullness", |s, v| s.fullness = v, 14, Word::Starving, true),
+            (
+                "hydration",
+                |s, v| s.hydration = v,
+                30,
+                Word::Thirsty,
+                false,
+            ),
+            ("hydration", |s, v| s.hydration = v, 14, Word::Parched, true),
+            ("energy", |s, v| s.energy = v, 30, Word::Sleepy, false),
+            ("energy", |s, v| s.energy = v, 9, Word::Exhausted, false),
+            ("dirt", |s, v| s.dirt = v, 65, Word::Grubby, false),
+            ("dirt", |s, v| s.dirt = v, 86, Word::Filthy, true),
+            ("booze", |s, v| s.booze = v, 45, Word::Sloppy, false),
+            ("booze", |s, v| s.booze = v, 71, Word::Wasted, true),
+        ];
+        for (name, set, p, word, danger) in cases {
+            let mut s = pet();
+            set(&mut s, pct(p));
+            let l = status_line(&s);
+            assert_eq!((l.first, l.danger), (word, danger), "{name} {p}");
+        }
+    }
+
+    #[test]
+    fn two_large_terms_show_two_words() {
+        let mut s = pet();
+        s.fullness = pct(20);
+        s.fun = pct(10);
+        let l = status_line(&s);
+        assert_eq!((l.first, l.second), (Word::Hungry, Some(Word::Bored)));
+    }
+
+    #[test]
+    fn a_small_second_term_is_dropped() {
+        let mut s = pet();
+        s.fullness = pct(20);
+        s.fun = pct(30);
+        assert_eq!(status_line(&s).second, None);
+    }
+
+    #[test]
+    fn the_danger_word_comes_first() {
+        let mut s = pet();
+        s.dirt = pct(86);
+        s.fun = 0;
+        let l = status_line(&s);
+        assert_eq!(
+            (l.first, l.second, l.danger),
+            (Word::Filthy, Some(Word::Bored), true)
+        );
+    }
+
+    #[test]
+    fn prompts_take_the_second_slot() {
+        let mut s = pet();
+        s.diabetic = true;
+        s.insulin_min = 0;
+        s.fullness = pct(20);
+        let l = status_line(&s);
+        assert_eq!((l.first, l.second), (Word::Hungry, Some(Word::NoInsulin)));
+
+        let mut s = pet();
+        s.dependent = true;
+        s.rehab_min = 0;
+        let l = status_line(&s);
+        assert_eq!((l.first, l.second), (Word::NeedsRehab, None));
+    }
+
+    #[test]
+    fn info_words_when_nothing_is_out() {
+        let mut s = pet();
+        s.is_sleeping = true;
+        assert_eq!(status_line(&s).first, Word::Asleep);
+        let mut s = pet();
+        s.strain = pct(45);
+        assert_eq!(status_line(&s).first, Word::Sore);
+        let mut s = pet();
+        s.booze = pct(12);
+        assert_eq!(status_line(&s).first, Word::Tipsy);
+        let mut s = pet();
+        s.rested_min = 30;
+        assert_eq!(status_line(&s).first, Word::WellRested);
+        assert_eq!(status_line(&pet()).first, Word::Content);
+    }
+
+    #[test]
+    fn status_text_fits_two_lines_of_21() {
+        for a in Word::ALL {
+            for second in core::iter::once(None).chain(Word::ALL.into_iter().map(Some)) {
+                let t = StatusLine {
+                    first: a,
+                    second,
+                    danger: false,
+                }
+                .text();
+                let lines: Vec<&str> = t.split('\n').collect();
+                assert!(lines.len() <= 2, "{t:?}");
+                assert!(lines.iter().all(|l| l.len() <= LINE_COLS), "{t:?}");
+            }
+        }
+        let t = StatusLine {
+            first: Word::Hungry,
+            second: Some(Word::Bored),
+            danger: false,
+        }
+        .text();
+        assert_eq!(t.as_str(), "hungry, bored");
+    }
+
+    #[test]
+    fn condition_line_names_the_two_most_pressing() {
+        let set = |cs: &[Condition]| Conditions(cs.iter().fold(0u16, |b, &c| b | 1 << c as u8));
+        let two = set(&[Condition::Injured, Condition::HungOver]);
+        assert_eq!(two.line(CONDITION_COLS).as_str(), "injured, hung over");
+        let three = set(&[Condition::Injured, Condition::HungOver, Condition::Diabetic]);
+        assert_eq!(three.line(CONDITION_COLS).as_str(), "injured +2");
+        assert_eq!(Conditions::default().line(CONDITION_COLS).as_str(), "");
+        for c in Condition::ALL {
+            assert!(c.text().len() <= CONDITION_WORD_COLS, "{}", c.text());
+        }
+    }
+
+    #[test]
+    fn conditions_follow_the_state() {
+        let mut s = pet();
+        s.strain = pct(45);
+        assert!(conditions(&s).has(Condition::Sore));
+        s.injured_min = 5;
+        let c = conditions(&s);
+        assert!(c.has(Condition::Injured) && !c.has(Condition::Sore));
+        let mut s = pet();
+        s.dependent = true;
+        s.rehab_min = 10;
+        let c = conditions(&s);
+        assert!(c.has(Condition::InRehab) && !c.has(Condition::Dependent));
     }
 }

@@ -19,6 +19,14 @@ pub const NEED_HI_EDGE_PCT: u8 = 85;
 pub const DIRT_DANGER_PCT: u8 = NEED_HI_EDGE_PCT;
 /// Health below this is in danger.
 pub const HEALTH_DANGER_PCT: u8 = 30;
+/// Fullness below this is hungry (a fixed edge, graded from peckish).
+pub const HUNGRY_PCT: u8 = 25;
+/// Energy below this is exhausted (a fixed edge, graded from sleepy).
+pub const EXHAUSTED_PCT: u8 = 10;
+/// Booze at or above this shows as tipsy (a fixed edge).
+pub const TIPSY_PCT: u8 = 10;
+/// Strain above this is sore (a fixed edge).
+pub const SORE_PCT: u8 = 40;
 /// A content pet at or above this mood shows as happy.
 pub const HAPPY_MOOD_PCT: u8 = 80;
 
@@ -98,18 +106,18 @@ const fn merge(fixed: &[u8], tuned: &[u8]) -> ([u8; MAX_EDGES], u8) {
 pub const fn build_edges(t: &Thresholds) -> EdgeTable {
     let rows = [
         merge(
-            &[NEED_DANGER_LO_PCT, 25, NEED_HI_EDGE_PCT, 95],
+            &[NEED_DANGER_LO_PCT, HUNGRY_PCT, NEED_HI_EDGE_PCT, 95],
             &[t.FULL_LO_PCT, t.FULL_HI_PCT],
         ),
         merge(
             &[NEED_DANGER_LO_PCT, 25, NEED_HI_EDGE_PCT, 90, 95],
             &[t.WATER_LO_PCT, t.WATER_HI_PCT],
         ),
-        merge(&[10, 50, 70, 85], &[t.ENERGY_LO_PCT]),
+        merge(&[EXHAUSTED_PCT, 50, 70, 85], &[t.ENERGY_LO_PCT]),
         merge(&[40], &[t.FUN_LO_PCT, t.FUN_HI_PCT]),
         merge(&[25, DIRT_DANGER_PCT], &[t.DIRT_HI_PCT]),
-        merge(&[10, 15, 30], &[t.BOOZE_HI_PCT, t.BOOZE_DANGER_PCT]),
-        merge(&[15, 40], &[t.STRAIN_INJ_PCT]),
+        merge(&[TIPSY_PCT, 15, 30], &[t.BOOZE_HI_PCT, t.BOOZE_DANGER_PCT]),
+        merge(&[15, SORE_PCT], &[t.STRAIN_INJ_PCT]),
         merge(&[25, 50, 60, 61, 70], &[t.FIT_LO_PCT]),
         merge(&[20, 65, 80], &[t.WEIGHT_LO_PCT, t.WEIGHT_HI_PCT]),
     ];
