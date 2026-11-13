@@ -10,6 +10,7 @@
 //! This lets the CPU sleep for minutes or hours when nothing interesting
 //! is about to happen, saving significant battery on the badge.
 
+pub mod advance;
 pub mod anim_files;
 pub mod drink;
 pub mod food;

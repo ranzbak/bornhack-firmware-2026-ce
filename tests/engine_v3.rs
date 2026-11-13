@@ -283,3 +283,371 @@ mod health_terms {
         assert_eq!(c.REC_GOOD_PM, k.REC_GOOD_PM);
     }
 }
+
+mod advance_wake {
+    use bornhack_aegg::game::engine::advance::{advance, wake};
+    use bornhack_aegg::game::engine::needs::{MAX, P};
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase};
+
+    fn pct(p: i32) -> u16 {
+        (p * P) as u16
+    }
+
+    /// Awake pet with every need mid-band, full mood and full health room.
+    fn calm() -> GameState {
+        let mut s = GameState::new_egg(1, PetKind(0));
+        s.phase = Phase::Active;
+        s.is_sleeping = false;
+        s.fullness = pct(60);
+        s.hydration = pct(65);
+        s.energy = pct(80);
+        s.fun = pct(50);
+        s.dirt = pct(20);
+        s.booze = pct(30);
+        s.strain = pct(20);
+        s.fitness = pct(55);
+        s.weight = pct(50);
+        s.mood = MAX as u16;
+        s.health = pct(70);
+        s
+    }
+
+    #[test]
+    fn one_minute_awake_moves_needs_by_their_rates() {
+        let mut s = calm();
+        advance(&mut s, 1);
+        assert_eq!(s.fullness, pct(60) - 54);
+        assert_eq!(s.hydration, pct(65) - 45 * 110 / 100, "booze 30 %: thirst x1.1");
+        assert_eq!(s.energy, pct(80) - 36);
+        assert_eq!(s.fun, pct(50) - 40);
+        assert_eq!(s.dirt, pct(20) + 8);
+        assert_eq!(s.booze, pct(30) - 36);
+        assert_eq!(s.strain, pct(20) - 80);
+        assert_eq!(s.fitness, pct(55) - 4);
+        assert_eq!(s.weight, pct(50) - 1);
+        assert_eq!(s.mood, MAX as u16);
+        assert_eq!(s.health, pct(70) + 14, "below the ceiling and in a good mood");
+        assert_eq!(s.care_awake_min, 1);
+        assert_eq!(s.care_good_min, 1);
+    }
+
+    #[test]
+    fn sleep_from_30_percent_is_full_in_about_six_and_a_half_hours() {
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.energy = pct(30);
+        s.booze = 0;
+        let mut minutes = 0;
+        while s.energy < MAX as u16 && minutes < 600 {
+            advance(&mut s, 1);
+            minutes += 1;
+        }
+        assert!((375..=390).contains(&minutes), "took {minutes} minutes");
+        assert_eq!(s.energy, MAX as u16);
+        assert_eq!(s.sleep_min, minutes as u16);
+        assert!(s.good_sleep_min >= 300, "good sleep {}", s.good_sleep_min);
+        assert!(s.fun >= pct(40), "fun floor while asleep");
+    }
+
+    #[test]
+    fn oversleep_past_four_hours_makes_groggy() {
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.energy = MAX as u16;
+        advance(&mut s, 250);
+        assert_eq!(s.oversleep_min, 250);
+        assert!(s.is_sleeping);
+        let (energy, fit) = (s.energy, s.fitness);
+        wake(&mut s, true);
+        assert!(!s.is_sleeping);
+        assert_eq!(s.groggy_min, 120);
+        assert_eq!(s.energy, energy - pct(10));
+        assert_eq!(s.fitness, fit - pct(2));
+        assert_eq!(s.mood, MAX as u16, "full energy: not grumpy");
+    }
+
+    #[test]
+    fn grumpy_when_woken_tired_and_no_groggy_clears_oversleep() {
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.energy = pct(40);
+        s.mood = pct(80);
+        wake(&mut s, true);
+        assert_eq!(s.mood, pct(70));
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.energy = pct(40);
+        s.mood = pct(80);
+        wake(&mut s, false);
+        assert_eq!(s.mood, pct(80), "self-wake is not grumpy");
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.oversleep_min = 250;
+        s.no_groggy = true;
+        wake(&mut s, false);
+        assert_eq!((s.oversleep_min, s.groggy_min, s.no_groggy), (0, 0, false));
+    }
+
+    #[test]
+    fn well_rested_after_five_good_hours() {
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.good_sleep_min = 299;
+        wake(&mut s, false);
+        assert_eq!(s.rested_min, 0);
+        s.is_sleeping = true;
+        s.good_sleep_min = 300;
+        wake(&mut s, false);
+        assert_eq!(s.rested_min, 960);
+    }
+
+    fn night_wake(s: &mut GameState, minutes: u16) {
+        s.is_sleeping = true;
+        s.night = true;
+        s.sleep_min = minutes;
+        wake(s, false);
+    }
+
+    #[test]
+    fn three_short_nights_deprive_two_good_nights_clear() {
+        let mut s = calm();
+        for n in 1..=3u8 {
+            night_wake(&mut s, 300);
+            assert_eq!(s.short_nights, n);
+            assert_eq!(s.deprived, n == 3);
+        }
+        night_wake(&mut s, 365); // enough to break the streak, not a good night
+        assert_eq!((s.short_nights, s.good_nights, s.deprived), (0, 0, true));
+        night_wake(&mut s, 400);
+        assert_eq!((s.good_nights, s.deprived), (1, true));
+        night_wake(&mut s, 400);
+        assert_eq!((s.good_nights, s.deprived), (2, false));
+        // a short night resets the good streak
+        night_wake(&mut s, 300);
+        assert_eq!((s.short_nights, s.good_nights), (1, 0));
+    }
+
+    #[test]
+    fn naps_do_not_count_as_nights() {
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.night = false;
+        s.sleep_min = 60;
+        wake(&mut s, false);
+        assert_eq!((s.short_nights, s.good_nights), (0, 0));
+    }
+
+    #[test]
+    fn hangover_starts_after_peak_and_lasts_480() {
+        let mut s = calm();
+        s.booze = pct(60);
+        advance(&mut s, 1);
+        assert!(s.booze_peak);
+        assert_eq!(s.hangover_min, 0);
+        s.booze = pct(15) + 20; // falls under 15 % this minute
+        advance(&mut s, 1);
+        assert!(!s.booze_peak);
+        assert_eq!(s.hangover_min, 479, "480 set, one minute elapsed");
+        advance(&mut s, 400);
+        assert_eq!(s.hangover_min, 79);
+        advance(&mut s, 79);
+        assert_eq!(s.hangover_min, 0);
+    }
+
+    #[test]
+    fn hangover_runs_down_twice_as_fast_asleep() {
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.hangover_min = 100;
+        advance(&mut s, 10);
+        assert_eq!(s.hangover_min, 80);
+    }
+
+    #[test]
+    fn dependence_builds_while_drunk_and_decays_when_sober() {
+        let mut s = calm();
+        s.booze = pct(90);
+        s.dependence_min = 1198;
+        advance(&mut s, 1);
+        assert!(!s.dependent);
+        advance(&mut s, 1);
+        assert_eq!(s.dependence_min, 1200);
+        assert!(s.dependent);
+
+        let mut s = calm();
+        s.booze = 0;
+        s.dependence_min = 100;
+        advance(&mut s, 40);
+        assert_eq!(s.dependence_min, 90, "minus dt / 4 while sober");
+    }
+
+    #[test]
+    fn recovering_pet_relapses_after_400() {
+        let mut s = calm();
+        s.booze = pct(90);
+        s.recovering_min = 5000;
+        s.dependence_min = 399;
+        advance(&mut s, 1);
+        assert!(s.dependent);
+    }
+
+    #[test]
+    fn rehab_course_cures_and_marks_recovering() {
+        let mut s = calm();
+        s.dependent = true;
+        s.dependence_min = 700;
+        s.rehab_min = 3;
+        advance(&mut s, 2);
+        assert!(s.dependent);
+        assert_eq!(s.rehab_min, 1);
+        advance(&mut s, 1);
+        assert_eq!(s.rehab_min, 0);
+        assert!(!s.dependent);
+        assert_eq!(s.dependence_min, 0);
+        assert_eq!(s.recovering_min, 10080);
+        advance(&mut s, 1);
+        assert_eq!(s.recovering_min, 10079);
+    }
+
+    #[test]
+    fn diabetes_sets_in_after_4320_heavy_minutes() {
+        let mut s = calm();
+        s.weight = pct(85);
+        s.diabetes_min = 4319;
+        advance(&mut s, 1);
+        assert!(!s.diabetic || s.diabetes_min >= 4320);
+        assert_eq!(s.diabetes_min, 4320);
+        assert!(s.diabetic);
+        assert_eq!(s.reversal_min, 0);
+    }
+
+    #[test]
+    fn diabetes_reverses_after_10080_lean_fit_minutes() {
+        let mut s = calm();
+        s.diabetic = true;
+        s.weight = pct(60);
+        s.fitness = pct(65);
+        s.reversal_min = 10078;
+        advance(&mut s, 1);
+        assert!(s.diabetic);
+        assert_eq!(s.reversal_min, 10079);
+        advance(&mut s, 1);
+        assert!(!s.diabetic);
+        assert_eq!(s.diabetes_min, 0);
+
+        let mut s = calm();
+        s.diabetic = true;
+        s.weight = pct(60);
+        s.fitness = pct(58);
+        s.reversal_min = 100;
+        advance(&mut s, 5);
+        assert_eq!(s.reversal_min, 100, "not fit enough: no progress");
+    }
+
+    #[test]
+    fn collapse_at_zero_energy_sleeps_and_costs_health() {
+        let mut s = calm();
+        s.energy = 20;
+        s.health = pct(60);
+        s.sleep_min = 500;
+        advance(&mut s, 1);
+        assert!(s.is_sleeping);
+        assert!(s.night);
+        assert_eq!(s.sleep_min, 0);
+        assert_eq!(s.good_sleep_min, 0);
+        assert!(s.health <= pct(57) + 20, "lost 3 points, health {}", s.health);
+
+        let mut s = calm();
+        s.energy = 20;
+        s.health = pct(30);
+        advance(&mut s, 1);
+        assert!(s.is_sleeping);
+        assert!(s.health >= pct(30), "no collapse loss at or under 33 %");
+    }
+
+    #[test]
+    fn long_sleep_wakes_itself_at_720() {
+        let mut s = calm();
+        s.is_sleeping = true;
+        s.energy = pct(5);
+        s.booze = 0;
+        s.night = true;
+        advance(&mut s, 719);
+        assert!(s.is_sleeping);
+        advance(&mut s, 1);
+        assert!(!s.is_sleeping);
+    }
+
+    #[test]
+    fn zero_health_counts_toward_leaving_and_recovers_at_half_speed() {
+        let mut s = calm();
+        s.health = 0;
+        s.fullness = 0;
+        s.hydration = 0;
+        advance(&mut s, 100);
+        assert_eq!(s.health, 0);
+        assert_eq!(s.leaving_min, 100);
+        assert_eq!(s.phase, Phase::Leaving);
+        advance(&mut s, 619);
+        assert_eq!(s.phase, Phase::Leaving);
+        advance(&mut s, 1);
+        assert_eq!(s.phase, Phase::Gone);
+        assert!(s.realm_pending);
+
+        let mut s = calm();
+        s.leaving_min = 100;
+        s.phase = Phase::Leaving;
+        advance(&mut s, 40);
+        assert_eq!(s.leaving_min, 80);
+        advance(&mut s, 160);
+        assert_eq!(s.leaving_min, 0);
+        assert_eq!(s.phase, Phase::Active);
+    }
+}
+
+mod carried_from_task_4 {
+    use bornhack_aegg::game::bornpets_cfg::apply_overrides;
+    use bornhack_aegg::game::engine::needs::P;
+    use bornhack_aegg::game::engine::regime::health_recovery;
+    use bornhack_aegg::game::engine::thresholds::Thresholds;
+    use bornhack_aegg::game::engine::{GameState, PetKind};
+
+    #[test]
+    fn health_recovery_tiers_and_deprived_halving() {
+        let mut s = GameState::new_egg(1, PetKind(0));
+        for (mood, want) in [(100, 14), (60, 14), (59, 5), (40, 5), (39, 0), (0, 0)] {
+            s.mood = (mood * P) as u16;
+            assert_eq!(health_recovery(&s), want, "mood {mood}");
+        }
+        s.deprived = true;
+        for (mood, want) in [(70, 7), (50, 2), (10, 0)] {
+            s.mood = (mood * P) as u16;
+            assert_eq!(health_recovery(&s), want, "deprived, mood {mood}");
+        }
+    }
+
+    #[test]
+    fn ceiling_settings_cannot_exceed_one_hundred_percent() {
+        let mut t = Thresholds::CLASSIC;
+        let cfg = b"CEILING_STEP0_PCT=500\nCEILING_STEP1_PCT=500\nCEILING_STEP2_PCT=500\nCEILING_STEP3_PCT=500\nCEILING_DIABETIC_PCT=500\n";
+        assert_eq!(apply_overrides(&mut t, cfg), 5);
+        assert_eq!(
+            [t.CEILING_STEP0_PCT, t.CEILING_STEP1_PCT, t.CEILING_STEP2_PCT, t.CEILING_STEP3_PCT, t.CEILING_DIABETIC_PCT],
+            [100; 5]
+        );
+    }
+
+    #[test]
+    fn ceiling_is_clamped_to_the_level_range() {
+        use bornhack_aegg::game::engine::needs::MAX;
+        use bornhack_aegg::game::engine::regime::ceiling_with;
+        let mut t = Thresholds::CLASSIC;
+        t.CEILING_STEP3_PCT = 500;
+        assert_eq!(ceiling_with(&t, 80 * P, false), MAX);
+        let mut t = Thresholds::CLASSIC;
+        t.CEILING_STEP0_PCT = 10;
+        t.CEILING_DIABETIC_PCT = 50;
+        assert_eq!(ceiling_with(&t, 0, true), 0);
+        assert_eq!(ceiling_with(&Thresholds::CLASSIC, 0, true), 35 * P);
+    }
+}

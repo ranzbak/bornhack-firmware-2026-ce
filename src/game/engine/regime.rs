@@ -190,18 +190,23 @@ pub fn mood_target(s: &GameState) -> i32 {
 /// Highest health the pet can recover to: steps up with fitness; an
 /// untreated diabetic loses a fixed slice.
 pub fn health_ceiling(s: &GameState) -> i32 {
-    let fit = s.fitness as i32;
-    let step = if fit < lvl(t::CEILING_FIT_STEP1_PCT()) {
-        t::CEILING_STEP0_PCT()
-    } else if fit < lvl(t::CEILING_FIT_STEP2_PCT()) {
-        t::CEILING_STEP1_PCT()
-    } else if fit < lvl(t::CEILING_FIT_STEP3_PCT()) {
-        t::CEILING_STEP2_PCT()
+    ceiling_with(t::cfg(), s.fitness as i32, s.diabetic && s.insulin_min == 0)
+}
+
+/// [`health_ceiling`] for explicit settings and inputs, clamped to the level
+/// range so a config value can never push it past `MAX` or below zero.
+pub fn ceiling_with(th: &t::Thresholds, fit: i32, untreated_diabetic: bool) -> i32 {
+    let step = if fit < lvl(th.CEILING_FIT_STEP1_PCT) {
+        th.CEILING_STEP0_PCT
+    } else if fit < lvl(th.CEILING_FIT_STEP2_PCT) {
+        th.CEILING_STEP1_PCT
+    } else if fit < lvl(th.CEILING_FIT_STEP3_PCT) {
+        th.CEILING_STEP2_PCT
     } else {
-        t::CEILING_STEP3_PCT()
+        th.CEILING_STEP3_PCT
     } as i32;
-    let cut = if s.diabetic && s.insulin_min == 0 { t::CEILING_DIABETIC_PCT() as i32 } else { 0 };
-    (step - cut) * P
+    let cut = if untreated_diabetic { th.CEILING_DIABETIC_PCT as i32 } else { 0 };
+    ((step - cut) * P).clamp(0, MAX)
 }
 
 /// Health lost per engine minute.
