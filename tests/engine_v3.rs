@@ -3021,6 +3021,9 @@ fn template_parses_to_classic_with_no_edits() {
     // Start from Casual so every row is a real edit.
     let mut values = Thresholds::CASUAL;
     apply_overrides(&mut values, uncommented.as_bytes());
+    // The template documents the badge's hatching time; the simulator build
+    // shortens its own presets, so compare everything else.
+    values.HATCHING_TICKS = Thresholds::CLASSIC.HATCHING_TICKS;
     assert_eq!(values, Thresholds::CLASSIC);
 }
 
@@ -3033,6 +3036,20 @@ fn template_first_line_and_casual_notes() {
         "# BornPets v3 balance. Uncomment a line to change it. The old firmware keeps using BORNPETS.CFG."
     );
     assert!(template.contains("# MOOD_STEP=") && template.contains("# Casual "));
+}
+
+#[test]
+fn template_documents_the_badge_hatching_time_not_the_simulators() {
+    // The simulator shortens hatching to 1 tick; the file is for the badge.
+    let template = cfg_template();
+    assert!(
+        template.contains("# HATCHING_TICKS=6   # Casual 6\n"),
+        "{}",
+        template
+            .lines()
+            .find(|l| l.contains("HATCHING_TICKS"))
+            .unwrap()
+    );
 }
 
 #[test]

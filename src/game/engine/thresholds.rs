@@ -1008,7 +1008,9 @@ pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
         t.MINIGAME_COOLDOWN = clamp_u16(v)
     }),
     ("HATCHING_TICKS", |t, v| t.HATCHING_TICKS = clamp_u16(v)),
-    ("MAX_SLEEP_TICKS", |t, v| t.MAX_SLEEP_TICKS = v.clamp(30, 1440)),
+    ("MAX_SLEEP_TICKS", |t, v| {
+        t.MAX_SLEEP_TICKS = v.clamp(30, 1440)
+    }),
     ("FULL_LO_PCT", |t, v| t.FULL_LO_PCT = clamp_pct(v)),
     ("FULL_HI_PCT", |t, v| t.FULL_HI_PCT = clamp_pct(v)),
     ("WATER_LO_PCT", |t, v| t.WATER_LO_PCT = clamp_pct(v)),
@@ -1023,226 +1025,582 @@ pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
     ("FIT_LO_PCT", |t, v| t.FIT_LO_PCT = clamp_pct(v)),
     ("WEIGHT_LO_PCT", |t, v| t.WEIGHT_LO_PCT = clamp_pct(v)),
     ("WEIGHT_HI_PCT", |t, v| t.WEIGHT_HI_PCT = clamp_pct(v)),
-    ("FULL_DRAIN_AWAKE_PM", |t, v| t.FULL_DRAIN_AWAKE_PM = clamp_u16(v)),
-    ("WATER_DRAIN_AWAKE_PM", |t, v| t.WATER_DRAIN_AWAKE_PM = clamp_u16(v)),
-    ("ENERGY_DRAIN_AWAKE_PM", |t, v| t.ENERGY_DRAIN_AWAKE_PM = clamp_u16(v)),
+    ("FULL_DRAIN_AWAKE_PM", |t, v| {
+        t.FULL_DRAIN_AWAKE_PM = clamp_u16(v)
+    }),
+    ("WATER_DRAIN_AWAKE_PM", |t, v| {
+        t.WATER_DRAIN_AWAKE_PM = clamp_u16(v)
+    }),
+    ("ENERGY_DRAIN_AWAKE_PM", |t, v| {
+        t.ENERGY_DRAIN_AWAKE_PM = clamp_u16(v)
+    }),
     ("FUN_DRAIN_PM", |t, v| t.FUN_DRAIN_PM = clamp_u16(v)),
-    ("FULL_DRAIN_ASLEEP_PM", |t, v| t.FULL_DRAIN_ASLEEP_PM = clamp_u16(v)),
-    ("WATER_DRAIN_ASLEEP_PM", |t, v| t.WATER_DRAIN_ASLEEP_PM = clamp_u16(v)),
-    ("ENERGY_GAIN_ASLEEP_PM", |t, v| t.ENERGY_GAIN_ASLEEP_PM = clamp_u16(v)),
-    ("SLEEP_FUN_FLOOR_PCT", |t, v| t.SLEEP_FUN_FLOOR_PCT = clamp_pct(v)),
+    ("FULL_DRAIN_ASLEEP_PM", |t, v| {
+        t.FULL_DRAIN_ASLEEP_PM = clamp_u16(v)
+    }),
+    ("WATER_DRAIN_ASLEEP_PM", |t, v| {
+        t.WATER_DRAIN_ASLEEP_PM = clamp_u16(v)
+    }),
+    ("ENERGY_GAIN_ASLEEP_PM", |t, v| {
+        t.ENERGY_GAIN_ASLEEP_PM = clamp_u16(v)
+    }),
+    ("SLEEP_FUN_FLOOR_PCT", |t, v| {
+        t.SLEEP_FUN_FLOOR_PCT = clamp_pct(v)
+    }),
     ("DIRT_GAIN_PM", |t, v| t.DIRT_GAIN_PM = clamp_u16(v)),
     ("BOOZE_CLEAR_PM", |t, v| t.BOOZE_CLEAR_PM = clamp_u16(v)),
-    ("BOOZE_CLEAR_SLOW_PCT", |t, v| t.BOOZE_CLEAR_SLOW_PCT = clamp_u16(v)),
+    ("BOOZE_CLEAR_SLOW_PCT", |t, v| {
+        t.BOOZE_CLEAR_SLOW_PCT = clamp_mult(v)
+    }),
     ("STRAIN_CLEAR_PM", |t, v| t.STRAIN_CLEAR_PM = clamp_u16(v)),
-    ("FIT_DECAY_HIGH_PM", |t, v| t.FIT_DECAY_HIGH_PM = clamp_u16(v)),
+    ("FIT_DECAY_HIGH_PM", |t, v| {
+        t.FIT_DECAY_HIGH_PM = clamp_u16(v)
+    }),
     ("FIT_DECAY_MID_PM", |t, v| t.FIT_DECAY_MID_PM = clamp_u16(v)),
     ("FIT_DECAY_LOW_PM", |t, v| t.FIT_DECAY_LOW_PM = clamp_u16(v)),
-    ("FIT_DECAY_HIGH_ABOVE_PCT", |t, v| t.FIT_DECAY_HIGH_ABOVE_PCT = clamp_pct(v)),
-    ("FIT_DECAY_MID_ABOVE_PCT", |t, v| t.FIT_DECAY_MID_ABOVE_PCT = clamp_pct(v)),
-    ("FIT_DECAY_HEAVY_PCT", |t, v| t.FIT_DECAY_HEAVY_PCT = clamp_u16(v)),
-    ("WEIGHT_PULL_HEAVY_PM", |t, v| t.WEIGHT_PULL_HEAVY_PM = clamp_u16(v)),
+    ("FIT_DECAY_HIGH_ABOVE_PCT", |t, v| {
+        t.FIT_DECAY_HIGH_ABOVE_PCT = clamp_pct(v)
+    }),
+    ("FIT_DECAY_MID_ABOVE_PCT", |t, v| {
+        t.FIT_DECAY_MID_ABOVE_PCT = clamp_pct(v)
+    }),
+    ("FIT_DECAY_HEAVY_PCT", |t, v| {
+        t.FIT_DECAY_HEAVY_PCT = clamp_mult(v)
+    }),
+    ("WEIGHT_PULL_HEAVY_PM", |t, v| {
+        t.WEIGHT_PULL_HEAVY_PM = clamp_u16(v)
+    }),
     ("WEIGHT_PULL_PM", |t, v| t.WEIGHT_PULL_PM = clamp_u16(v)),
     ("WEIGHT_BELLY_PM", |t, v| t.WEIGHT_BELLY_PM = clamp_u16(v)),
-    ("ENERGY_MULT_UNFIT_PCT", |t, v| t.ENERGY_MULT_UNFIT_PCT = clamp_u16(v)),
-    ("ENERGY_MULT_FIT_PCT", |t, v| t.ENERGY_MULT_FIT_PCT = clamp_u16(v)),
-    ("ENERGY_FIT_GOOD_PCT", |t, v| t.ENERGY_FIT_GOOD_PCT = clamp_pct(v)),
-    ("ENERGY_MULT_DRUNK_PCT", |t, v| t.ENERGY_MULT_DRUNK_PCT = clamp_u16(v)),
-    ("ENERGY_MULT_WIRED_PCT", |t, v| t.ENERGY_MULT_WIRED_PCT = clamp_u16(v)),
-    ("ENERGY_MULT_HANGOVER_PCT", |t, v| t.ENERGY_MULT_HANGOVER_PCT = clamp_u16(v)),
-    ("ENERGY_MULT_WEIGHT_PCT", |t, v| t.ENERGY_MULT_WEIGHT_PCT = clamp_u16(v)),
-    ("ENERGY_CAP_DEPRIVED_PCT", |t, v| t.ENERGY_CAP_DEPRIVED_PCT = clamp_pct(v)),
-    ("THIRST_MULT_BASE_PCT", |t, v| t.THIRST_MULT_BASE_PCT = clamp_u16(v)),
-    ("THIRST_MULT_LOW_PCT", |t, v| t.THIRST_MULT_LOW_PCT = clamp_u16(v)),
-    ("THIRST_MULT_MID_PCT", |t, v| t.THIRST_MULT_MID_PCT = clamp_u16(v)),
-    ("THIRST_MULT_HIGH_PCT", |t, v| t.THIRST_MULT_HIGH_PCT = clamp_u16(v)),
-    ("THIRST_BOOZE_LOW_PCT", |t, v| t.THIRST_BOOZE_LOW_PCT = clamp_pct(v)),
-    ("THIRST_BOOZE_MID_PCT", |t, v| t.THIRST_BOOZE_MID_PCT = clamp_pct(v)),
-    ("THIRST_BOOZE_HIGH_PCT", |t, v| t.THIRST_BOOZE_HIGH_PCT = clamp_pct(v)),
-    ("SLEEP_QUALITY_POOR_PM", |t, v| t.SLEEP_QUALITY_POOR_PM = clamp_u16(v)),
-    ("SLEEP_QUALITY_GOOD_PM", |t, v| t.SLEEP_QUALITY_GOOD_PM = clamp_u16(v)),
-    ("UNSETTLED_BOOZE_PCT", |t, v| t.UNSETTLED_BOOZE_PCT = clamp_pct(v)),
-    ("UNSETTLED_FULL_LO_PCT", |t, v| t.UNSETTLED_FULL_LO_PCT = clamp_pct(v)),
-    ("UNSETTLED_FULL_HI_PCT", |t, v| t.UNSETTLED_FULL_HI_PCT = clamp_pct(v)),
-    ("UNSETTLED_WATER_LO_PCT", |t, v| t.UNSETTLED_WATER_LO_PCT = clamp_pct(v)),
-    ("UNSETTLED_WATER_HI_PCT", |t, v| t.UNSETTLED_WATER_HI_PCT = clamp_pct(v)),
-    ("MOOD_STEP", |t, v| t.MOOD_STEP = clamp_u16(v)),
-    ("MOOD_PEN_INJURED_PCT", |t, v| t.MOOD_PEN_INJURED_PCT = clamp_u16(v)),
-    ("MOOD_PEN_GROGGY_PCT", |t, v| t.MOOD_PEN_GROGGY_PCT = clamp_u16(v)),
-    ("MOOD_PEN_HANGOVER_PCT", |t, v| t.MOOD_PEN_HANGOVER_PCT = clamp_u16(v)),
-    ("MOOD_PEN_DEPRIVED_PCT", |t, v| t.MOOD_PEN_DEPRIVED_PCT = clamp_u16(v)),
-    ("MOOD_PEN_REHAB_PCT", |t, v| t.MOOD_PEN_REHAB_PCT = clamp_u16(v)),
-    ("MOOD_PEN_CRAVING_PCT", |t, v| t.MOOD_PEN_CRAVING_PCT = clamp_u16(v)),
-    ("MOOD_CRAVING_BOOZE_PCT", |t, v| t.MOOD_CRAVING_BOOZE_PCT = clamp_pct(v)),
-    ("MOOD_HEALTH_FLOOR_PCT", |t, v| t.MOOD_HEALTH_FLOOR_PCT = clamp_pct(v)),
-    ("CEILING_FIT_STEP1_PCT", |t, v| t.CEILING_FIT_STEP1_PCT = clamp_pct(v)),
-    ("CEILING_FIT_STEP2_PCT", |t, v| t.CEILING_FIT_STEP2_PCT = clamp_pct(v)),
-    ("CEILING_FIT_STEP3_PCT", |t, v| t.CEILING_FIT_STEP3_PCT = clamp_pct(v)),
-    ("CEILING_STEP0_PCT", |t, v| t.CEILING_STEP0_PCT = v.min(100) as u16),
-    ("CEILING_STEP1_PCT", |t, v| t.CEILING_STEP1_PCT = v.min(100) as u16),
-    ("CEILING_STEP2_PCT", |t, v| t.CEILING_STEP2_PCT = v.min(100) as u16),
-    ("CEILING_STEP3_PCT", |t, v| t.CEILING_STEP3_PCT = v.min(100) as u16),
-    ("CEILING_DIABETIC_PCT", |t, v| t.CEILING_DIABETIC_PCT = v.min(100) as u16),
+    ("ENERGY_MULT_UNFIT_PCT", |t, v| {
+        t.ENERGY_MULT_UNFIT_PCT = clamp_mult(v)
+    }),
+    ("ENERGY_MULT_FIT_PCT", |t, v| {
+        t.ENERGY_MULT_FIT_PCT = clamp_mult(v)
+    }),
+    ("ENERGY_FIT_GOOD_PCT", |t, v| {
+        t.ENERGY_FIT_GOOD_PCT = clamp_pct(v)
+    }),
+    ("ENERGY_MULT_DRUNK_PCT", |t, v| {
+        t.ENERGY_MULT_DRUNK_PCT = clamp_mult(v)
+    }),
+    ("ENERGY_MULT_WIRED_PCT", |t, v| {
+        t.ENERGY_MULT_WIRED_PCT = clamp_mult(v)
+    }),
+    ("ENERGY_MULT_HANGOVER_PCT", |t, v| {
+        t.ENERGY_MULT_HANGOVER_PCT = clamp_mult(v)
+    }),
+    ("ENERGY_MULT_WEIGHT_PCT", |t, v| {
+        t.ENERGY_MULT_WEIGHT_PCT = clamp_mult(v)
+    }),
+    ("ENERGY_CAP_DEPRIVED_PCT", |t, v| {
+        t.ENERGY_CAP_DEPRIVED_PCT = clamp_pct(v)
+    }),
+    ("THIRST_MULT_BASE_PCT", |t, v| {
+        t.THIRST_MULT_BASE_PCT = clamp_mult(v)
+    }),
+    ("THIRST_MULT_LOW_PCT", |t, v| {
+        t.THIRST_MULT_LOW_PCT = clamp_mult(v)
+    }),
+    ("THIRST_MULT_MID_PCT", |t, v| {
+        t.THIRST_MULT_MID_PCT = clamp_mult(v)
+    }),
+    ("THIRST_MULT_HIGH_PCT", |t, v| {
+        t.THIRST_MULT_HIGH_PCT = clamp_mult(v)
+    }),
+    ("THIRST_BOOZE_LOW_PCT", |t, v| {
+        t.THIRST_BOOZE_LOW_PCT = clamp_pct(v)
+    }),
+    ("THIRST_BOOZE_MID_PCT", |t, v| {
+        t.THIRST_BOOZE_MID_PCT = clamp_pct(v)
+    }),
+    ("THIRST_BOOZE_HIGH_PCT", |t, v| {
+        t.THIRST_BOOZE_HIGH_PCT = clamp_pct(v)
+    }),
+    ("SLEEP_QUALITY_POOR_PM", |t, v| {
+        t.SLEEP_QUALITY_POOR_PM = clamp_u16(v)
+    }),
+    ("SLEEP_QUALITY_GOOD_PM", |t, v| {
+        t.SLEEP_QUALITY_GOOD_PM = clamp_u16(v)
+    }),
+    ("UNSETTLED_BOOZE_PCT", |t, v| {
+        t.UNSETTLED_BOOZE_PCT = clamp_pct(v)
+    }),
+    ("UNSETTLED_FULL_LO_PCT", |t, v| {
+        t.UNSETTLED_FULL_LO_PCT = clamp_pct(v)
+    }),
+    ("UNSETTLED_FULL_HI_PCT", |t, v| {
+        t.UNSETTLED_FULL_HI_PCT = clamp_pct(v)
+    }),
+    ("UNSETTLED_WATER_LO_PCT", |t, v| {
+        t.UNSETTLED_WATER_LO_PCT = clamp_pct(v)
+    }),
+    ("UNSETTLED_WATER_HI_PCT", |t, v| {
+        t.UNSETTLED_WATER_HI_PCT = clamp_pct(v)
+    }),
+    ("MOOD_STEP", |t, v| t.MOOD_STEP = clamp_u16(v).max(1)),
+    ("MOOD_PEN_INJURED_PCT", |t, v| {
+        t.MOOD_PEN_INJURED_PCT = clamp_mult(v)
+    }),
+    ("MOOD_PEN_GROGGY_PCT", |t, v| {
+        t.MOOD_PEN_GROGGY_PCT = clamp_mult(v)
+    }),
+    ("MOOD_PEN_HANGOVER_PCT", |t, v| {
+        t.MOOD_PEN_HANGOVER_PCT = clamp_mult(v)
+    }),
+    ("MOOD_PEN_DEPRIVED_PCT", |t, v| {
+        t.MOOD_PEN_DEPRIVED_PCT = clamp_mult(v)
+    }),
+    ("MOOD_PEN_REHAB_PCT", |t, v| {
+        t.MOOD_PEN_REHAB_PCT = clamp_mult(v)
+    }),
+    ("MOOD_PEN_CRAVING_PCT", |t, v| {
+        t.MOOD_PEN_CRAVING_PCT = clamp_mult(v)
+    }),
+    ("MOOD_CRAVING_BOOZE_PCT", |t, v| {
+        t.MOOD_CRAVING_BOOZE_PCT = clamp_pct(v)
+    }),
+    ("MOOD_HEALTH_FLOOR_PCT", |t, v| {
+        t.MOOD_HEALTH_FLOOR_PCT = clamp_pct(v)
+    }),
+    ("CEILING_FIT_STEP1_PCT", |t, v| {
+        t.CEILING_FIT_STEP1_PCT = clamp_pct(v)
+    }),
+    ("CEILING_FIT_STEP2_PCT", |t, v| {
+        t.CEILING_FIT_STEP2_PCT = clamp_pct(v)
+    }),
+    ("CEILING_FIT_STEP3_PCT", |t, v| {
+        t.CEILING_FIT_STEP3_PCT = clamp_pct(v)
+    }),
+    ("CEILING_STEP0_PCT", |t, v| {
+        t.CEILING_STEP0_PCT = v.min(100) as u16
+    }),
+    ("CEILING_STEP1_PCT", |t, v| {
+        t.CEILING_STEP1_PCT = v.min(100) as u16
+    }),
+    ("CEILING_STEP2_PCT", |t, v| {
+        t.CEILING_STEP2_PCT = v.min(100) as u16
+    }),
+    ("CEILING_STEP3_PCT", |t, v| {
+        t.CEILING_STEP3_PCT = v.min(100) as u16
+    }),
+    ("CEILING_DIABETIC_PCT", |t, v| {
+        t.CEILING_DIABETIC_PCT = v.min(100) as u16
+    }),
     ("DMG_NEED_LOW_PCT", |t, v| t.DMG_NEED_LOW_PCT = clamp_pct(v)),
-    ("DMG_NEED_HIGH_PCT", |t, v| t.DMG_NEED_HIGH_PCT = clamp_pct(v)),
+    ("DMG_NEED_HIGH_PCT", |t, v| {
+        t.DMG_NEED_HIGH_PCT = clamp_pct(v)
+    }),
     ("DMG_ENERGY_PCT", |t, v| t.DMG_ENERGY_PCT = clamp_pct(v)),
-    ("DMG_ENERGY_HEALTH_PCT", |t, v| t.DMG_ENERGY_HEALTH_PCT = clamp_pct(v)),
+    ("DMG_ENERGY_HEALTH_PCT", |t, v| {
+        t.DMG_ENERGY_HEALTH_PCT = clamp_pct(v)
+    }),
     ("DMG_MOOD_PCT", |t, v| t.DMG_MOOD_PCT = clamp_pct(v)),
     ("DMG_DIRT_PCT", |t, v| t.DMG_DIRT_PCT = clamp_pct(v)),
-    ("DMG_WEIGHT_HIGH_PCT", |t, v| t.DMG_WEIGHT_HIGH_PCT = clamp_pct(v)),
-    ("DMG_WEIGHT_LOW_PCT", |t, v| t.DMG_WEIGHT_LOW_PCT = clamp_pct(v)),
+    ("DMG_WEIGHT_HIGH_PCT", |t, v| {
+        t.DMG_WEIGHT_HIGH_PCT = clamp_pct(v)
+    }),
+    ("DMG_WEIGHT_LOW_PCT", |t, v| {
+        t.DMG_WEIGHT_LOW_PCT = clamp_pct(v)
+    }),
     ("DMG_FULL_LOW_PM", |t, v| t.DMG_FULL_LOW_PM = clamp_u16(v)),
     ("DMG_FULL_HIGH_PM", |t, v| t.DMG_FULL_HIGH_PM = clamp_u16(v)),
     ("DMG_WATER_LOW_PM", |t, v| t.DMG_WATER_LOW_PM = clamp_u16(v)),
-    ("DMG_WATER_HIGH_PM", |t, v| t.DMG_WATER_HIGH_PM = clamp_u16(v)),
+    ("DMG_WATER_HIGH_PM", |t, v| {
+        t.DMG_WATER_HIGH_PM = clamp_u16(v)
+    }),
     ("DMG_ENERGY_PM", |t, v| t.DMG_ENERGY_PM = clamp_u16(v)),
     ("DMG_BOOZE_PM", |t, v| t.DMG_BOOZE_PM = clamp_u16(v)),
     ("DMG_MOOD_PM", |t, v| t.DMG_MOOD_PM = clamp_u16(v)),
     ("DMG_DIRT_PM", |t, v| t.DMG_DIRT_PM = clamp_u16(v)),
-    ("DMG_WEIGHT_HIGH_PM", |t, v| t.DMG_WEIGHT_HIGH_PM = clamp_u16(v)),
-    ("DMG_WEIGHT_LOW_PM", |t, v| t.DMG_WEIGHT_LOW_PM = clamp_u16(v)),
+    ("DMG_WEIGHT_HIGH_PM", |t, v| {
+        t.DMG_WEIGHT_HIGH_PM = clamp_u16(v)
+    }),
+    ("DMG_WEIGHT_LOW_PM", |t, v| {
+        t.DMG_WEIGHT_LOW_PM = clamp_u16(v)
+    }),
     ("REC_GOOD_PM", |t, v| t.REC_GOOD_PM = clamp_u16(v)),
     ("REC_FAIR_PM", |t, v| t.REC_FAIR_PM = clamp_u16(v)),
-    ("REC_GOOD_MOOD_PCT", |t, v| t.REC_GOOD_MOOD_PCT = clamp_pct(v)),
-    ("REC_FAIR_MOOD_PCT", |t, v| t.REC_FAIR_MOOD_PCT = clamp_pct(v)),
-    ("REC_DEPRIVED_PCT", |t, v| t.REC_DEPRIVED_PCT = clamp_u16(v)),
-    ("DEPENDENCE_ONSET_MIN", |t, v| t.DEPENDENCE_ONSET_MIN = clamp_u16(v)),
-    ("DEPENDENCE_RELAPSE_MIN", |t, v| t.DEPENDENCE_RELAPSE_MIN = clamp_u16(v)),
-    ("DIABETES_ONSET_MIN", |t, v| t.DIABETES_ONSET_MIN = clamp_u16(v)),
-    ("DIABETES_REVERSAL_MIN", |t, v| t.DIABETES_REVERSAL_MIN = clamp_u16(v)),
+    ("REC_GOOD_MOOD_PCT", |t, v| {
+        t.REC_GOOD_MOOD_PCT = clamp_pct(v)
+    }),
+    ("REC_FAIR_MOOD_PCT", |t, v| {
+        t.REC_FAIR_MOOD_PCT = clamp_pct(v)
+    }),
+    ("REC_DEPRIVED_PCT", |t, v| {
+        t.REC_DEPRIVED_PCT = clamp_mult(v)
+    }),
+    ("DEPENDENCE_ONSET_MIN", |t, v| {
+        t.DEPENDENCE_ONSET_MIN = clamp_u16(v)
+    }),
+    ("DEPENDENCE_RELAPSE_MIN", |t, v| {
+        t.DEPENDENCE_RELAPSE_MIN = clamp_u16(v)
+    }),
+    ("DIABETES_ONSET_MIN", |t, v| {
+        t.DIABETES_ONSET_MIN = clamp_u16(v)
+    }),
+    ("DIABETES_REVERSAL_MIN", |t, v| {
+        t.DIABETES_REVERSAL_MIN = clamp_u16(v)
+    }),
     ("HANGOVER_MIN", |t, v| t.HANGOVER_MIN = clamp_u16(v)),
     ("RECOVERING_MIN", |t, v| t.RECOVERING_MIN = clamp_u16(v)),
     ("SELF_WAKE_MIN", |t, v| t.SELF_WAKE_MIN = clamp_u16(v)),
-    ("OVERSLEEP_WAKE_MIN", |t, v| t.OVERSLEEP_WAKE_MIN = clamp_u16(v)),
+    ("OVERSLEEP_WAKE_MIN", |t, v| {
+        t.OVERSLEEP_WAKE_MIN = clamp_u16(v)
+    }),
     ("GROGGY_LINE_MIN", |t, v| t.GROGGY_LINE_MIN = clamp_u16(v)),
     ("GROGGY_MIN", |t, v| t.GROGGY_MIN = clamp_u16(v)),
-    ("GROGGY_ENERGY_PCT", |t, v| t.GROGGY_ENERGY_PCT = clamp_pct(v)),
+    ("GROGGY_ENERGY_PCT", |t, v| {
+        t.GROGGY_ENERGY_PCT = clamp_pct(v)
+    }),
     ("GROGGY_FIT_PCT", |t, v| t.GROGGY_FIT_PCT = clamp_pct(v)),
     ("RESTED_MIN", |t, v| t.RESTED_MIN = clamp_u16(v)),
-    ("GOOD_SLEEP_LINE_MIN", |t, v| t.GOOD_SLEEP_LINE_MIN = clamp_u16(v)),
+    ("GOOD_SLEEP_LINE_MIN", |t, v| {
+        t.GOOD_SLEEP_LINE_MIN = clamp_u16(v)
+    }),
     ("NIGHT_SHORT_MIN", |t, v| t.NIGHT_SHORT_MIN = clamp_u16(v)),
     ("NIGHT_GOOD_MIN", |t, v| t.NIGHT_GOOD_MIN = clamp_u16(v)),
-    ("DEPRIVED_NIGHTS", |t, v| t.DEPRIVED_NIGHTS = v.clamp(1, 255) as u8),
-    ("CLEARING_NIGHTS", |t, v| t.CLEARING_NIGHTS = v.clamp(1, 255) as u8),
+    ("DEPRIVED_NIGHTS", |t, v| {
+        t.DEPRIVED_NIGHTS = v.clamp(1, 255) as u8
+    }),
+    ("CLEARING_NIGHTS", |t, v| {
+        t.CLEARING_NIGHTS = v.clamp(1, 255) as u8
+    }),
     ("GRUMPY_PCT", |t, v| t.GRUMPY_PCT = clamp_pct(v)),
-    ("GRUMPY_ENERGY_PCT", |t, v| t.GRUMPY_ENERGY_PCT = clamp_pct(v)),
+    ("GRUMPY_ENERGY_PCT", |t, v| {
+        t.GRUMPY_ENERGY_PCT = clamp_pct(v)
+    }),
     ("COLLAPSE_DAMAGE", |t, v| t.COLLAPSE_DAMAGE = clamp_u16(v)),
-    ("COLLAPSE_HEALTH_FLOOR_PCT", |t, v| t.COLLAPSE_HEALTH_FLOOR_PCT = clamp_pct(v)),
+    ("COLLAPSE_HEALTH_FLOOR_PCT", |t, v| {
+        t.COLLAPSE_HEALTH_FLOOR_PCT = clamp_pct(v)
+    }),
     ("LEAVING_MIN", |t, v| t.LEAVING_MIN = clamp_u16(v)),
     ("BOOZE_CLEAR_PCT", |t, v| t.BOOZE_CLEAR_PCT = clamp_pct(v)),
-    ("DIABETES_WEIGHT_HI_PCT", |t, v| t.DIABETES_WEIGHT_HI_PCT = clamp_pct(v)),
-    ("DIABETES_WEIGHT_LO_PCT", |t, v| t.DIABETES_WEIGHT_LO_PCT = clamp_pct(v)),
+    ("DIABETES_WEIGHT_HI_PCT", |t, v| {
+        t.DIABETES_WEIGHT_HI_PCT = clamp_pct(v)
+    }),
+    ("DIABETES_WEIGHT_LO_PCT", |t, v| {
+        t.DIABETES_WEIGHT_LO_PCT = clamp_pct(v)
+    }),
     ("REVERSAL_FIT_PCT", |t, v| t.REVERSAL_FIT_PCT = clamp_pct(v)),
-    ("HANGOVER_ASLEEP_MULT", |t, v| t.HANGOVER_ASLEEP_MULT = v.clamp(1, 255) as u8),
-    ("HEALTH_EXCESS_DECAY_PM", |t, v| t.HEALTH_EXCESS_DECAY_PM = clamp_u16(v)),
-    ("CARE_GOOD_MOOD_PCT", |t, v| t.CARE_GOOD_MOOD_PCT = clamp_pct(v)),
-    ("OVERSLEEP_RESET_PCT", |t, v| t.OVERSLEEP_RESET_PCT = clamp_pct(v)),
-    ("DOSE_SALAD_FULL_PCT", |t, v| t.DOSE_SALAD_FULL_PCT = v.min(100) as u8),
-    ("DOSE_APPLE_FULL_PCT", |t, v| t.DOSE_APPLE_FULL_PCT = v.min(100) as u8),
-    ("DOSE_FRIKANDEL_FULL_PCT", |t, v| t.DOSE_FRIKANDEL_FULL_PCT = v.min(100) as u8),
-    ("DOSE_PIZZA_FULL_PCT", |t, v| t.DOSE_PIZZA_FULL_PCT = v.min(100) as u8),
-    ("DOSE_CAKE_FULL_PCT", |t, v| t.DOSE_CAKE_FULL_PCT = v.min(100) as u8),
-    ("DOSE_SALAD_DIRT_PCT", |t, v| t.DOSE_SALAD_DIRT_PCT = v.min(100) as u8),
-    ("DOSE_APPLE_DIRT_PCT", |t, v| t.DOSE_APPLE_DIRT_PCT = v.min(100) as u8),
-    ("DOSE_FRIKANDEL_DIRT_PCT", |t, v| t.DOSE_FRIKANDEL_DIRT_PCT = v.min(100) as u8),
-    ("DOSE_PIZZA_DIRT_PCT", |t, v| t.DOSE_PIZZA_DIRT_PCT = v.min(100) as u8),
-    ("DOSE_CAKE_DIRT_PCT", |t, v| t.DOSE_CAKE_DIRT_PCT = v.min(100) as u8),
-    ("DOSE_SALAD_WEIGHT_PM", |t, v| t.DOSE_SALAD_WEIGHT_PM = clamp_u16(v)),
-    ("DOSE_APPLE_WEIGHT_PM", |t, v| t.DOSE_APPLE_WEIGHT_PM = clamp_u16(v)),
-    ("DOSE_FRIKANDEL_WEIGHT_PM", |t, v| t.DOSE_FRIKANDEL_WEIGHT_PM = clamp_u16(v)),
-    ("DOSE_PIZZA_WEIGHT_PM", |t, v| t.DOSE_PIZZA_WEIGHT_PM = clamp_u16(v)),
-    ("DOSE_CAKE_WEIGHT_PM", |t, v| t.DOSE_CAKE_WEIGHT_PM = clamp_u16(v)),
-    ("DOSE_FRIKANDEL_MOOD_PCT", |t, v| t.DOSE_FRIKANDEL_MOOD_PCT = v.min(100) as u8),
-    ("DOSE_PIZZA_MOOD_PCT", |t, v| t.DOSE_PIZZA_MOOD_PCT = v.min(100) as u8),
-    ("DOSE_CAKE_MOOD_PCT", |t, v| t.DOSE_CAKE_MOOD_PCT = v.min(100) as u8),
-    ("DOSE_HEALTHY_WATER_PCT", |t, v| t.DOSE_HEALTHY_WATER_PCT = v.min(100) as u8),
-    ("DOSE_SALAD_FIT_PCT", |t, v| t.DOSE_SALAD_FIT_PCT = v.min(100) as u8),
-    ("DOSE_JUNK_REPEAT_DIV", |t, v| t.DOSE_JUNK_REPEAT_DIV = v.clamp(1, 255) as u8),
+    ("HANGOVER_ASLEEP_MULT", |t, v| {
+        t.HANGOVER_ASLEEP_MULT = v.clamp(1, 255) as u8
+    }),
+    ("HEALTH_EXCESS_DECAY_PM", |t, v| {
+        t.HEALTH_EXCESS_DECAY_PM = clamp_u16(v)
+    }),
+    ("CARE_GOOD_MOOD_PCT", |t, v| {
+        t.CARE_GOOD_MOOD_PCT = clamp_pct(v)
+    }),
+    ("OVERSLEEP_RESET_PCT", |t, v| {
+        t.OVERSLEEP_RESET_PCT = clamp_pct(v)
+    }),
+    ("DOSE_SALAD_FULL_PCT", |t, v| {
+        t.DOSE_SALAD_FULL_PCT = v.min(100) as u8
+    }),
+    ("DOSE_APPLE_FULL_PCT", |t, v| {
+        t.DOSE_APPLE_FULL_PCT = v.min(100) as u8
+    }),
+    ("DOSE_FRIKANDEL_FULL_PCT", |t, v| {
+        t.DOSE_FRIKANDEL_FULL_PCT = v.min(100) as u8
+    }),
+    ("DOSE_PIZZA_FULL_PCT", |t, v| {
+        t.DOSE_PIZZA_FULL_PCT = v.min(100) as u8
+    }),
+    ("DOSE_CAKE_FULL_PCT", |t, v| {
+        t.DOSE_CAKE_FULL_PCT = v.min(100) as u8
+    }),
+    ("DOSE_SALAD_DIRT_PCT", |t, v| {
+        t.DOSE_SALAD_DIRT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_APPLE_DIRT_PCT", |t, v| {
+        t.DOSE_APPLE_DIRT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_FRIKANDEL_DIRT_PCT", |t, v| {
+        t.DOSE_FRIKANDEL_DIRT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_PIZZA_DIRT_PCT", |t, v| {
+        t.DOSE_PIZZA_DIRT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_CAKE_DIRT_PCT", |t, v| {
+        t.DOSE_CAKE_DIRT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_SALAD_WEIGHT_PM", |t, v| {
+        t.DOSE_SALAD_WEIGHT_PM = clamp_u16(v)
+    }),
+    ("DOSE_APPLE_WEIGHT_PM", |t, v| {
+        t.DOSE_APPLE_WEIGHT_PM = clamp_u16(v)
+    }),
+    ("DOSE_FRIKANDEL_WEIGHT_PM", |t, v| {
+        t.DOSE_FRIKANDEL_WEIGHT_PM = clamp_u16(v)
+    }),
+    ("DOSE_PIZZA_WEIGHT_PM", |t, v| {
+        t.DOSE_PIZZA_WEIGHT_PM = clamp_u16(v)
+    }),
+    ("DOSE_CAKE_WEIGHT_PM", |t, v| {
+        t.DOSE_CAKE_WEIGHT_PM = clamp_u16(v)
+    }),
+    ("DOSE_FRIKANDEL_MOOD_PCT", |t, v| {
+        t.DOSE_FRIKANDEL_MOOD_PCT = v.min(100) as u8
+    }),
+    ("DOSE_PIZZA_MOOD_PCT", |t, v| {
+        t.DOSE_PIZZA_MOOD_PCT = v.min(100) as u8
+    }),
+    ("DOSE_CAKE_MOOD_PCT", |t, v| {
+        t.DOSE_CAKE_MOOD_PCT = v.min(100) as u8
+    }),
+    ("DOSE_HEALTHY_WATER_PCT", |t, v| {
+        t.DOSE_HEALTHY_WATER_PCT = v.min(100) as u8
+    }),
+    ("DOSE_SALAD_FIT_PCT", |t, v| {
+        t.DOSE_SALAD_FIT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_JUNK_REPEAT_DIV", |t, v| {
+        t.DOSE_JUNK_REPEAT_DIV = v.clamp(1, 255) as u8
+    }),
     ("DOSE_JUNK_MIN", |t, v| t.DOSE_JUNK_MIN = clamp_u16(v)),
-    ("DOSE_FULL_CAP_PCT", |t, v| t.DOSE_FULL_CAP_PCT = v.clamp(1, 255) as u8),
-    ("DOSE_EXCESS_ENERGY_DIV", |t, v| t.DOSE_EXCESS_ENERGY_DIV = v.clamp(1, 255) as u8),
-    ("DOSE_EXCESS_WEIGHT_DIV", |t, v| t.DOSE_EXCESS_WEIGHT_DIV = v.clamp(1, 255) as u8),
-    ("DOSE_WATER_MAX_PCT", |t, v| t.DOSE_WATER_MAX_PCT = v.min(100) as u8),
-    ("DOSE_WATER_BELLY_PCT", |t, v| t.DOSE_WATER_BELLY_PCT = v.min(100) as u8),
-    ("DOSE_WATER_BELLY_MIN_PCT", |t, v| t.DOSE_WATER_BELLY_MIN_PCT = v.min(100) as u8),
-    ("DOSE_WATER_BOOZE_PCT", |t, v| t.DOSE_WATER_BOOZE_PCT = v.min(100) as u8),
-    ("DOSE_WATER_HANGOVER_MIN", |t, v| t.DOSE_WATER_HANGOVER_MIN = clamp_u16(v)),
-    ("DOSE_WATER_GROGGY_MIN", |t, v| t.DOSE_WATER_GROGGY_MIN = clamp_u16(v)),
-    ("DOSE_COLA_WATER_PCT", |t, v| t.DOSE_COLA_WATER_PCT = v.min(100) as u8),
-    ("DOSE_COLA_FULL_PCT", |t, v| t.DOSE_COLA_FULL_PCT = v.min(100) as u8),
-    ("DOSE_COLA_ENERGY_PCT", |t, v| t.DOSE_COLA_ENERGY_PCT = v.min(100) as u8),
-    ("DOSE_COLA_MOOD_PCT", |t, v| t.DOSE_COLA_MOOD_PCT = v.min(100) as u8),
-    ("DOSE_COLA_WEIGHT_PCT", |t, v| t.DOSE_COLA_WEIGHT_PCT = v.min(100) as u8),
-    ("DOSE_BEER_WATER_PCT", |t, v| t.DOSE_BEER_WATER_PCT = v.min(100) as u8),
-    ("DOSE_BEER_BELLY_PCT", |t, v| t.DOSE_BEER_BELLY_PCT = v.min(100) as u8),
-    ("DOSE_BEER_BOOZE_PCT", |t, v| t.DOSE_BEER_BOOZE_PCT = v.min(100) as u8),
-    ("DOSE_BEER_MOOD_PCT", |t, v| t.DOSE_BEER_MOOD_PCT = v.min(100) as u8),
-    ("DOSE_WINE_WATER_PCT", |t, v| t.DOSE_WINE_WATER_PCT = v.min(100) as u8),
-    ("DOSE_WINE_BELLY_PCT", |t, v| t.DOSE_WINE_BELLY_PCT = v.min(100) as u8),
-    ("DOSE_WINE_BOOZE_PCT", |t, v| t.DOSE_WINE_BOOZE_PCT = v.min(100) as u8),
-    ("DOSE_WINE_MOOD_PCT", |t, v| t.DOSE_WINE_MOOD_PCT = v.min(100) as u8),
-    ("DOSE_WHISKEY_WATER_PCT", |t, v| t.DOSE_WHISKEY_WATER_PCT = v.min(100) as u8),
-    ("DOSE_WHISKEY_BELLY_PCT", |t, v| t.DOSE_WHISKEY_BELLY_PCT = v.min(100) as u8),
-    ("DOSE_WHISKEY_BOOZE_PCT", |t, v| t.DOSE_WHISKEY_BOOZE_PCT = v.min(100) as u8),
-    ("DOSE_WHISKEY_MOOD_PCT", |t, v| t.DOSE_WHISKEY_MOOD_PCT = v.min(100) as u8),
-    ("DOSE_BEER_WEIGHT_PCT", |t, v| t.DOSE_BEER_WEIGHT_PCT = v.min(100) as u8),
-    ("DOSE_ALCOHOL_ENERGY_PCT", |t, v| t.DOSE_ALCOHOL_ENERGY_PCT = v.min(100) as u8),
-    ("DOSE_ALCOHOL_FUN_PCT", |t, v| t.DOSE_ALCOHOL_FUN_PCT = v.min(100) as u8),
-    ("DOSE_TIRED_BOOZE_PCT", |t, v| t.DOSE_TIRED_BOOZE_PCT = clamp_u16(v)),
-    ("DOSE_DEPENDENT_DIV", |t, v| t.DOSE_DEPENDENT_DIV = v.clamp(1, 255) as u8),
-    ("DOSE_RELAPSE_MOOD_PCT", |t, v| t.DOSE_RELAPSE_MOOD_PCT = v.min(100) as u8),
-    ("DOSE_PLAY_FUN_PCT", |t, v| t.DOSE_PLAY_FUN_PCT = v.min(100) as u8),
-    ("DOSE_PLAY_ENERGY_PCT", |t, v| t.DOSE_PLAY_ENERGY_PCT = v.min(100) as u8),
-    ("DOSE_PLAY_FULL_PCT", |t, v| t.DOSE_PLAY_FULL_PCT = v.min(100) as u8),
-    ("DOSE_PLAY_WATER_PCT", |t, v| t.DOSE_PLAY_WATER_PCT = v.min(100) as u8),
-    ("DOSE_PLAY_FIT_PCT", |t, v| t.DOSE_PLAY_FIT_PCT = v.min(100) as u8),
-    ("DOSE_PLAY_DIRT_PCT", |t, v| t.DOSE_PLAY_DIRT_PCT = v.min(100) as u8),
-    ("DOSE_PLAY_GROGGY_MIN", |t, v| t.DOSE_PLAY_GROGGY_MIN = clamp_u16(v)),
-    ("DOSE_TIRED_FUN_MULT", |t, v| t.DOSE_TIRED_FUN_MULT = v.min(100) as u8),
-    ("DOSE_MINI_FUN_BASE_PCT", |t, v| t.DOSE_MINI_FUN_BASE_PCT = v.min(100) as u8),
-    ("DOSE_MINI_FUN_GRADE_PCT", |t, v| t.DOSE_MINI_FUN_GRADE_PCT = v.min(100) as u8),
-    ("DOSE_MINI_ENERGY_PCT", |t, v| t.DOSE_MINI_ENERGY_PCT = v.min(100) as u8),
-    ("DOSE_EXERCISE_STRAIN_PCT", |t, v| t.DOSE_EXERCISE_STRAIN_PCT = v.min(100) as u8),
-    ("DOSE_STRAIN_NEED_PCT", |t, v| t.DOSE_STRAIN_NEED_PCT = clamp_u16(v)),
-    ("DOSE_STRAIN_RESTED_PCT", |t, v| t.DOSE_STRAIN_RESTED_PCT = clamp_u16(v)),
-    ("DOSE_STRAIN_FIT_PCT", |t, v| t.DOSE_STRAIN_FIT_PCT = clamp_u16(v)),
-    ("DOSE_STRAIN_FIT_MIN_PCT", |t, v| t.DOSE_STRAIN_FIT_MIN_PCT = v.min(100) as u8),
-    ("DOSE_STRAIN_HEAVY_PCT", |t, v| t.DOSE_STRAIN_HEAVY_PCT = clamp_u16(v)),
-    ("DOSE_STRAIN_DEPRIVED_PCT", |t, v| t.DOSE_STRAIN_DEPRIVED_PCT = clamp_u16(v)),
-    ("DOSE_EXERCISE_ENERGY_PCT", |t, v| t.DOSE_EXERCISE_ENERGY_PCT = v.min(100) as u8),
-    ("DOSE_EXERCISE_FULL_PCT", |t, v| t.DOSE_EXERCISE_FULL_PCT = v.min(100) as u8),
-    ("DOSE_EXERCISE_WATER_PCT", |t, v| t.DOSE_EXERCISE_WATER_PCT = v.min(100) as u8),
-    ("DOSE_EXERCISE_FUN_PCT", |t, v| t.DOSE_EXERCISE_FUN_PCT = v.min(100) as u8),
-    ("DOSE_EXERCISE_BOOZE_PCT", |t, v| t.DOSE_EXERCISE_BOOZE_PCT = v.min(100) as u8),
-    ("DOSE_EXERCISE_DIRT_PCT", |t, v| t.DOSE_EXERCISE_DIRT_PCT = v.min(100) as u8),
-    ("DOSE_EXERCISE_WEIGHT_PCT", |t, v| t.DOSE_EXERCISE_WEIGHT_PCT = v.min(100) as u8),
-    ("DOSE_EXERCISE_HANGOVER_MIN", |t, v| t.DOSE_EXERCISE_HANGOVER_MIN = clamp_u16(v)),
-    ("DOSE_EXERCISE_FIT_PCT", |t, v| t.DOSE_EXERCISE_FIT_PCT = v.min(100) as u8),
+    ("DOSE_FULL_CAP_PCT", |t, v| {
+        t.DOSE_FULL_CAP_PCT = v.clamp(1, 255) as u8
+    }),
+    ("DOSE_EXCESS_ENERGY_DIV", |t, v| {
+        t.DOSE_EXCESS_ENERGY_DIV = v.clamp(1, 255) as u8
+    }),
+    ("DOSE_EXCESS_WEIGHT_DIV", |t, v| {
+        t.DOSE_EXCESS_WEIGHT_DIV = v.clamp(1, 255) as u8
+    }),
+    ("DOSE_WATER_MAX_PCT", |t, v| {
+        t.DOSE_WATER_MAX_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WATER_BELLY_PCT", |t, v| {
+        t.DOSE_WATER_BELLY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WATER_BELLY_MIN_PCT", |t, v| {
+        t.DOSE_WATER_BELLY_MIN_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WATER_BOOZE_PCT", |t, v| {
+        t.DOSE_WATER_BOOZE_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WATER_HANGOVER_MIN", |t, v| {
+        t.DOSE_WATER_HANGOVER_MIN = clamp_u16(v)
+    }),
+    ("DOSE_WATER_GROGGY_MIN", |t, v| {
+        t.DOSE_WATER_GROGGY_MIN = clamp_u16(v)
+    }),
+    ("DOSE_COLA_WATER_PCT", |t, v| {
+        t.DOSE_COLA_WATER_PCT = v.min(100) as u8
+    }),
+    ("DOSE_COLA_FULL_PCT", |t, v| {
+        t.DOSE_COLA_FULL_PCT = v.min(100) as u8
+    }),
+    ("DOSE_COLA_ENERGY_PCT", |t, v| {
+        t.DOSE_COLA_ENERGY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_COLA_MOOD_PCT", |t, v| {
+        t.DOSE_COLA_MOOD_PCT = v.min(100) as u8
+    }),
+    ("DOSE_COLA_WEIGHT_PCT", |t, v| {
+        t.DOSE_COLA_WEIGHT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_BEER_WATER_PCT", |t, v| {
+        t.DOSE_BEER_WATER_PCT = v.min(100) as u8
+    }),
+    ("DOSE_BEER_BELLY_PCT", |t, v| {
+        t.DOSE_BEER_BELLY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_BEER_BOOZE_PCT", |t, v| {
+        t.DOSE_BEER_BOOZE_PCT = v.min(100) as u8
+    }),
+    ("DOSE_BEER_MOOD_PCT", |t, v| {
+        t.DOSE_BEER_MOOD_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WINE_WATER_PCT", |t, v| {
+        t.DOSE_WINE_WATER_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WINE_BELLY_PCT", |t, v| {
+        t.DOSE_WINE_BELLY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WINE_BOOZE_PCT", |t, v| {
+        t.DOSE_WINE_BOOZE_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WINE_MOOD_PCT", |t, v| {
+        t.DOSE_WINE_MOOD_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WHISKEY_WATER_PCT", |t, v| {
+        t.DOSE_WHISKEY_WATER_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WHISKEY_BELLY_PCT", |t, v| {
+        t.DOSE_WHISKEY_BELLY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WHISKEY_BOOZE_PCT", |t, v| {
+        t.DOSE_WHISKEY_BOOZE_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WHISKEY_MOOD_PCT", |t, v| {
+        t.DOSE_WHISKEY_MOOD_PCT = v.min(100) as u8
+    }),
+    ("DOSE_BEER_WEIGHT_PCT", |t, v| {
+        t.DOSE_BEER_WEIGHT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_ALCOHOL_ENERGY_PCT", |t, v| {
+        t.DOSE_ALCOHOL_ENERGY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_ALCOHOL_FUN_PCT", |t, v| {
+        t.DOSE_ALCOHOL_FUN_PCT = v.min(100) as u8
+    }),
+    ("DOSE_TIRED_BOOZE_PCT", |t, v| {
+        t.DOSE_TIRED_BOOZE_PCT = clamp_mult(v)
+    }),
+    ("DOSE_DEPENDENT_DIV", |t, v| {
+        t.DOSE_DEPENDENT_DIV = v.clamp(1, 255) as u8
+    }),
+    ("DOSE_RELAPSE_MOOD_PCT", |t, v| {
+        t.DOSE_RELAPSE_MOOD_PCT = v.min(100) as u8
+    }),
+    ("DOSE_PLAY_FUN_PCT", |t, v| {
+        t.DOSE_PLAY_FUN_PCT = v.min(100) as u8
+    }),
+    ("DOSE_PLAY_ENERGY_PCT", |t, v| {
+        t.DOSE_PLAY_ENERGY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_PLAY_FULL_PCT", |t, v| {
+        t.DOSE_PLAY_FULL_PCT = v.min(100) as u8
+    }),
+    ("DOSE_PLAY_WATER_PCT", |t, v| {
+        t.DOSE_PLAY_WATER_PCT = v.min(100) as u8
+    }),
+    ("DOSE_PLAY_FIT_PCT", |t, v| {
+        t.DOSE_PLAY_FIT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_PLAY_DIRT_PCT", |t, v| {
+        t.DOSE_PLAY_DIRT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_PLAY_GROGGY_MIN", |t, v| {
+        t.DOSE_PLAY_GROGGY_MIN = clamp_u16(v)
+    }),
+    ("DOSE_TIRED_FUN_MULT", |t, v| {
+        t.DOSE_TIRED_FUN_MULT = v.min(100) as u8
+    }),
+    ("DOSE_MINI_FUN_BASE_PCT", |t, v| {
+        t.DOSE_MINI_FUN_BASE_PCT = v.min(100) as u8
+    }),
+    ("DOSE_MINI_FUN_GRADE_PCT", |t, v| {
+        t.DOSE_MINI_FUN_GRADE_PCT = v.min(100) as u8
+    }),
+    ("DOSE_MINI_ENERGY_PCT", |t, v| {
+        t.DOSE_MINI_ENERGY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_EXERCISE_STRAIN_PCT", |t, v| {
+        t.DOSE_EXERCISE_STRAIN_PCT = v.min(100) as u8
+    }),
+    ("DOSE_STRAIN_NEED_PCT", |t, v| {
+        t.DOSE_STRAIN_NEED_PCT = clamp_mult(v)
+    }),
+    ("DOSE_STRAIN_RESTED_PCT", |t, v| {
+        t.DOSE_STRAIN_RESTED_PCT = clamp_mult(v)
+    }),
+    ("DOSE_STRAIN_FIT_PCT", |t, v| {
+        t.DOSE_STRAIN_FIT_PCT = clamp_mult(v)
+    }),
+    ("DOSE_STRAIN_FIT_MIN_PCT", |t, v| {
+        t.DOSE_STRAIN_FIT_MIN_PCT = v.min(100) as u8
+    }),
+    ("DOSE_STRAIN_HEAVY_PCT", |t, v| {
+        t.DOSE_STRAIN_HEAVY_PCT = clamp_mult(v)
+    }),
+    ("DOSE_STRAIN_DEPRIVED_PCT", |t, v| {
+        t.DOSE_STRAIN_DEPRIVED_PCT = clamp_mult(v)
+    }),
+    ("DOSE_EXERCISE_ENERGY_PCT", |t, v| {
+        t.DOSE_EXERCISE_ENERGY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_EXERCISE_FULL_PCT", |t, v| {
+        t.DOSE_EXERCISE_FULL_PCT = v.min(100) as u8
+    }),
+    ("DOSE_EXERCISE_WATER_PCT", |t, v| {
+        t.DOSE_EXERCISE_WATER_PCT = v.min(100) as u8
+    }),
+    ("DOSE_EXERCISE_FUN_PCT", |t, v| {
+        t.DOSE_EXERCISE_FUN_PCT = v.min(100) as u8
+    }),
+    ("DOSE_EXERCISE_BOOZE_PCT", |t, v| {
+        t.DOSE_EXERCISE_BOOZE_PCT = v.min(100) as u8
+    }),
+    ("DOSE_EXERCISE_DIRT_PCT", |t, v| {
+        t.DOSE_EXERCISE_DIRT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_EXERCISE_WEIGHT_PCT", |t, v| {
+        t.DOSE_EXERCISE_WEIGHT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_EXERCISE_HANGOVER_MIN", |t, v| {
+        t.DOSE_EXERCISE_HANGOVER_MIN = clamp_u16(v)
+    }),
+    ("DOSE_EXERCISE_FIT_PCT", |t, v| {
+        t.DOSE_EXERCISE_FIT_PCT = v.min(100) as u8
+    }),
     ("DOSE_INJURY_MIN", |t, v| t.DOSE_INJURY_MIN = clamp_u16(v)),
-    ("DOSE_INJURY_HEALTH_PCT", |t, v| t.DOSE_INJURY_HEALTH_PCT = v.min(100) as u8),
-    ("DOSE_WASH_DIRT_PCT", |t, v| t.DOSE_WASH_DIRT_PCT = v.min(100) as u8),
-    ("DOSE_RELAX_FUN_PCT", |t, v| t.DOSE_RELAX_FUN_PCT = v.min(100) as u8),
-    ("DOSE_RELAX_STRAIN_PCT", |t, v| t.DOSE_RELAX_STRAIN_PCT = v.min(100) as u8),
-    ("DOSE_RELAX_ENERGY_PCT", |t, v| t.DOSE_RELAX_ENERGY_PCT = v.min(100) as u8),
-    ("DOSE_RELAX_FIT_PCT", |t, v| t.DOSE_RELAX_FIT_PCT = v.min(100) as u8),
+    ("DOSE_INJURY_HEALTH_PCT", |t, v| {
+        t.DOSE_INJURY_HEALTH_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WASH_DIRT_PCT", |t, v| {
+        t.DOSE_WASH_DIRT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_RELAX_FUN_PCT", |t, v| {
+        t.DOSE_RELAX_FUN_PCT = v.min(100) as u8
+    }),
+    ("DOSE_RELAX_STRAIN_PCT", |t, v| {
+        t.DOSE_RELAX_STRAIN_PCT = v.min(100) as u8
+    }),
+    ("DOSE_RELAX_ENERGY_PCT", |t, v| {
+        t.DOSE_RELAX_ENERGY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_RELAX_FIT_PCT", |t, v| {
+        t.DOSE_RELAX_FIT_PCT = v.min(100) as u8
+    }),
     ("DOSE_MED_CD_MIN", |t, v| t.DOSE_MED_CD_MIN = clamp_u16(v)),
-    ("DOSE_HEAL_INJURY_MIN", |t, v| t.DOSE_HEAL_INJURY_MIN = clamp_u16(v)),
-    ("DOSE_MED_BOOZE_PCT", |t, v| t.DOSE_MED_BOOZE_PCT = v.min(100) as u8),
-    ("DOSE_HEAL_HEALTHY_PCT", |t, v| t.DOSE_HEAL_HEALTHY_PCT = v.min(100) as u8),
-    ("DOSE_HEAL_HEALTH_PCT", |t, v| t.DOSE_HEAL_HEALTH_PCT = v.min(100) as u8),
-    ("DOSE_INSULIN_WINDOW_MIN", |t, v| t.DOSE_INSULIN_WINDOW_MIN = clamp_u16(v)),
+    ("DOSE_HEAL_INJURY_MIN", |t, v| {
+        t.DOSE_HEAL_INJURY_MIN = clamp_u16(v)
+    }),
+    ("DOSE_MED_BOOZE_PCT", |t, v| {
+        t.DOSE_MED_BOOZE_PCT = v.min(100) as u8
+    }),
+    ("DOSE_HEAL_HEALTHY_PCT", |t, v| {
+        t.DOSE_HEAL_HEALTHY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_HEAL_HEALTH_PCT", |t, v| {
+        t.DOSE_HEAL_HEALTH_PCT = v.min(100) as u8
+    }),
+    ("DOSE_INSULIN_WINDOW_MIN", |t, v| {
+        t.DOSE_INSULIN_WINDOW_MIN = clamp_u16(v)
+    }),
     ("DOSE_INSULIN_MIN", |t, v| t.DOSE_INSULIN_MIN = clamp_u16(v)),
-    ("DOSE_OZEMPIC_WEIGHT_PCT", |t, v| t.DOSE_OZEMPIC_WEIGHT_PCT = v.min(100) as u8),
-    ("DOSE_OZEMPIC_FIT_PCT", |t, v| t.DOSE_OZEMPIC_FIT_PCT = v.min(100) as u8),
+    ("DOSE_OZEMPIC_WEIGHT_PCT", |t, v| {
+        t.DOSE_OZEMPIC_WEIGHT_PCT = v.min(100) as u8
+    }),
+    ("DOSE_OZEMPIC_FIT_PCT", |t, v| {
+        t.DOSE_OZEMPIC_FIT_PCT = v.min(100) as u8
+    }),
     ("DOSE_OZEMPIC_MIN", |t, v| t.DOSE_OZEMPIC_MIN = clamp_u16(v)),
-    ("DOSE_OZEMPIC_CD_MIN", |t, v| t.DOSE_OZEMPIC_CD_MIN = clamp_u16(v)),
+    ("DOSE_OZEMPIC_CD_MIN", |t, v| {
+        t.DOSE_OZEMPIC_CD_MIN = clamp_u16(v)
+    }),
     ("DOSE_REHAB_MIN", |t, v| t.DOSE_REHAB_MIN = clamp_u16(v)),
-    ("DOSE_NIGHT_ENERGY_PCT", |t, v| t.DOSE_NIGHT_ENERGY_PCT = v.min(100) as u8),
-    ("DOSE_WORK_ENERGY_PCT", |t, v| t.DOSE_WORK_ENERGY_PCT = v.min(100) as u8),
-    ("DOSE_WORK_FUN_PCT", |t, v| t.DOSE_WORK_FUN_PCT = v.min(100) as u8),
-    ("DOSE_WORK_MOOD_PCT", |t, v| t.DOSE_WORK_MOOD_PCT = v.min(100) as u8),
-    ("DOSE_FRIEND_BIG_FUN_PCT", |t, v| t.DOSE_FRIEND_BIG_FUN_PCT = v.min(100) as u8),
-    ("DOSE_FRIEND_SMALL_FUN_PCT", |t, v| t.DOSE_FRIEND_SMALL_FUN_PCT = v.min(100) as u8),
+    ("DOSE_NIGHT_ENERGY_PCT", |t, v| {
+        t.DOSE_NIGHT_ENERGY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WORK_ENERGY_PCT", |t, v| {
+        t.DOSE_WORK_ENERGY_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WORK_FUN_PCT", |t, v| {
+        t.DOSE_WORK_FUN_PCT = v.min(100) as u8
+    }),
+    ("DOSE_WORK_MOOD_PCT", |t, v| {
+        t.DOSE_WORK_MOOD_PCT = v.min(100) as u8
+    }),
+    ("DOSE_FRIEND_BIG_FUN_PCT", |t, v| {
+        t.DOSE_FRIEND_BIG_FUN_PCT = v.min(100) as u8
+    }),
+    ("DOSE_FRIEND_SMALL_FUN_PCT", |t, v| {
+        t.DOSE_FRIEND_SMALL_FUN_PCT = v.min(100) as u8
+    }),
 ];
 
 #[inline]
@@ -1252,6 +1610,13 @@ fn clamp_u16(v: u32) -> u16 {
     } else {
         v as u16
     }
+}
+
+/// Multiplier percentages (energy, thirst, mood penalties, dose
+/// amplifiers) stay at most 1000 %, so no product of levels wraps.
+#[inline]
+fn clamp_mult(v: u32) -> u16 {
+    v.min(1000) as u16
 }
 
 /// Band edges are percentages; keep them inside 1..=99.
@@ -1280,6 +1645,14 @@ pub fn validate(t: &Thresholds, preset: &Thresholds) -> Thresholds {
         r.WEIGHT_LO_PCT = preset.WEIGHT_LO_PCT;
         r.WEIGHT_HI_PCT = preset.WEIGHT_HI_PCT;
     }
+    if r.BOOZE_HI_PCT >= r.BOOZE_DANGER_PCT {
+        r.BOOZE_HI_PCT = preset.BOOZE_HI_PCT;
+        r.BOOZE_DANGER_PCT = preset.BOOZE_DANGER_PCT;
+    }
+    if r.DIABETES_WEIGHT_LO_PCT >= r.DIABETES_WEIGHT_HI_PCT {
+        r.DIABETES_WEIGHT_LO_PCT = preset.DIABETES_WEIGHT_LO_PCT;
+        r.DIABETES_WEIGHT_HI_PCT = preset.DIABETES_WEIGHT_HI_PCT;
+    }
     r
 }
 
@@ -1294,6 +1667,7 @@ mod template {
     use alloc::string::String;
     use core::fmt::Write;
 
+    const BADGE_HATCHING_TICKS: u32 = 6;
     const HEAD: &str = "# BornPets v3 balance. Uncomment a line to change it. The old firmware keeps using BORNPETS.CFG.";
 
     /// Exact text of `assets/to-badge/BPETS_V3.CFG`: every key as a
@@ -1302,8 +1676,14 @@ mod template {
         let mut out = String::from(HEAD);
         out.push('\n');
         for (key, _) in BORNPETS_CFG_KEYS {
-            let classic = Thresholds::CLASSIC.value_of(key).expect("key is a field");
-            let casual = Thresholds::CASUAL.value_of(key).expect("key is a field");
+            let mut classic = Thresholds::CLASSIC.value_of(key).expect("key is a field");
+            let mut casual = Thresholds::CASUAL.value_of(key).expect("key is a field");
+            if *key == "HATCHING_TICKS" {
+                // The simulator build hatches in 1 tick; the file is for the
+                // badge, which hatches in 6 (both presets).
+                classic = BADGE_HATCHING_TICKS;
+                casual = BADGE_HATCHING_TICKS;
+            }
             let _ = writeln!(out, "# {key}={classic}   # Casual {casual}");
         }
         out

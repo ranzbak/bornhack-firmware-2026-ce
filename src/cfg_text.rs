@@ -26,13 +26,67 @@ pub fn kv_of_line(line: &[u8], inline_comments: bool) -> Option<(&[u8], &[u8])> 
 
 /// Every `\n`-separated line of `data` that parses with [`kv_of_line`] and
 /// has both a non-empty key and a non-empty value.
-pub fn kv_lines(
-    data: &[u8],
-    inline_comments: bool,
-) -> impl Iterator<Item = (&[u8], &[u8])> {
+pub fn kv_lines(data: &[u8], inline_comments: bool) -> impl Iterator<Item = (&[u8], &[u8])> {
     data.split(|&b| b == b'\n')
         .filter_map(move |l| kv_of_line(l, inline_comments))
         .filter(|(k, v)| !k.is_empty() && !v.is_empty())
+}
+
+/// Reassembles text lines from arbitrary byte chunks (a file read piece by
+/// piece), so a file of any size streams through `N` bytes of state.
+///
+/// A line longer than `N` is dropped whole, never delivered truncated, so
+/// a cut-off value can't be applied by mistake.
+pub struct LineAssembler<const N: usize> {
+    buf: [u8; N],
+    len: usize,
+    skipping: bool,
+}
+
+impl<const N: usize> LineAssembler<N> {
+    pub const fn new() -> Self {
+        Self {
+            buf: [0; N],
+            len: 0,
+            skipping: false,
+        }
+    }
+
+    /// Feed the next chunk; `f` runs once per completed line (no `\n`).
+    pub fn push(&mut self, chunk: &[u8], f: &mut impl FnMut(&[u8])) {
+        for &b in chunk {
+            if b == b'\n' {
+                if !self.skipping {
+                    f(&self.buf[..self.len]);
+                }
+                self.len = 0;
+                self.skipping = false;
+            } else if self.skipping {
+                // Rest of an over-long line: dropped.
+            } else if self.len == N {
+                self.skipping = true;
+                self.len = 0;
+            } else {
+                self.buf[self.len] = b;
+                self.len += 1;
+            }
+        }
+    }
+
+    /// End of file: flush a last line that has no trailing newline.
+    pub fn finish(&mut self, f: &mut impl FnMut(&[u8])) {
+        if !self.skipping && self.len > 0 {
+            f(&self.buf[..self.len]);
+        }
+        self.len = 0;
+        self.skipping = false;
+    }
+}
+
+impl<const N: usize> Default for LineAssembler<N> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Parse a non-empty ASCII decimal into a `u32`, or `None` on any
@@ -57,7 +111,10 @@ mod tests {
 
     #[test]
     fn kv_basic_and_whitespace() {
-        assert_eq!(kv_of_line(b"  A = b c \r", true), Some((&b"A"[..], &b"b c"[..])));
+        assert_eq!(
+            kv_of_line(b"  A = b c \r", true),
+            Some((&b"A"[..], &b"b c"[..]))
+        );
         assert_eq!(kv_of_line(b"A=1", false), Some((&b"A"[..], &b"1"[..])));
     }
 
@@ -67,7 +124,10 @@ mod tests {
         assert_eq!(kv_of_line(b"# A=1", false), None);
         assert_eq!(kv_of_line(b"  # A=1", false), None);
         assert_eq!(kv_of_line(b"A=1 # n", true), Some((&b"A"[..], &b"1"[..])));
-        assert_eq!(kv_of_line(b"A=1 # n", false), Some((&b"A"[..], &b"1 # n"[..])));
+        assert_eq!(
+            kv_of_line(b"A=1 # n", false),
+            Some((&b"A"[..], &b"1 # n"[..]))
+        );
     }
 
     #[test]
