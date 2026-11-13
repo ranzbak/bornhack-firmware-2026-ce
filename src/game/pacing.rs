@@ -250,6 +250,15 @@ mod tests {
     }
 
     #[test]
+    fn a_cleared_deadline_waits_a_full_interval() {
+        let mut p = FramePacer::new();
+        assert_eq!(p.wait(0, 1, Some(300), 7200), (300, true));
+        // away from the pet screen for 10 minutes, then cleared on return
+        p.on_frame();
+        assert_eq!(p.wait(600, 1, Some(300), 7200), (300, true));
+    }
+
+    #[test]
     fn an_anim_change_restarts_the_deadline() {
         let mut p = FramePacer::new();
         assert_eq!(p.wait(0, 1, Some(300), 7200), (300, true));

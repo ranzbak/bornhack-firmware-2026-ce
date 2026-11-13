@@ -1461,6 +1461,13 @@ async fn wait_display_event(
 
     #[cfg(not(feature = "game"))]
     let _ = &anim_state;
+    // Away from the pet screen the frame deadline lapses; clear it so coming
+    // back does not fire a stale frame (and cancel the refresh) at once. Not
+    // while `allow_sprite` is false: that is a drive in flight.
+    #[cfg(feature = "game")]
+    if allow_sprite && active_screen != bornhack_aegg::SCREEN_GAME {
+        anim_state.pacer.on_frame();
+    }
     #[cfg(feature = "game")]
     let sprite_active = allow_sprite
         && active_screen == bornhack_aegg::SCREEN_GAME
@@ -1482,11 +1489,8 @@ async fn wait_display_event(
             let kind = lifecycle::pet_kind();
             let frame_count =
                 bornhack_aegg::game::engine::anim_files::frame_count(kind, anim) as u32;
-            let frame_secs = pacing::frame_interval_secs(
-                anim,
-                frame_count,
-                lifecycle::action_ticks_remaining(),
-            );
+            let frame_secs =
+                pacing::frame_interval_secs(anim, frame_count, lifecycle::action_ticks_remaining());
             let wake_secs = pacing::wake_secs(
                 lifecycle::next_wake_tick(),
                 bornhack_aegg::game::next_ui_deadline_tick(),

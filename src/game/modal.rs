@@ -1062,8 +1062,9 @@ where
 {
     use super::lifecycle;
     use super::stat_bar::draw_stat_bar;
-    super::note_live_view_drawn();
     use crate::RED;
+
+    super::note_live_view_drawn();
 
     // Get fresh stats (triggers an update if needed).
     let stats = match lifecycle::cycle() {

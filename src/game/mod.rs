@@ -414,9 +414,6 @@ pub(crate) fn last_reason_for_test() -> engine::doses::Reason {
     )
 }
 
-/// True while a view whose numbers drift by themselves is on screen. Such a
-/// view is refreshed at least once per idle frame (display pacing, not
-/// engine polling).
 /// Tick the live view was last drawn (or opened); its refresh deadline is
 /// anchored here so minute ticks cannot slide it forward.
 static LIVE_DRAWN_TICK: AtomicU32 = AtomicU32::new(0);
@@ -426,8 +423,20 @@ pub(crate) fn note_live_view_drawn() {
     LIVE_DRAWN_TICK.store(lifecycle::now_tick(), Ordering::Relaxed);
 }
 
+/// The next refresh tick of a live view last drawn at `drawn`: on the grid
+/// of idle frames anchored at the draw, so it is never in the past (a view
+/// hidden under another screen cannot cause a poll) and at most one idle
+/// frame ahead.
+fn live_deadline(drawn: u32, now: u32) -> u32 {
+    let frames = now.saturating_sub(drawn) / pacing::IDLE_FRAME_TICKS + 1;
+    drawn.saturating_add(pacing::IDLE_FRAME_TICKS.saturating_mul(frames))
+}
+
+/// True while a view whose numbers drift by themselves is on screen. Such a
+/// view is refreshed at least once per idle frame (display pacing, not
+/// engine polling). A Gone pet shows no live view.
 pub fn live_view_open() -> bool {
-    modal::live_modal_view_open()
+    modal::live_modal_view_open() && lifecycle::display_anim() != engine::DisplayAnim::Gone
 }
 
 /// Next tick the frame loop must wake for UI-only timed state, whatever the
@@ -447,7 +456,7 @@ pub fn next_ui_deadline_tick() -> u32 {
     }
     if live_view_open() {
         let drawn = LIVE_DRAWN_TICK.load(Ordering::Relaxed);
-        next = next.min(drawn.saturating_add(pacing::IDLE_FRAME_TICKS));
+        next = next.min(live_deadline(drawn, now));
     }
     next
 }
@@ -702,6 +711,10 @@ where
 
     // ── Gone ─────────────────────────────────────────────────────────────
     if anim == DisplayAnim::Gone {
+        // A Gone pet shows no menu or live view.
+        if modal::is_open() {
+            modal::close();
+        }
         // Farewell animation blitted by embassy.rs if available.
         if sprite_loader::frame_count() == 0 {
             Text::with_text_style("Your pet has left", Point::new(76, 50), font_red, centered)
@@ -1126,6 +1139,39 @@ mod tests {
         super::battle_view::show_result_for_test();
         assert!(super::battle_view::wants_full_refresh());
         assert_eq!(super::next_ui_deadline_tick(), u32::MAX);
+    }
+
+    #[test]
+    fn live_deadline_is_on_a_grid_never_in_the_past() {
+        use super::{live_deadline, pacing::IDLE_FRAME_TICKS as F};
+        assert_eq!(live_deadline(500, 500), 500 + F);
+        assert_eq!(live_deadline(500, 500 + F - 1), 500 + F);
+        assert_eq!(live_deadline(500, 500 + F), 500 + 2 * F);
+        let now = 1000;
+        let d = live_deadline(now - 100, now);
+        assert!(d > now && d <= now + F, "{d}");
+        // a later draw moves the anchor
+        assert_eq!(live_deadline(now, now), now + F);
+    }
+
+    #[test]
+    fn a_gone_pet_keeps_no_live_view() {
+        use crate::game::engine::{GameState, PetKind, Phase};
+        let _guard = super::lock_test_state();
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.phase = Phase::Active;
+        crate::game::lifecycle::set_state_for_test(Some(s));
+        super::modal::open(super::modal::ModalKind::Stats);
+        super::modal::activate();
+        assert!(super::live_view_open());
+        let mut gone = GameState::new_egg(7, PetKind(0));
+        gone.phase = Phase::Gone;
+        crate::game::lifecycle::set_state_for_test(Some(gone));
+        assert_eq!(super::lifecycle::display_anim(), super::engine::DisplayAnim::Gone);
+        assert!(!super::live_view_open());
+        assert_eq!(super::next_ui_deadline_tick(), u32::MAX);
+        super::modal::close();
+        crate::game::lifecycle::set_state_for_test(None);
     }
 
     #[test]
