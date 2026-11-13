@@ -10,15 +10,19 @@ Each plan ships working firmware and a working simulator on its own, with its te
 |---|---|---|---|---|---|
 | 1 | **Engine core and save v3** | the v2 needs, doses, interactions, conditions, sleep, delta solver, 2 h wake cap, save v3 with v2 upgrade, simulator with step oracle; just enough menu items to play it (Wash, Relax, Wake up, Water refusal toasts) | none | 1 to 4, 13, 15.1 to 15.6, 15.8, 17 rows 1 to 10 and 28 to 31, 18.1 to 18.3 | L |
 | 2 | **Reading the pet (UI)** | two-page stats view with band ticks, status line, cause toasts, menu hints, diary, Health status entry removed, 5-minute idle frame | 1 | 5, 17 rows 29 and 32, 18.6 | M |
-| 3 | **Demo mode** | self-caring pet, clock-following sleep, fitness floor, settings toggle, calm display | 1 (engine events), 2 (status line) | 8, 13.3, 17 rows 11 to 15, 18.3, 18.8 | M |
+| 3 | **Demo mode** | self-caring pet, clock-following sleep, fitness floor, weight control (owner: tune here; one run ended at 98 %), settings toggle, calm display | 1 (engine events), 2 (status line) | 8, 13.3, 17 rows 11 to 15, 18.3, 18.8 | M |
 | 4 | **NFC stations** | `fix s=...` plaintext, old phrases as aliases, per-station cooldown, clinic preset | 1 | 19 | S |
 | 5 | **Battles** | new battle formula and floors, snapshot, challenge / accept / decline, pre-battle screen with win chance, 100 / 20 HAX pay, beacon with six numbers | 1; 2 for the mirrored bar widget | 12, 15.7, 17 rows 16 to 23a, 18.4, 18.5, 18.8 | L |
 | 6 | **Hard mode and money** | v2 prices and work, debt, deductible and copay, work insurance, insulin creep (cap 60), surprise bills, authorization popup, eviction | 1, 2 (bill and popup screens) | 15.9, 16, 17 rows 24 to 27, 18.5 | M |
 | 6b | Crowdfunding and cross-border pharmacy | two SHDW message types | 5, 6 | 16.3 rows 10 and 11 | M |
-| 7 | **Backgrounds, floor items, Jellyfish removal** | layered backgrounds, day and night from the clock, floor items tied to dirt | 1 (dirt), 2 (screen layout) | 14 (not written by this planner; read it before planning) | M |
+| 7 | **Backgrounds, floor items, Jellyfish removal** | layered backgrounds, day and night from the clock, floor items tied to dirt; new or replaced assets reach existing badges through `copy_assets.py --update` from plan 1 task 15 (extend it for replacements) | 1 (dirt), 2 (screen layout) | 14 (not written by this planner; read it before planning) | M |
 | 8 | Long-term layer | care score display, growth forms as titles, traits as modifiers, Unicorn Realm record fields | 1, 2 | 4, 17 row 11 | S to M |
 
 Plans 3, 4, 5 and 7 are independent of each other once 1 and 2 are in. 6 needs the work action from 1 and screens from 2. Suggested sequence for a festival deadline: 1, 2, 4, 3, 6, 5, 7, 8, 6b.
+
+## Tunable balance across plans
+
+Plan 1 makes every v2 value a `Thresholds` field with a Classic and a Casual value and a `BORNPETS.CFG` key (owner, 2026-11-13). Every later plan follows the same rule for the values it adds (demo policy, station limits, battle stats, prices, hard-mode amounts) and regenerates the commented template `assets/to-badge/BORNPETS.CFG`. An asset update keeps the owner's previous file as `BORNPETS.BAK`.
 
 ## Save format across plans
 

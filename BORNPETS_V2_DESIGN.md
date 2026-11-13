@@ -1863,6 +1863,17 @@ Still open after round 2: one fight a day out-earning a shift; the demo pet's we
 
 ---
 
+### 18.9 Owner answers, round 3 (2026-11-13)
+
+| Question | Answer |
+|---|---|
+| Keep the Casual preset and `BORNPETS.CFG` tuning? | **Yes:** "make the new engine tunable as well, copy new config in with new assets, copy old config to .bak". Every v2 value is a `Thresholds` field with Classic and Casual values and a config key; the new `BORNPETS.CFG` ships as a commented template with the assets; an update keeps the previous file as `BORNPETS.BAK`. Plan 1, tasks 1 and 15. |
+| Fresh-egg health `85 % - (MAX - vitality) / 8` | **OK.** |
+| Demo pet weight control is weak | **Tune it in plan 3 (demo mode).** |
+| One fight a day pays about two shifts | **Accepted.** |
+
+---
+
 ## 19. NFC magic stations
 
 Owner requirement: the magic places stay part of the game (tap the badge, the pet gets a fix), and the signed station message should carry v2 variable names and values instead of three fixed phrases that each reset one old stat.

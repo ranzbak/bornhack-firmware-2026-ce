@@ -20,6 +20,10 @@
 - Scale: levels are `u16`, `P = 655` is one percent, `MAX = 65535`.
 - 1 engine minute = 6 ticks; 1 tick = 10 s.
 - Engine wake cap: 720 ticks (2 h).
+- **v2 balance is runtime-tunable** (owner, 2026-11-13: "make the new engine tunable as well, copy new config in with new assets, copy old config to .bak"). Every v2 rate, band edge, dose, timer and condition threshold is a field of the existing `Thresholds` table (`src/game/engine/thresholds.rs`, `thresholds_table!`) with a Classic and a Casual value and a `BORNPETS_CFG_KEYS` row. Engine code reads them through the generated accessors, never as literals. Numbers pinned in Tasks 3 to 10 are the **Classic** values; tests run with the Classic preset installed and may use literals.
+- Casual preset (spec 10, phase 2): every band 5 points wider on each side (lower edges -5, upper edges +5, clamped to 1..99), every health-damage rate halved; all other values equal to Classic.
+- No v2 config key reuses a v1 key name; v1 keys left in an old file are unknown and skipped.
+- Fixed safety edges (15, 25, 85, 90, 95 and the other non-band entries of the edge table) stay `const`; only band edges and the danger lines named in Task 1 are tunable.
 - Local builds and tests use at most 2 cores: prefix `CARGO_BUILD_JOBS=2 taskset -c 0,1` and pass `-j 2`.
 - Test command: `CARGO_BUILD_JOBS=2 taskset -c 0,1 cargo test -j 2 --features simulator --test <file> <name>`.
 - Firmware check: `CARGO_BUILD_JOBS=2 taskset -c 0,1 cargo build -j 2 --bin embassy --no-default-features --features embassy-game --target thumbv7em-none-eabihf`.
@@ -33,12 +37,18 @@ Failure modes the spec implies and that are easy to ship unnoticed, most likely 
 3. **Mood or health crosses its own line inside a segment**, so health keeps the wrong recovery rate for hours. Pinned in Task 8 (`mood_crossing_60_splits_the_segment`).
 4. **v2 upgrade maps the old bad-high stats one to one**, giving stuffed, exhausted or unfit pets after the update. Pinned in Task 11 (`v2_golden_upgrades_to_expected_v3_levels`).
 5. **`next_wake_tick` is later than the first visible change, or always at the cap.** Pinned in Task 10 (`wake_is_never_later_than_first_status_change`, `wake_budget_balanced_day`).
+6. **A hand-edited `BORNPETS.CFG` breaks the solver or the pet** (lower edge above upper edge, a zero rate used as a divisor, an edge of 0 or 100). Pinned in Task 1 (`bad_band_pair_falls_back_to_preset`, `zero_rate_keys_are_floored`) and Task 15 (`template_parses_to_classic_with_no_edits`).
 
 ## File map
 
 | File | Change |
 |---|---|
-| `src/game/engine/needs.rs` | create: `Need`, band and threshold tables, constants |
+| `src/game/engine/needs.rs` | create: `Need`, band accessors, edge table built from the active `Thresholds` |
+| `src/game/engine/thresholds.rs` | modify: v2 fields (Classic + Casual), `BORNPETS_CFG_KEYS` rows, `validate`, edge-table cache in `install` |
+| `src/game/bornpets_cfg.rs` | modify: custom flag = values differ from preset; validation before install |
+| `assets/to-badge/BORNPETS.CFG` | create: v2 template, every key commented out with its Classic and Casual value |
+| `scripts/copy_assets.py`, `scripts/test_copy_assets.py` | modify / create: `--update` mode that backs up the old config to `BORNPETS.BAK` |
+| `USER_GAMES.md` | modify: v2 key list (generated from `BORNPETS_CFG_KEYS`) |
 | `src/game/engine/regime.rs` | create: `rates`, multipliers, `sleep_quality_pm`, `health_ceiling`, `mood_target` |
 | `src/game/engine/solver.rs` | create: `seg_len`, `sig` |
 | `src/game/engine/advance.rs` | create: `advance`, wake handling |
@@ -54,35 +64,44 @@ Failure modes the spec implies and that are easy to ship unnoticed, most likely 
 
 ---
 
-### Task 1: needs, bands and thresholds
+### Task 1: needs, tunable bands and the edge table
 
-**Files:** create `src/game/engine/needs.rs`; modify `src/game/engine/mod.rs` (add `pub mod needs;`); create `tests/engine_v3.rs`.
+**Files:** create `src/game/engine/needs.rs`; modify `src/game/engine/mod.rs` (add `pub mod needs;`), `src/game/engine/thresholds.rs`, `src/game/bornpets_cfg.rs` (`load_and_install` 27, `apply_overrides` 55); create `tests/engine_v3.rs`.
 
 **Produces:**
 ```rust
+// needs.rs
 pub const P: i32 = 655; pub const MAX: i32 = 65535;
 #[repr(u8)] pub enum Need { Full = 0, Water, Energy, Fun, Dirt, Booze, Strain, Fit, Weight }
 pub const NEEDS: usize = 9;
-pub const FULL_LO: i32 = 38 * P; pub const FULL_HI: i32 = 78 * P;
-pub const WATER_LO: i32 = 38 * P; pub const WATER_HI: i32 = 83 * P;
-pub const ENERGY_LO: i32 = 33 * P;
-pub const FUN_LO: i32 = 33 * P;  pub const FUN_HI: i32 = 73 * P;
-pub const DIRT_HI: i32 = 58 * P; pub const BOOZE_HI: i32 = 38 * P; pub const BOOZE_DANGER: i32 = 70 * P;
-pub const STRAIN_INJ: i32 = 60 * P; pub const FIT_LO: i32 = 43 * P;
-pub const WEIGHT_LO: i32 = 38 * P; pub const WEIGHT_HI: i32 = 63 * P;
-/// Percent thresholds at which any rate, penalty or health term changes. 0 and 100 are implicit.
-pub const THRESHOLDS: [&[u8]; NEEDS] = [
-    &[15, 25, 38, 78, 85, 95], &[15, 25, 38, 83, 85, 90, 95], &[10, 33, 50, 70, 85],
-    &[33, 40, 73], &[25, 58, 85], &[10, 15, 30, 38, 70], &[15, 40, 60],
-    &[25, 43, 50, 60, 61, 70], &[20, 38, 63, 65, 80]];
-pub fn pct(level: i32) -> i32;        // level / P
-pub fn clamp_level(v: i32) -> i32;    // 0..=MAX
+pub fn full_lo() -> i32;  pub fn full_hi() -> i32;   // FULL_LO_PCT() as i32 * P, ...
+pub fn water_lo() -> i32; pub fn water_hi() -> i32;
+pub fn energy_lo() -> i32;
+pub fn fun_lo() -> i32;   pub fn fun_hi() -> i32;
+pub fn dirt_hi() -> i32;  pub fn booze_hi() -> i32;  pub fn booze_danger() -> i32;
+pub fn strain_inj() -> i32; pub fn fit_lo() -> i32;
+pub fn weight_lo() -> i32; pub fn weight_hi() -> i32;
+pub const MAX_EDGES: usize = 8;
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct EdgeTable { pub edges: [[u8; MAX_EDGES]; NEEDS], pub len: [u8; NEEDS] }
+pub fn build_edges(t: &Thresholds) -> EdgeTable; // fixed edges merged with t's band edges, ascending, deduplicated
+pub fn edges() -> &'static EdgeTable;            // cached copy built by thresholds::install
+pub fn pct(level: i32) -> i32;  pub fn clamp_level(v: i32) -> i32;
+// thresholds.rs
+pub fn validate(t: &Thresholds, preset: &Thresholds) -> Thresholds; // per band pair: lo < hi else both from preset
 ```
+Band fields (`u8`, percent; Classic / Casual): `FULL_LO_PCT` 38/33, `FULL_HI_PCT` 78/83, `WATER_LO_PCT` 38/33, `WATER_HI_PCT` 83/88, `ENERGY_LO_PCT` 33/28, `FUN_LO_PCT` 33/28, `FUN_HI_PCT` 73/78, `DIRT_HI_PCT` 58/63, `BOOZE_HI_PCT` 38/43, `BOOZE_DANGER_PCT` 70/75, `STRAIN_INJ_PCT` 60/65, `FIT_LO_PCT` 43/38, `WEIGHT_LO_PCT` 38/33, `WEIGHT_HI_PCT` 63/68. Setters clamp to 1..=99. Fixed edges (`const`, not tunable): Full 15, 25, 85, 95; Water 15, 25, 85, 90, 95; Energy 10, 50, 70, 85; Fun 40; Dirt 25, 85; Booze 10, 15, 30; Strain 15, 40; Fit 25, 50, 60, 61, 70; Weight 20, 65, 80. With Classic installed `edges()` equals the prototype's table: `[15,25,38,78,85,95]`, `[15,25,38,83,85,90,95]`, `[10,33,50,70,85]`, `[33,40,73]`, `[25,58,85]`, `[10,15,30,38,70]`, `[15,40,60]`, `[25,43,50,60,61,70]`, `[20,38,63,65,80]`.
 
-- [ ] Test `thresholds_are_sorted_and_cover_every_band_edge`: every slice strictly ascending; `THRESHOLDS[Need::Full as usize]` contains 38 and 78; Water 38 and 83; Energy 33; Fun 33 and 73; Dirt 58; Booze 38 and 70; Fit 43; Weight 38, 63, 80.
-- [ ] Run `... --test engine_v3 thresholds_are_sorted` : FAIL (module missing).
-- [ ] Implement `needs.rs` exactly as above.
-- [ ] Run: PASS. Commit `feat(engine): v2 needs, bands and threshold table`.
+All other v2 tunables (rates per minute, multipliers in per-mille, doses, timers in minutes, condition onset and cure times, ceiling steps) are added as `Thresholds` fields **in the task that first reads them** (Tasks 3, 4, 5, 9, 10), each with Classic = the value pinned in that task, Casual = Classic except health-damage rates halved, and one `BORNPETS_CFG_KEYS` row. Rates are stored as positive magnitudes (`u16`); the sign lives in the code. Any key used as a divisor is floored to 1 in its setter.
+
+- [ ] Test `classic_edges_match_prototype`: `build_edges(&Thresholds::CLASSIC)` equals the nine slices above (compare `edges[i][..len[i]]`).
+- [ ] Test `casual_bands_are_five_wider`: `Thresholds::CASUAL.FULL_LO_PCT == 33`, `FULL_HI_PCT == 83`, `FIT_LO_PCT == 38`; every slice of `build_edges(&CASUAL)` strictly ascending.
+- [ ] Test `cfg_override_moves_an_edge`: `apply_overrides(&mut t, b"FULL_HI_PCT=80\n")` returns 1; `build_edges(&t).edges[Need::Full as usize]` contains 80, not 78.
+- [ ] Test `bad_band_pair_falls_back_to_preset`: overrides `FULL_LO_PCT=90` with Classic: `validate` gives 38 / 78; `WATER_HI_PCT=0` clamps to 1 and then the pair falls back to 38 / 83.
+- [ ] Test `custom_flag_only_when_values_differ`: a file whose rows repeat Classic values leaves `values == Thresholds::CLASSIC` and `load_and_install`'s custom flag is computed as `values != mode.preset()` (move the comparison into a host-testable `fn is_custom_set(values: &Thresholds, mode: Mode) -> bool`; derive `PartialEq` on `Thresholds`).
+- [ ] Run `... --test engine_v3 classic_edges` : FAIL (module missing).
+- [ ] Implement: fields, setters, `validate`, `build_edges`, cache filled in `thresholds::install` (also in the simulator's install path), `is_custom_set`; `load_and_install` calls `validate` before `install`.
+- [ ] Run all five: PASS. Run the existing `tests/` suite: no regressions. Commit `feat(engine): v2 needs with tunable bands and edge table`.
 
 ### Task 2: GameState v3 fields and fresh egg
 
@@ -313,9 +332,34 @@ pub fn balanced(day: u32, minute: u32, s: &GameState) -> heapless::Vec<Action, 6
 - [ ] Test `catch_up_is_capped_and_safe`: `(0, x) -> 0`; `(1000, 900) -> 0`; `(1000, 1000 + 3600) -> 60`; `(1000, 1000 + 86400 * 3) -> 720`.
 - [ ] Run: FAIL. Implement. Run: PASS. Firmware check builds. Commit `feat(game): catch up at most 12 h on boot`.
 
+### Task 15: v2 config template, backup on update, docs
+
+**Files:** create `assets/to-badge/BORNPETS.CFG`; modify `scripts/copy_assets.py` (`copy_assets_to` 140, `process_device` 170, `main` 395); create `scripts/test_copy_assets.py`; modify `USER_GAMES.md` (section "Custom balance: `BORNPETS.CFG`", line 46), `QUICKSTART.md:93`, `POCKET_CARD.md:62`.
+
+**Consumes:** `BORNPETS_CFG_KEYS`, `Thresholds::CLASSIC`, `Thresholds::CASUAL`, `apply_overrides`. **Produces:**
+```rust
+// thresholds.rs, host only (#[cfg(any(test, feature = "simulator"))])
+pub fn cfg_template() -> String; // the exact text of assets/to-badge/BORNPETS.CFG
+```
+```python
+# copy_assets.py
+CONFIG_NAME = "BORNPETS.CFG"; BACKUP_NAME = "BORNPETS.BAK"
+def update_assets_to(mount_point: Path, assets_dir: Path) -> dict  # {"backed_up": bool, "config": bool, "added": [names]}
+```
+Template text: first line `# BornPets v2 balance. Uncomment a line to change it. The previous file was saved as BORNPETS.BAK.`; then for every key in `BORNPETS_CFG_KEYS` order one comment line `# KEY=<classic>   (Casual <casual>)`. No active rows, so the file never overrides the Casual preset and never sets the `*` mark. `BORNPETS.BAK` is 8.3-safe for the badge's FAT12 volume.
+
+Update mode (`copy_assets.py --update`): accepts non-empty `CYBR*` volumes. Order: if `BORNPETS.CFG` exists on the volume and differs from the new template, and `BORNPETS.BAK` does not exist, copy it to `BORNPETS.BAK` (an existing `.BAK` is never overwritten: it holds the oldest owner file); then write the new `BORNPETS.CFG`; then copy only asset files that are **missing** on the volume. Existing files other than `BORNPETS.CFG` are never overwritten (hand-added PCX, `PETS.CFG`, `000000.PCX`, `010000.PCX` differ per badge). Factory mode (no flag) is unchanged.
+
+- [ ] Test `template_parses_to_classic_with_no_edits` (Rust, `tests/engine_v3.rs`): `cfg_template()` equals the file on disk (`include_str!("../assets/to-badge/BORNPETS.CFG")`); `apply_overrides(&mut CLASSIC.clone(), template)` returns 0; every key of `BORNPETS_CFG_KEYS` appears once; uncommenting every line yields `values == CLASSIC`.
+- [ ] Test `no_v2_key_reuses_a_v1_name`: none of the v2 keys equals one of the 21 v1 names (`HUNGER_RATE`, `TIRED_RATE`, `SLEEP_HUNGER_COST`, `SICK_RATE`, `SICK_CONDITION_RATE`, `SICK_CONDITION_MISERABLE_RATE`, `MISERABLE_INTERVAL_BASE`, `MISERABLE_INTERVAL_MIN`, `FEED_HUNGER_RELIEF`, `HEAL_SICK_RELIEF`, `PLAY_HUNGER_COST`, `PLAY_TIRED_COST`, `MINIGAME_HUNGER_COST`, `MINIGAME_COOLDOWN`, `HATCHING_TICKS`, `MAX_SLEEP_TICKS`, `WEIGHT_RATE`, `FEED_WEIGHT_GAIN`, `EXERCISE_WEIGHT_RELIEF`, `DIABETES_ONSET_TICKS`, `MEDICATE_COOLDOWN`) unless the field keeps its v1 meaning and unit (`HATCHING_TICKS`, `MINIGAME_COOLDOWN`, `MAX_SLEEP_TICKS`); v1 rows whose field the v2 engine no longer reads are removed from `BORNPETS_CFG_KEYS`.
+- [ ] Tests (Python, `scripts/test_copy_assets.py`, temp dirs): `test_update_backs_up_old_config` (old `BORNPETS.CFG` → `BORNPETS.BAK` byte-identical, new config written); `test_update_keeps_existing_bak`; `test_update_no_backup_when_identical`; `test_update_never_overwrites_other_files` (a differing `PETS.CFG` and `000000.PCX` survive, a missing PCX is added); `test_factory_mode_unchanged` (empty volume gets every file).
+- [ ] Run `CARGO_BUILD_JOBS=2 taskset -c 0,1 cargo test -j 2 --features simulator --test engine_v3 template_` and `python3 -m unittest discover -s scripts -p 'test_copy_assets.py'`: FAIL.
+- [ ] Implement `cfg_template`, write the asset file from it, `update_assets_to`, the `--update` flag; regenerate the key list in `USER_GAMES.md` from `BORNPETS_CFG_KEYS` (the stale v1 keys `DRAINED_INTERVAL`, `FEED_DRAINED_RELIEF`, `RELAX_DRAINED_RELIEF`, `RELAX_HUNGER_COST`, `PLAY_DRAINED_COST`, `DRAINED_INTERVAL_MISERABLE` go) and say that the update keeps the old file as `BORNPETS.BAK`.
+- [ ] Run both: PASS. Firmware check builds. Commit `feat(game): v2 BORNPETS.CFG template and backup on asset update`.
+
 ## Self-review
 
-- **Coverage:** needs and bands (T1), fields (T2), every rate and multiplier of spec 13.2 / 15 (T3), mood and health incl. stepwise ceiling and the 30 % sleep-shortage floor (T4), sleep without timer, oversleep 4 h, sleep-deprived, hangover, dependence and rehab, diabetes and reversal, injury, collapse, leaving drain-back (T5), delta update (T6 to T8), every dose and refusal of 2.3 / 15 / 17 (T9), wake cap and status (T10), save (T11), oracle and targets (T12), minimal UI (T13), row 30 (T14). Deliberately outside this plan: demo policy, stations, battle formula, hard mode, the two-page stats view.
+- **Coverage:** needs and bands (T1), fields (T2), every rate and multiplier of spec 13.2 / 15 (T3), mood and health incl. stepwise ceiling and the 30 % sleep-shortage floor (T4), sleep without timer, oversleep 4 h, sleep-deprived, hangover, dependence and rehab, diabetes and reversal, injury, collapse, leaving drain-back (T5), delta update (T6 to T8), every dose and refusal of 2.3 / 15 / 17 (T9), wake cap and status (T10), save (T11), oracle and targets (T12), minimal UI (T13), row 30 (T14). Tunable balance: bands and edge table (T1), every other v2 value added as a `Thresholds` field by the task that reads it, config template, `.BAK` backup and docs (T15). Deliberately outside this plan: demo policy, stations, battle formula, hard mode, the two-page stats view.
 - **Type consistency:** levels are `u16` in the struct and `i32` in arithmetic; minute timers `u16` (largest value 10080); counters reuse the existing `u32` fields; `Action` gains `Wash` and `Relax` and needs matching `to_u8` / `from_u8` values 10 and 11.
-- **Review Focus:** items 1 to 5 are pinned in T6, T12, T8, T11, T10.
+- **Review Focus:** items 1 to 6 are pinned in T6, T12, T8, T11, T10, T1 + T15.
 - **Proportion:** rule bodies are given as pinned values; only the solver and the segment split are described as algorithms.
