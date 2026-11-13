@@ -638,6 +638,12 @@ where
         return game::traits_view::draw(display);
     }
 
+    // Diary: the last cause events.
+    #[cfg(feature = "game")]
+    if game::diary_view::is_active() {
+        return game::diary_view::draw(display);
+    }
+
     // Health status: full-screen weight/diabetes modifiers view.
     #[cfg(feature = "game")]
     if game::health_view::is_active() {

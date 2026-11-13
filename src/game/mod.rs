@@ -19,6 +19,8 @@ pub mod battle_view;
 pub mod blackhole;
 pub mod bornjeweled;
 pub mod debug_cheats;
+pub mod diary;
+pub mod diary_view;
 pub mod engine;
 pub mod friends;
 pub mod friends_view;
@@ -57,6 +59,7 @@ use timed_flag::TimedFlag;
 
 /// Action feedback shown briefly after an action.
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
 #[repr(u8)]
 pub enum Toast {
     None = 0,
@@ -108,6 +111,9 @@ pub enum Toast {
     Wash = 28,
     /// Debug menu "Engine info": two lines read from the engine at draw time.
     DebugInfo = 29,
+    /// Why something went badly: two lines (what, why) from `Cause`, read
+    /// from `CAUSE_CODE` (see `show_cause`).
+    Cause = 30,
 }
 
 impl Toast {
@@ -142,6 +148,7 @@ impl Toast {
             27 => Self::Reason,
             28 => Self::Wash,
             29 => Self::DebugInfo,
+            30 => Self::Cause,
             _ => Self::None,
         }
     }
@@ -181,6 +188,8 @@ impl Toast {
             Toast::Reason => "",
             // Dynamic — handled in the renderer.
             Toast::DebugInfo => "",
+            // Two lines, drawn by `draw_cause_toast`.
+            Toast::Cause => "",
         }
     }
 }
@@ -194,6 +203,9 @@ static TOAST: TimedFlag = TimedFlag::new();
 /// The reason shown by [`Toast::Reason`]: `Reason::pack` kind and seconds.
 static REASON_KIND: AtomicU8 = AtomicU8::new(0);
 static REASON_SECS: AtomicU32 = AtomicU32::new(0);
+
+/// The cause shown by [`Toast::Cause`]: `Cause::pack`.
+static CAUSE_CODE: AtomicU8 = AtomicU8::new(0);
 
 /// Remaining cooldown in seconds, read by the renderer when the
 /// active toast is [`Toast::StationCooldown`].  Set by
@@ -355,6 +367,22 @@ pub fn show_toast(toast: Toast) {
     crate::TOAST_SIGNAL.signal(());
 }
 
+/// The cause toast: what went wrong (bold red, on the HAX row), then why
+/// (red, one row lower, clear of the balance).
+fn draw_cause_toast<D>(display: &mut D) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = crate::TriColor>,
+{
+    let Some(cause) = engine::causes::Cause::unpack(CAUSE_CODE.load(Ordering::Relaxed)) else {
+        return Ok(());
+    };
+    let style = crate::ui::TOP_LEFT;
+    crate::ui::draw_text(display, cause.what(), TOAST_POS, crate::ui::TEXT_BOLD_RED, style)?;
+    let second = TOAST_POS + Point::new(0, TOAST_LINE_DY);
+    crate::ui::draw_text(display, cause.why(), second, crate::ui::TEXT_RED, style)?;
+    Ok(())
+}
+
 /// Full-screen one-shot condition alert: two bold black lines and a red hint,
 /// cleared once `ALERT_MIN_VISIBLE_MS` has elapsed.
 fn draw_alert<D>(
@@ -405,6 +433,28 @@ pub fn show_reason(why: engine::doses::Reason) {
     show_toast(Toast::Reason);
 }
 
+/// Tell the player what went wrong and why (silent: no buzz).
+pub fn show_cause(c: engine::causes::Cause) {
+    CAUSE_CODE.store(c.pack(), Ordering::Relaxed);
+    show_toast(Toast::Cause);
+}
+
+/// The toast that is up now.
+#[cfg(test)]
+pub(crate) fn current_toast_for_test() -> Toast {
+    if TOAST.is_active() {
+        Toast::from_u8(TOAST_MSG.load(Ordering::Relaxed))
+    } else {
+        Toast::None
+    }
+}
+
+/// The cause the last `show_cause` stored.
+#[cfg(test)]
+pub(crate) fn last_cause_for_test() -> Option<engine::causes::Cause> {
+    engine::causes::Cause::unpack(CAUSE_CODE.load(Ordering::Relaxed))
+}
+
 /// The reason the last `show_reason` stored.
 #[cfg(test)]
 pub(crate) fn last_reason_for_test() -> engine::doses::Reason {
@@ -436,7 +486,7 @@ fn live_deadline(drawn: u32, now: u32) -> u32 {
 /// view is refreshed at least once per idle frame (display pacing, not
 /// engine polling). A Gone pet shows no live view.
 pub fn live_view_open() -> bool {
-    modal::live_modal_view_open() && lifecycle::display_anim() != engine::DisplayAnim::Gone
+    (modal::live_modal_view_open() || diary_view::is_active()) && lifecycle::display_anim() != engine::DisplayAnim::Gone
 }
 
 /// Next tick the frame loop must wake for UI-only timed state, whatever the
@@ -494,6 +544,13 @@ const STATUS_CHAR_W: i32 = 7;
 const STATUS_BACKING_PAD: i32 = 4;
 
 /// First display row of the pet/sprite area.
+/// The HAX balance: right-aligned, top baseline, ending at x = 150.
+const HAX_POS: Point = Point::new(150, 33);
+/// The toast's first line, top-left. It shares the HAX row, so the cause
+/// toast keeps its `what` line short enough to end left of the balance.
+const TOAST_POS: Point = Point::new(2, SEP_TOP + 2);
+/// Distance from a toast's first line to its second.
+const TOAST_LINE_DY: i32 = 13;
 pub const PET_AREA_TOP: usize = SEP_TOP as usize + 1;
 
 // ── Public entry point
@@ -630,7 +687,7 @@ where
         );
         // Reuse the already-linked bold font (FONT_7X13_BOLD via `font`) —
         // pulling in a second glyph table (9x15) overflowed FLASH by ~12 KB.
-        Text::with_text_style(money_buf.as_str(), Point::new(150, 33), font, right_style)
+        Text::with_text_style(money_buf.as_str(), HAX_POS, font, right_style)
             .draw(display)?;
     }
 
@@ -799,14 +856,16 @@ where
         } else {
             toast.message()
         };
-        if !msg.is_empty() {
+        if let Toast::Cause = toast {
+            draw_cause_toast(display)?;
+        } else if !msg.is_empty() {
             
             
             use embedded_graphics::text::{Text};
             let style = crate::ui::TOP_LEFT;
             Text::with_text_style(
                 msg,
-                Point::new(2, SEP_TOP + 2),
+                TOAST_POS,
                 // Red so the action feedback (-hunger / -sick / +inspired /
                 // bonus) pops against the black UI.
                 crate::ui::TEXT_BOLD_RED,
@@ -995,6 +1054,44 @@ impl Drop for TestState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_cause_toast_clears_the_hax_balance() {
+        use embedded_graphics::prelude::*;
+        use embedded_graphics::text::Text;
+        // The widest balance the badge shows: "{} H" of a six-digit number.
+        let mut hax: heapless::String<12> = heapless::String::new();
+        core::fmt::Write::write_fmt(&mut hax, format_args!("{} H", 999_999)).unwrap();
+        let hax_box = Text::with_text_style(
+            hax.as_str(),
+            super::HAX_POS,
+            crate::ui::TEXT_BOLD_BLACK,
+            crate::ui::TOP_RIGHT,
+        )
+        .bounding_box();
+        for cause in super::engine::causes::Cause::all() {
+            let what_box = Text::with_text_style(
+                cause.what(),
+                super::TOAST_POS,
+                crate::ui::TEXT_BOLD_RED,
+                crate::ui::TOP_LEFT,
+            )
+            .bounding_box();
+            assert!(
+                what_box.intersection(&hax_box).is_zero_sized(),
+                "{cause:?}: {what_box:?} meets {hax_box:?}"
+            );
+            let why_box = Text::with_text_style(
+                cause.why(),
+                super::TOAST_POS + Point::new(0, super::TOAST_LINE_DY),
+                crate::ui::TEXT_RED,
+                crate::ui::TOP_LEFT,
+            )
+            .bounding_box();
+            assert!(why_box.intersection(&hax_box).is_zero_sized(), "{cause:?}");
+            assert!(why_box.bottom_right().unwrap().x <= 150, "{cause:?}");
+        }
+    }
+
     #[test]
     fn toasts_name_the_v3_effects() {
         use super::Toast;

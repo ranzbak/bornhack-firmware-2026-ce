@@ -92,6 +92,7 @@ impl ModalKind {
         match self {
             Self::Stats => &[
                 Item::ViewStats,
+                Item::Diary,
                 Item::RolledStats,
                 Item::HealthStatus,
                 Item::Friends,
@@ -185,6 +186,7 @@ impl ModalKind {
 enum Item {
     Cancel,
     ViewStats,
+    Diary,
     RolledStats,
     HealthStatus,
     Friends,
@@ -295,6 +297,7 @@ impl Item {
         match self {
             Self::Cancel => "Cancel",
             Self::ViewStats => "View stats",
+            Self::Diary => "Diary",
             Self::RolledStats => "Rolled stats",
             Self::HealthStatus => "Health status",
             Self::Friends => "Friends",
@@ -366,12 +369,13 @@ impl Item {
         if stats.hibernating && !matches!(self, Self::Debug(_)) {
             return matches!(
                 self,
-                Self::Cancel | Self::ViewStats | Self::RolledStats | Self::WakeUp,
+                Self::Cancel | Self::ViewStats | Self::Diary | Self::RolledStats | Self::WakeUp,
             );
         }
         match self {
             Self::Cancel
             | Self::ViewStats
+            | Self::Diary
             | Self::RolledStats
             | Self::HealthStatus
             | Self::Friends
@@ -521,6 +525,10 @@ impl Item {
             Self::ViewStats => {
                 STATS_VIEW.store(true, Ordering::Relaxed);
                 super::note_live_view_drawn();
+            }
+            Self::Diary => {
+                super::diary_view::open();
+                close();
             }
             Self::RolledStats => {
                 super::traits_view::open();
@@ -1367,5 +1375,52 @@ mod tests {
         assert_eq!(step_cursor(5, 0, false), 4);
         assert_eq!(step_cursor(1, 0, true), 0);
         assert_eq!(step_cursor(0, 0, false), 0);
+    }
+
+    #[test]
+    fn an_action_end_shows_its_cause_and_logs_it() {
+        let _guard = crate::game::lock_test_state();
+        use crate::game::engine::{causes::Cause, FoodKind};
+        lifecycle::start_new_game(PetKind(0), false, false);
+        lifecycle::with_state(|s| {
+            s.phase = Phase::Active;
+            s.fullness = 70 * 655;
+            true
+        });
+        Item::FeedFood(FoodKind::Pizza).activate();
+        super::close();
+        lifecycle::debug_skip_minutes(5);
+        lifecycle::cycle();
+        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::Cause);
+        assert_eq!(crate::game::last_cause_for_test(), Some(Cause::FoodComa));
+        assert_eq!(lifecycle::diary().len(), 1);
+        assert_eq!(
+            lifecycle::diary().newest_first().next().unwrap().cause,
+            Cause::FoodComa
+        );
+    }
+
+    #[test]
+    fn a_new_pet_starts_an_empty_diary() {
+        let _guard = crate::game::lock_test_state();
+        use crate::game::engine::causes::Cause;
+        lifecycle::start_new_game(PetKind(0), false, false);
+        lifecycle::log_cause(Cause::Groggy, 0);
+        assert_eq!(lifecycle::diary().len(), 1);
+        lifecycle::start_new_game(PetKind(0), false, false);
+        assert_eq!(lifecycle::diary().len(), 0);
+        lifecycle::log_cause(Cause::Groggy, 0);
+        lifecycle::new_generation(PetKind(0), false, false);
+        assert_eq!(lifecycle::diary().len(), 0);
+    }
+
+    #[test]
+    fn stats_menu_has_a_diary_row() {
+        let labels: std::vec::Vec<&str> =
+            ModalKind::Stats.items().iter().map(|i| i.label()).collect();
+        assert_eq!(
+            labels,
+            ["View stats", "Diary", "Rolled stats", "Health status", "Friends", "Cancel"]
+        );
     }
 }

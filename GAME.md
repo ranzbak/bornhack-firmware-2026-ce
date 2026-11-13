@@ -96,6 +96,12 @@ what triggers each, or "Friends" for the pets your badge has met over
 the mesh (see
 [Friends & the SHDW Channel](#friends--the-shdw-channel) below).
 
+"Diary" lists the last 6 things that went wrong (or well), newest first,
+three per page (Left / Right flips the page, any other button closes).
+Each entry shows how long ago it happened ("now", "59m", "23h", "9d") and
+the same two lines as the toast. The diary is kept in memory only: a new
+pet or a reboot starts it empty.
+
 ## Actions
 
 | Icon         | Options          | What it does                                                    |
@@ -122,6 +128,13 @@ the mesh (see
 |              | Beer             | Baseline drunk gain and weight gain                              |
 |              | Wine             | More drunk than Beer, less weight gain                           |
 |              | Whiskey          | Most drunk by far, least weight gain, strongest drained relief   |
+
+When an action ends badly the pet tells you why. A two-line toast
+appears at the top of the pet area: what happened ("food coma", "barely
+felt", "groggy", "strained") and the reason under it ("ate too much",
+"treat too soon", "overslept", "sport: tired"). A good night says "well
+rested". The toasts are silent, and they teach the rules: read them
+before you repeat the mistake. They are also logged in the Diary.
 
 Each action has a **cooldown** — you'll see "(wait)" next to items that
 aren't ready yet. Actions are mutually exclusive: the pet can only do one

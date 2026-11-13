@@ -312,6 +312,7 @@ pub fn start_new_game(kind: super::engine::PetKind, money_enabled: bool, hard_mo
     egg.money_enabled = money_enabled;
     egg.hard_mode = hard_mode;
     forget_boot_gap(&BOOT_SAVED_UNIX, &CATCH_UP_DONE);
+    clear_diary();
     unsafe {
         *GAME.get() = Some(egg);
     }
@@ -390,7 +391,43 @@ pub fn cycle() -> Option<PetStats> {
     check_severity_transition(state);
     check_diabetes_onset(state);
     check_alcoholism_onset(state);
+    log_causes(state);
     Some(stats)
+}
+
+/// Log what the engine blamed since the last cycle and toast the first. The
+/// waiter never calls `cycle`, so draining here cannot starve any view.
+fn log_causes(state: &mut GameState) {
+    let at_min = state.age_ticks / super::engine::TICKS_PER_MINUTE;
+    let causes = state.take_causes();
+    for cause in causes.iter() {
+        log_cause(*cause, at_min);
+    }
+    if let Some(first) = causes.iter().next() {
+        super::show_cause(*first);
+    }
+}
+
+/// The pet's age in minutes (0 without a game).
+pub fn pet_age_min() -> u32 {
+    let state = unsafe { (*GAME.get()).as_ref() };
+    state.map_or(0, |s| s.age_ticks / super::engine::TICKS_PER_MINUTE)
+}
+
+/// Causes logged for the current pet. RAM only: never saved.
+static DIARY: SyncCell<super::diary::Diary> = SyncCell::new(super::diary::Diary::new());
+
+/// A copy of the diary for the view.
+pub fn diary() -> super::diary::Diary {
+    unsafe { (*DIARY.get()).clone() }
+}
+
+fn clear_diary() {
+    unsafe { (*DIARY.get()).clear() }
+}
+
+pub(super) fn log_cause(cause: super::engine::causes::Cause, at_min: u32) {
+    unsafe { (*DIARY.get()).push(cause, at_min) }
 }
 
 /// Ticks left in the running action (cheap read, no update; 0 when none or
@@ -827,6 +864,7 @@ pub fn new_generation(kind: super::engine::PetKind, money_enabled: bool, hard_mo
 
         let seed = now_tick() as u64 ^ 0xDEAD_BEEF;
         s.new_generation(seed, kind);
+        clear_diary();
         forget_boot_gap(&BOOT_SAVED_UNIX, &CATCH_UP_DONE);
         s.money_enabled = money_enabled;
         s.hard_mode = hard_mode;

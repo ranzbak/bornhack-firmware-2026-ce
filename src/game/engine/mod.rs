@@ -41,7 +41,7 @@ thread_local! {
 }
 
 /// Engine ticks per simulated minute.
-const TICKS_PER_MINUTE: u32 = 6;
+pub const TICKS_PER_MINUTE: u32 = 6;
 
 // ---------------------------------------------------------------------------
 // Types

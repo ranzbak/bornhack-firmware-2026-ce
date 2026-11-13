@@ -29,6 +29,15 @@ pub fn dispatch(btn: ButtonId) -> bool {
         return true;
     }
 
+    // ── Diary: Left / Right flip the page, any other button closes ──────
+    if super::diary_view::is_active() {
+        match btn {
+            ButtonId::Left | ButtonId::Right => super::diary_view::flip(),
+            _ => super::diary_view::close(),
+        }
+        return true;
+    }
+
     // ── Health status view: any button closes it ────────────────────────
     if super::health_view::is_active() {
         super::health_view::close();
