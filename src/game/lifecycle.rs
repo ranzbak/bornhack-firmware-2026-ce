@@ -124,10 +124,11 @@ async fn try_load() -> Option<GameState> {
     match pick_save(v3, v2) {
         Some((mut s, upgraded)) => {
             s.last_update_tick = 0;
-            // Catch up the time the badge was off, if both clocks are known.
-            // No late catch-up when the clock is only set after boot.
+            // Clock already known: catch up now. Otherwise `on_wall_clock_set`
+            // does it when the clock first becomes known.
             if let Some(now) = crate::unix_now() {
-                s.catch_up(catch_up_minutes(s.saved_unix, now));
+                let uptime_s = (crate::platform::uptime_ms() / 1000) as u32;
+                apply_boot_catch_up(&mut s, &CATCH_UP_DONE, now, uptime_s);
             }
             defmt::info!(
                 "game: restored from flash (gen={} age={} upgraded={})",
@@ -195,6 +196,46 @@ pub fn catch_up_minutes(saved_unix: u32, now_unix: u32) -> u32 {
         return 0;
     }
     ((now_unix - saved_unix) / 60).min(CATCH_UP_MAX_MIN)
+}
+
+/// Off-time to catch up when the wall clock becomes known `uptime_s` seconds
+/// after boot: the gap from the save to the boot moment (`now - uptime`), so
+/// the time already run this session is not counted twice.
+pub fn deferred_catch_up_minutes(saved_unix: u32, now_unix: u32, uptime_s: u32) -> u32 {
+    match now_unix.checked_sub(uptime_s) {
+        Some(boot_unix) => catch_up_minutes(saved_unix, boot_unix),
+        None => 0,
+    }
+}
+
+/// Catch the pet up once per boot. `done` is the once-per-boot latch: the
+/// first call takes it and applies the off-time (then requests a save so
+/// `saved_unix` is refreshed); later calls do nothing. Returns true if the
+/// catch-up was taken.
+pub fn apply_boot_catch_up(s: &mut GameState, done: &AtomicBool, now_unix: u32, uptime_s: u32) -> bool {
+    if done.swap(true, Ordering::Relaxed) {
+        return false;
+    }
+    let minutes = deferred_catch_up_minutes(s.saved_unix, now_unix, uptime_s);
+    if minutes > 0 {
+        s.catch_up(minutes);
+        s.request_save();
+    }
+    true
+}
+
+/// Set once the boot catch-up was taken (RAM only, one per boot).
+static CATCH_UP_DONE: AtomicBool = AtomicBool::new(false);
+
+/// Called by `set_wall_clock` the moment the clock is set. The first call
+/// of a boot catches the loaded pet up on the time the badge was off; later
+/// calls (re-syncs) and a missing pet do nothing.
+#[cfg(feature = "embassy-core")]
+pub fn on_wall_clock_set(now_unix: u32) {
+    if let Some(s) = unsafe { (*GAME.get()).as_mut() } {
+        let uptime_s = (crate::platform::uptime_ms() / 1000) as u32;
+        apply_boot_catch_up(s, &CATCH_UP_DONE, now_unix, uptime_s);
+    }
 }
 
 /// Create a new egg and begin the hatching countdown.
@@ -918,10 +959,12 @@ pub async fn save_if_needed() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Severity, current_severity};
+    use super::{
+        Severity, apply_boot_catch_up, catch_up_minutes, current_severity, deferred_catch_up_minutes,
+    };
     use crate::game::engine::needs::P;
-    use super::catch_up_minutes;
     use crate::game::engine::{GameState, PetKind, Phase};
+    use core::sync::atomic::AtomicBool;
 
     fn pet() -> GameState {
         let mut s = GameState::new_egg(7, PetKind(0));
@@ -981,8 +1024,49 @@ mod tests {
         let age0 = s.age_ticks;
         let fullness = s.fullness;
         s.catch_up(600);
+        assert_eq!(s.hibernate_ticks, 3600);
         assert_eq!(s.age_ticks, age0);
         assert_eq!(s.fullness, fullness);
         assert_eq!(s.last_update_tick, 0);
+    }
+
+    #[test]
+    fn catch_up_carries_the_sub_minute_remainder() {
+        let mut s = pet();
+        s.catch_up(1);
+        assert_eq!(s.tick_rem, 0);
+        assert_eq!(s.last_update_tick, 0);
+        s.update(3); // half a minute of real time
+        assert_eq!(s.tick_rem, 3);
+        s.update(6);
+        assert_eq!(s.tick_rem, 0);
+    }
+
+    #[test]
+    fn clock_known_later_catches_up_the_off_time_only() {
+        // Saved at 1000, booted at 1000 + 3600, clock set 600 s after boot.
+        assert_eq!(deferred_catch_up_minutes(1000, 1000 + 3600 + 600, 600), 60);
+        assert_eq!(deferred_catch_up_minutes(1000, 1000 + 3600, 0), 60);
+    }
+
+    #[test]
+    fn clock_before_saved_is_ignored() {
+        assert_eq!(deferred_catch_up_minutes(5000, 4000, 0), 0);
+        assert_eq!(deferred_catch_up_minutes(5000, 5300, 600), 0);
+        assert_eq!(deferred_catch_up_minutes(0, 9000, 10), 0);
+        assert_eq!(deferred_catch_up_minutes(1000, 100, 600), 0); // now < uptime
+    }
+
+    #[test]
+    fn catch_up_runs_once_per_boot() {
+        let done = AtomicBool::new(false);
+        let mut s = pet();
+        s.saved_unix = 1000;
+        assert!(apply_boot_catch_up(&mut s, &done, 1000 + 3600, 0));
+        assert_eq!(s.age_ticks, 360);
+        assert!(s.needs_save());
+        let age = s.age_ticks;
+        assert!(!apply_boot_catch_up(&mut s, &done, 1000 + 7200, 0));
+        assert_eq!(s.age_ticks, age);
     }
 }

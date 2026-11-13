@@ -492,12 +492,6 @@ impl GameState {
 // ---------------------------------------------------------------------------
 
 impl GameState {
-    /// Advance the game state to `now_tick`.
-    ///
-    /// Time moves in whole engine minutes (1 minute = 6 ticks); the sub-minute
-    /// remainder is carried in `tick_rem`.  A backwards clock counts as zero
-    /// elapsed.  Each loop pass advances one solver segment, so a long gap
-    /// costs a handful of closed-form steps, not one per minute.
     /// Age the pet by `minutes` of time the badge was off (boot catch-up).
     /// Runs the normal `update` path, then restores `last_update_tick`, so
     /// the boot tick base is not moved past the real tick counter (else the
@@ -508,6 +502,12 @@ impl GameState {
         self.last_update_tick = base;
     }
 
+    /// Advance the game state to `now_tick`.
+    ///
+    /// Time moves in whole engine minutes (1 minute = 6 ticks); the sub-minute
+    /// remainder is carried in `tick_rem`.  A backwards clock counts as zero
+    /// elapsed.  Each loop pass advances one solver segment, so a long gap
+    /// costs a handful of closed-form steps, not one per minute.
     pub fn update(&mut self, now_tick: u32) {
         let total_delta = now_tick.saturating_sub(self.last_update_tick);
         if total_delta == 0 {

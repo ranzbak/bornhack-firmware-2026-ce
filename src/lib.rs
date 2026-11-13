@@ -467,6 +467,8 @@ pub fn set_wall_clock(unix_secs: u32) {
             ticks_base: embassy_time::Instant::now().as_ticks(),
         });
     });
+    // First clock of the boot: let the pet catch up on the off-time.
+    game::lifecycle::on_wall_clock_set(unix_secs);
 }
 
 /// Latched once the BLE companion has set the wall clock via

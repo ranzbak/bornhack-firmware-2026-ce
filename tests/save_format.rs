@@ -158,7 +158,10 @@ fn v3_golden_bytes_round_trip() {
     assert_eq!(&bytes[139..143], &0x0506_0708u32.to_le_bytes());
     assert_eq!(bytes[V3_FOOD_OFS], 3); // Pizza
     assert_eq!(bytes[V3_DRINK_OFS], 4); // Whiskey
-    assert_eq!(&bytes[V3_SAVED_UNIX_OFS..V3_SAVED_UNIX_OFS + 4], &0x2122_2324u32.to_le_bytes());
+    assert_eq!(
+        &bytes[V3_SAVED_UNIX_OFS..V3_SAVED_UNIX_OFS + 4],
+        &0x2122_2324u32.to_le_bytes()
+    );
     assert_eq!(&bytes[149..177], &[0u8; 28]);
 
     // Every field comes back, including the private counters.
@@ -696,4 +699,13 @@ fn battle_result_short_packet_tolerance() {
     assert_eq!(back.target_kind, 0x0C);
     long[4] = 0;
     assert!(!BattleResultMsg::from_bytes(&long).unwrap().challenger_won);
+}
+
+#[test]
+fn saved_unix_is_zero_for_upgrades_and_old_v3_saves() {
+    assert_eq!(v2_decoded().saved_unix, 0);
+    let mut bytes = v3_state().to_bytes();
+    bytes[V3_SAVED_UNIX_OFS..V3_SAVED_UNIX_OFS + 4].fill(0);
+    let back = GameState::from_bytes(&bytes).expect("v3 save must decode");
+    assert_eq!(back.saved_unix, 0);
 }
