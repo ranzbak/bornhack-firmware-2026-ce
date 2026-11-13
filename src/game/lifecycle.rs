@@ -257,6 +257,13 @@ pub fn saved_unix_to_write(
 /// Set once the boot catch-up was taken (RAM only, one per boot).
 static CATCH_UP_DONE: AtomicBool = AtomicBool::new(false);
 
+/// A new pet replaces the loaded one: drop the old pet's boot gap so the
+/// egg is never caught up on it, and no later save writes it either.
+pub fn forget_boot_gap(boot_saved: &AtomicU32, done: &AtomicBool) {
+    boot_saved.store(0, Ordering::Relaxed);
+    done.store(true, Ordering::Relaxed);
+}
+
 /// Called by `set_wall_clock` the moment the clock is set. The first call
 /// of a boot catches the loaded pet up on the time the badge was off; later
 /// calls (re-syncs) and a missing pet do nothing.
@@ -281,6 +288,7 @@ pub fn start_new_game(kind: super::engine::PetKind, money_enabled: bool, hard_mo
     egg.last_update_tick = now_tick();
     egg.money_enabled = money_enabled;
     egg.hard_mode = hard_mode;
+    forget_boot_gap(&BOOT_SAVED_UNIX, &CATCH_UP_DONE);
     unsafe {
         *GAME.get() = Some(egg);
     }
@@ -786,6 +794,7 @@ pub fn new_generation(kind: super::engine::PetKind, money_enabled: bool, hard_mo
 
         let seed = now_tick() as u64 ^ 0xDEAD_BEEF;
         s.new_generation(seed, kind);
+        forget_boot_gap(&BOOT_SAVED_UNIX, &CATCH_UP_DONE);
         s.money_enabled = money_enabled;
         s.hard_mode = hard_mode;
         s.last_update_tick = now_tick();
@@ -1000,11 +1009,11 @@ pub async fn save_if_needed() -> bool {
 mod tests {
     use super::{
         Severity, apply_boot_catch_up, catch_up_minutes, current_severity, deferred_catch_up_minutes,
-        saved_unix_to_write,
+        forget_boot_gap, saved_unix_to_write,
     };
     use crate::game::engine::needs::P;
     use crate::game::engine::{GameState, PetKind, Phase};
-    use core::sync::atomic::AtomicBool;
+    use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
     fn pet() -> GameState {
         let mut s = GameState::new_egg(7, PetKind(0));
@@ -1151,5 +1160,21 @@ mod tests {
         assert!(apply_boot_catch_up(&mut s, &done, written, 7000, 0));
         // 90 min = 30 (gap 1) + 60 (gap 2); the 10 min session is not counted.
         assert_eq!(s.age_ticks, 90 * 6);
+    }
+
+    #[test]
+    fn new_game_forgets_the_old_off_gap() {
+        let boot = AtomicU32::new(1000);
+        let done = AtomicBool::new(false);
+        assert_eq!(saved_unix_to_write(None, boot.load(Ordering::Relaxed), 600, false), 1600);
+        forget_boot_gap(&boot, &done);
+        let b = boot.load(Ordering::Relaxed);
+        let d = done.load(Ordering::Relaxed);
+        assert_eq!(saved_unix_to_write(None, b, 600, d), 0);
+        // The clock arriving later does not age the fresh egg.
+        let mut egg = pet();
+        let age = egg.age_ticks;
+        assert!(!apply_boot_catch_up(&mut egg, &done, b, 1000 + 3600, 0));
+        assert_eq!(egg.age_ticks, age);
     }
 }
