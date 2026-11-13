@@ -18,11 +18,15 @@ pub mod needs;
 pub mod regime;
 #[cfg(feature = "simulator")]
 pub mod sim;
+pub mod solver;
 pub mod thresholds;
 pub mod to_display;
 
 use needs::{MAX, P};
 use thresholds::*;
+
+/// Engine ticks per simulated minute.
+const TICKS_PER_MINUTE: u32 = 6;
 pub use drink::DrinkKind;
 pub use food::FoodKind;
 pub use to_display::DisplayAnim;
@@ -484,14 +488,13 @@ impl GameState {
 // ---------------------------------------------------------------------------
 
 impl GameState {
-    /// Advance the game state by `(now_tick - last_update_tick)` ticks.
+    /// Advance the game state to `now_tick`.
     ///
-    /// Processes the elapsed time **piecewise**: at each step, the engine
-    /// computes the ticks until the next rate-change boundary, applies
-    /// stat decay at the current rates for that segment (one multiply
-    /// per stat), then recalculates rates.  A 60-day delta with ~10
-    /// boundary crossings per day takes ~600 iterations — instant.
-    pub fn update(&mut self, now_tick: u32) {
+    /// Time moves in whole engine minutes (1 minute = 6 ticks); the sub-minute
+    /// remainder is carried in `tick_rem`.  A backwards clock counts as zero
+    /// elapsed.  Each loop pass advances one solver segment, so a long gap
+    /// costs a handful of closed-form steps, not one per minute.
+        pub fn update(&mut self, now_tick: u32) {
         let total_delta = now_tick.saturating_sub(self.last_update_tick);
         if total_delta == 0 {
             return;
@@ -526,9 +529,19 @@ impl GameState {
             Phase::Leaving | Phase::Active => {}
         }
 
-        // Consume action ticks first (v2 effects land in a later task).
-        let _remaining = self.consume_action_ticks(total_delta);
-        todo!("BornPets v2 plan 1: v2 delta-T update (later task)")
+        // A running action eats its ticks first (v2 effects land in a later
+        // task); without one nothing is consumed.
+        let mut ticks = total_delta + self.tick_rem as u32;
+        if self.active_action.is_some() {
+            ticks = self.consume_action_ticks(ticks);
+        }
+        let mut minutes = ticks / TICKS_PER_MINUTE;
+        self.tick_rem = (ticks % TICKS_PER_MINUTE) as u8;
+        while minutes > 0 {
+            let dt = solver::seg_len(self, minutes).clamp(1, minutes);
+            advance::advance(self, dt);
+            minutes -= dt;
+        }
     }
 
     /// Consume action ticks from delta, applying action effects.

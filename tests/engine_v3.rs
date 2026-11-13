@@ -749,3 +749,51 @@ mod carried_from_task_4 {
         assert_eq!(ceiling_with(&Thresholds::CLASSIC, 0, true), 35 * P);
     }
 }
+
+mod update_minutes {
+    use bornhack_aegg::game::engine::needs::P;
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase};
+
+    fn hatched() -> GameState {
+        let mut s = GameState::new_egg(1, PetKind(0));
+        s.phase = Phase::Active;
+        s.hatching_countdown = 0;
+        s.is_sleeping = false;
+        s
+    }
+
+    #[test]
+    fn many_small_updates_equal_one_big_update() {
+        let mut a = hatched();
+        let mut b = hatched();
+        for t in 1..=8640 {
+            a.update(t);
+        }
+        b.update(8640);
+        assert_eq!(a.fullness, b.fullness);
+        assert_eq!(a.energy, b.energy);
+        assert_eq!(a.age_ticks, b.age_ticks);
+        assert!(b.fullness < (60 * P) as u16, "pet did not age: {}", b.fullness);
+    }
+
+    #[test]
+    fn sub_minute_time_is_carried_not_lost() {
+        let mut s = hatched();
+        s.update(5);
+        assert_eq!(s.tick_rem, 5);
+        let before = s.fullness;
+        s.update(6);
+        assert_eq!(s.tick_rem, 0);
+        assert!(s.fullness < before, "one whole minute must have been applied");
+        assert_eq!(s.age_ticks, 6);
+    }
+
+    #[test]
+    fn clock_going_backwards_is_zero_elapsed() {
+        let mut s = hatched();
+        s.update(100);
+        let (f, rem, age) = (s.fullness, s.tick_rem, s.age_ticks);
+        s.update(50);
+        assert_eq!((s.fullness, s.tick_rem, s.age_ticks), (f, rem, age));
+    }
+}
