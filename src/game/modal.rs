@@ -1238,19 +1238,35 @@ mod tests {
 
     #[test]
     fn a_refused_poke_says_why() {
+        use crate::game::engine::DebugPoke;
+        use crate::game::engine::doses::Reason;
         let _guard = crate::game::lock_test_state();
-        lifecycle::start_new_game(PetKind(0), false, false);
-        // A fresh egg is still hatching: no poke applies.
         let hungry = ModalKind::Debug
             .items()
             .iter()
             .copied()
             .find(|i| i.label() == "Hungry")
             .unwrap();
-        let before = lifecycle::cycle().unwrap();
+        // A fresh egg is still hatching.
+        lifecycle::start_new_game(PetKind(0), false, false);
+        assert_eq!(lifecycle::debug_poke(DebugPoke::Hungry), Err(Reason::Egg));
         hungry.activate();
-        let after = lifecycle::cycle().unwrap();
-        assert_eq!(before.hunger, after.hunger);
+        assert_eq!(crate::game::last_reason_for_test(), Reason::Egg);
+        lifecycle::with_state(|s| {
+            s.phase = Phase::Gone;
+            true
+        });
+        assert_eq!(lifecycle::debug_poke(DebugPoke::Hungry), Err(Reason::Gone));
+        hungry.activate();
+        assert_eq!(crate::game::last_reason_for_test(), Reason::Gone);
+        lifecycle::with_state(|s| {
+            s.phase = Phase::Active;
+            s.hibernating = true;
+            true
+        });
+        assert_eq!(lifecycle::debug_poke(DebugPoke::Hungry), Err(Reason::Hibernating));
+        hungry.activate();
+        assert_eq!(crate::game::last_reason_for_test(), Reason::Hibernating);
         super::close();
     }
 

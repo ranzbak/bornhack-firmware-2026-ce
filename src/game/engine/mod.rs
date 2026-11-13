@@ -908,8 +908,10 @@ impl GameState {
     fn cannot_act(&self) -> Option<doses::Reason> {
         if self.hibernating {
             Some(doses::Reason::Hibernating)
+        } else if self.phase == Phase::Hatching {
+            Some(doses::Reason::Egg)
         } else if !self.is_alive() {
-            Some(doses::Reason::Refused(doses::Refusal::NoNeed))
+            Some(doses::Reason::Gone)
         } else if self.active_action.is_some() {
             Some(doses::Reason::Busy)
         } else {

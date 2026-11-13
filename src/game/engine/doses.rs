@@ -32,6 +32,10 @@ pub enum Reason {
     CantAfford,
     Busy,
     Hibernating,
+    /// Still hatching.
+    Egg,
+    /// The pet has left.
+    Gone,
 }
 
 impl Refusal {
@@ -61,6 +65,8 @@ impl Reason {
             Reason::CantAfford => out.push_str("can't afford"),
             Reason::Busy => out.push_str("busy"),
             Reason::Hibernating => out.push_str("hibernating"),
+            Reason::Egg => out.push_str("still an egg"),
+            Reason::Gone => out.push_str("pet is gone"),
         };
         out
     }
@@ -80,6 +86,8 @@ impl Reason {
             Reason::CantAfford => (7, 0),
             Reason::Busy => (8, 0),
             Reason::Hibernating => (9, 0),
+            Reason::Egg => (10, 0),
+            Reason::Gone => (11, 0),
         };
         (kind, secs)
     }
@@ -96,6 +104,8 @@ impl Reason {
             7 => Reason::CantAfford,
             8 => Reason::Busy,
             9 => Reason::Hibernating,
+            10 => Reason::Egg,
+            11 => Reason::Gone,
             _ => Reason::Refused(Refusal::NoNeed),
         }
     }

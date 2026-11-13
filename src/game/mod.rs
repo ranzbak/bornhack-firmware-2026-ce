@@ -404,6 +404,15 @@ pub fn show_reason(why: engine::doses::Reason) {
     show_toast(Toast::Reason);
 }
 
+/// The reason the last `show_reason` stored.
+#[cfg(test)]
+pub(crate) fn last_reason_for_test() -> engine::doses::Reason {
+    engine::doses::Reason::unpack(
+        REASON_KIND.load(Ordering::Relaxed),
+        REASON_SECS.load(Ordering::Relaxed),
+    )
+}
+
 /// Next tick the frame loop must wake for UI-only timed state, whatever the
 /// engine says: a toast or alert is cleared by the first draw after its
 /// minimum time, and the sleep animation floor ends at a fixed tick. Without

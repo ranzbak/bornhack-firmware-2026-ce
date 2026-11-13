@@ -40,6 +40,9 @@ pub enum DebugPoke {
 /// terms count half.
 const PAST_EDGE: i32 = 8 * P;
 
+/// Mood and health `Comfort` sets, in percent.
+const COMFORT_PCT: i32 = 70;
+
 /// What the engine is doing, for the "Engine info" row. Percent values.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DebugInfo {
@@ -81,25 +84,27 @@ impl StatusWord {
 }
 
 impl DebugInfo {
-    /// Two short lines (21 columns each at the toast font): the word, `!` in
-    /// danger, `zz` asleep, `nt` night; then mood / target, health and the
-    /// wait to the next wake in the countdown format ("23m", "2h05").
+    /// Short lines for the toast (7x13 font, so 11 columns stay left of the
+    /// condition banners at x = 80): the word, a flag line (`!` danger, `zz`
+    /// asleep, `nt` night) when any is set, mood / target, then health and the
+    /// wait to the next wake in the countdown format ("w23m", "w2h05").
     pub fn line(&self) -> heapless::String<48> {
         use core::fmt::Write;
         let mut out = heapless::String::new();
-        let _ = write!(out, "{}", self.status.name());
-        if self.danger {
-            let _ = out.push('!');
-        }
-        if self.asleep {
-            let _ = out.push_str(" zz");
-        }
-        if self.night {
-            let _ = out.push_str(" nt");
+        let _ = out.push_str(self.status.name());
+        let flags = [(self.danger, "!"), (self.asleep, "zz"), (self.night, "nt")];
+        if flags.iter().any(|f| f.0) {
+            let _ = out.push('\n');
+            for (n, (_, f)) in flags.iter().filter(|f| f.0).enumerate() {
+                if n > 0 {
+                    let _ = out.push(' ');
+                }
+                let _ = out.push_str(f);
+            }
         }
         let _ = write!(
             out,
-            "\nm{}/{} h{} wake ",
+            "\nm{}/{}\nh{} w",
             self.mood, self.mood_target, self.health
         );
         match self.wake_in_min {
@@ -160,8 +165,8 @@ impl GameState {
                 self.strain = level(needs::strain_inj() / 2);
                 self.fitness = level((needs::fit_lo() + MAX) / 2);
                 self.weight = level((needs::weight_lo() + needs::weight_hi()) / 2);
-                self.mood = level(70 * P);
-                self.health = level(70 * P);
+                self.mood = level(COMFORT_PCT * P);
+                self.health = level(COMFORT_PCT * P);
             }
             DebugPoke::ClearConditions => {
                 self.injured_min = 0;

@@ -3098,8 +3098,8 @@ fn every_cfg_key_sets_its_own_field() {
 }
 
 mod debug_menu {
-    use bornhack_aegg::game::engine::doses::{self, Reason};
-    use bornhack_aegg::game::engine::needs::{P, pct};
+    use bornhack_aegg::game::engine::doses::Reason;
+    use bornhack_aegg::game::engine::needs::pct;
     use bornhack_aegg::game::engine::status::{StatusWord, status};
     use bornhack_aegg::game::engine::thresholds::HATCHING_TICKS;
     use bornhack_aegg::game::engine::{
@@ -3283,24 +3283,29 @@ mod debug_menu {
         let mut hatching = GameState::new_egg(7, PetKind(0));
         assert_eq!(hatching.phase, Phase::Hatching);
         let before = hatching.clone();
-        assert!(hatching.debug_poke(DebugPoke::Hungry).is_err());
+        assert_eq!(hatching.debug_poke(DebugPoke::Hungry), Err(Reason::Egg));
         assert_eq!(hatching, before);
 
         let mut gone = pet();
         gone.phase = Phase::Gone;
-        assert!(gone.debug_poke(DebugPoke::Hungry).is_err());
+        assert_eq!(gone.debug_poke(DebugPoke::Hungry), Err(Reason::Gone));
 
-        let mut asleep_in_ice = pet();
-        asleep_in_ice.hibernating = true;
+        let mut frozen = pet();
+        frozen.hibernating = true;
         assert_eq!(
-            asleep_in_ice.debug_poke(DebugPoke::Comfort),
+            frozen.debug_poke(DebugPoke::Comfort),
             Err(Reason::Hibernating)
         );
         // The reason is the one every refused action shows.
         assert_eq!(
-            asleep_in_ice.refusal_for(Action::Wash, None),
+            frozen.refusal_for(Action::Wash, None),
             Some(Reason::Hibernating)
         );
+        assert_eq!(hatching.refusal_for(Action::Wash, None), Some(Reason::Egg));
+        assert_eq!(Reason::Egg.text().as_str(), "still an egg");
+        assert_eq!(Reason::Gone.text().as_str(), "pet is gone");
+        assert_eq!(Reason::unpack(Reason::Egg.pack().0, 0), Reason::Egg);
+        assert_eq!(Reason::unpack(Reason::Gone.pack().0, 0), Reason::Gone);
     }
 
     #[test]
@@ -3319,12 +3324,20 @@ mod debug_menu {
             assert_eq!(i.mood_target as i32, pct(regime::mood_target(&s)));
             assert_eq!(i.mood as i32, pct(s.mood as i32));
             assert_eq!(i.health as i32, pct(s.health as i32));
-            let wake = s.next_wake_tick();
-            let want = (wake != u32::MAX).then(|| (wake - s.last_update_tick).div_ceil(6));
-            assert_eq!(i.wake_in_min, want);
             assert_eq!((i.asleep, i.night), (s.is_sleeping, s.night));
         }
-        let _ = (P, doses::fmt_wait(0));
+        // Comfort: mood and health at 70 %.
+        let i = comfy().debug_info();
+        assert_eq!((i.mood, i.health), (70, 70));
+        // A running action ends in 30 ticks = 5 minutes: that is the wake.
+        let mut s = comfy();
+        s.active_action = Some(Action::Play);
+        s.action_ticks_remaining = 30;
+        assert_eq!(s.debug_info().wake_in_min, Some(5));
+        // Hibernating pets never wake by themselves.
+        s.active_action = None;
+        s.hibernating = true;
+        assert_eq!(s.debug_info().wake_in_min, None);
     }
 
     #[test]
@@ -3339,17 +3352,42 @@ mod debug_menu {
             asleep: false,
             night: false,
         };
-        assert_eq!(i.line().as_str(), "Hungry!\nm62/70 h80 wake 23m");
+        assert_eq!(i.line().as_str(), "Hungry\n!\nm62/70\nh80 w23m");
         i.wake_in_min = Some(125);
         i.danger = false;
         i.status = StatusWord::Underweight;
         i.asleep = true;
-        assert_eq!(i.line().as_str(), "Underweight zz\nm62/70 h80 wake 2h05");
+        assert_eq!(i.line().as_str(), "Underweight\nzz\nm62/70\nh80 w2h05");
         i.wake_in_min = None;
-        assert!(i.line().as_str().ends_with("wake -"));
-        // 7 px font on a 152 px screen: 21 columns per line.
-        for l in i.line().as_str().lines() {
-            assert!(l.len() <= 21, "{l}");
+        assert!(i.line().as_str().ends_with("h80 w-"));
+    }
+
+    #[test]
+    fn debug_info_worst_case_fits_the_toast() {
+        // 7 px font: 11 columns end at x = 79, left of the banners at x = 80.
+        // Four lines of 13 px fit the 77 px pet area.
+        let worst = DebugInfo {
+            status: StatusWord::Underweight,
+            danger: true,
+            mood: 100,
+            mood_target: 100,
+            health: 100,
+            wake_in_min: Some(72 * 60),
+            asleep: true,
+            night: true,
+        };
+        let line = worst.line();
+        assert_eq!(line.as_str(), "Underweight\n! zz nt\nm100/100\nh100 w72h00");
+        assert!(line.as_str().lines().count() <= 4);
+        for l in line.as_str().lines() {
+            assert!(l.len() <= 11, "{l}");
+        }
+        for word in [
+            StatusWord::Waterlogged,
+            StatusWord::Underweight,
+            StatusWord::Overweight,
+        ] {
+            assert!(word.name().len() <= 11);
         }
     }
 }
