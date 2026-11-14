@@ -60,8 +60,10 @@ that names it, so the status word shows.
 
 #word-table(
   table.header([*Row*], [*What it does*]),
-  w("Comfort"), [Every need goes to the middle of its band. Booze goes to
-    zero. Mood and health go to #v("COMFORT_PCT").],
+  w("Comfort"), [Fullness, hydration, fun and weight go to the middle of
+    their bands. Energy and fitness go halfway between their low edge and
+    full. Dirt and strain go to half their top line. Booze goes to zero. Mood
+    and health go to #v("COMFORT_PCT").],
   w("Hungry"), [Fullness drops under the danger line.],
   w("Thirsty"), [Hydration drops under the danger line.],
   w("Stuffed"), [Fullness goes past the top of its band.],

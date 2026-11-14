@@ -73,7 +73,7 @@ from the drive and reboot.]
 *Time in the table.* The badge counts in ticks, and #v("TICKS_PER_MINUTE")
 ticks make a minute. The table says which unit each row uses. A row marked
 raw is a plain number in the engine's own scale: a name ending in PM is a
-rate or a share in thousandths, one ending in DIV is a divisor, and one
+per-minute rate or a share, in thousandths, one ending in DIV is a divisor, and one
 ending in MULT is a multiplier.
 
 == `PETS.CFG`, the roster
@@ -90,7 +90,8 @@ One line per pet. The number is the pet's sprite slot, which picks the
 picture files (they are named after it). The name is what the screen shows,
 cut at #v("PETS_CFG_NAME_CAP") letters, plain ASCII only. A `#` starts a
 comment. Two slots are reserved for the badge and ignored, and so are
-numbers past the last slot. A bad line is skipped.
+numbers past the last slot. A slot listed twice renames the pet, it is not listed twice. A bad line is
+skipped.
 
 The shipped file already fills every slot the firmware has. So the useful
 edits are renaming a pet, reordering the list, or removing one. A pet's looks never
@@ -98,13 +99,14 @@ change the rules: all pets play the same.
 
 == Back to the old firmware
 
-Going back is safe. The new firmware never reads, writes or deletes the old
-firmware's files and saves:
+Going back is safe. The new firmware never writes or deletes the old
+firmware's saves, and never touches its balance file:
 
-- the old balance file, `BORNPETS.CFG`, stays on the drive and the old
-  firmware keeps reading it;
+- the old balance file, `BORNPETS.CFG`, is never read, written or deleted. It
+  stays on the drive and the old firmware keeps reading it;
 - the old pet save, kept under the key `state`, and the old name, under
-  `name`, stay as they were;
+  `name`, are read, only when there is no new save yet, to carry the pet over, and never
+  written or deleted, so they stay as they were;
 - the new firmware saves its own copy under `state_v3` and `name_v3`.
 
 The first time the new firmware starts on a badge with an old pet, it reads the old save
