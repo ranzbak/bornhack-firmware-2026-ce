@@ -628,6 +628,24 @@ mod floors {
         }
     }
 
+    /// The torn-muscle dose takes 5 % health. A demo pet on the floor keeps
+    /// it; a pet without demo falls through.
+    #[test]
+    fn injury_dose_does_not_break_the_health_floor() {
+        let floor = pct(t::DEMO_HEALTH_FLOOR_PCT() as i32);
+        for (demo, holds) in [(true, true), (false, false)] {
+            let mut s = calm(demo);
+            // Close enough above the floor that the dose would cross it, and
+            // far enough from the ceiling that no recovery masks the fall.
+            s.health = floor + pct(2);
+            s.strain = pct(95);
+            assert!(s.exercise(), "demo {demo}: the session started");
+            run(&mut s, 30);
+            assert!(s.injured_min > 0, "demo {demo}: the muscle tore");
+            assert_eq!(s.health >= floor, holds, "demo {demo}: health {}", s.health);
+        }
+    }
+
     #[test]
     fn relax_dose_does_not_break_the_floor() {
         for (demo, holds) in [(true, true), (false, false)] {
