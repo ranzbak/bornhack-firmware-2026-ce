@@ -3,6 +3,10 @@
 //! The block sits in the reserved tail of the format-3 save, so a plan-2
 //! save (zeros there) reads as demo off.
 
+use super::GameState;
+use super::needs::{MAX, Need, P};
+use super::thresholds as t;
+
 /// Where the demo block starts in the save, right after `saved_unix`.
 pub const BLOCK_AT: usize = 149;
 /// Bytes in the demo block.
@@ -91,6 +95,53 @@ impl Demo {
             demo_min: (last & HOURS_MAX) as u32 * MIN_PER_HOUR,
         }
     }
+}
+
+/// A fall that crosses `floor` stops on it; a stat already below it does not
+/// fall further and is not raised.
+pub fn floor(before: u16, after: u16, floor: u16) -> u16 {
+    after.max(before.min(floor))
+}
+
+/// The fitness floor as a level.
+pub fn fit_floor() -> u16 {
+    (t::DEMO_FIT_FLOOR_PCT() as i32 * P) as u16
+}
+
+/// The health floor as a level.
+pub fn health_floor() -> u16 {
+    (t::DEMO_HEALTH_FLOOR_PCT() as i32 * P) as u16
+}
+
+/// Fitness after a fall from `before` to `after`: held at the demo floor
+/// while demo is on, as it is.
+pub fn fit_after_fall(s: &GameState, before: u16, after: u16) -> u16 {
+    if s.demo.on {
+        floor(before, after, fit_floor())
+    } else {
+        after
+    }
+}
+
+/// A need that sits on its floor and still falls cannot move: the solver
+/// skips it, like a need at 0, so a pet resting on the floor takes long
+/// segments.
+pub fn pinned(s: &GameState, need: Need, level: i32, rate: i32) -> bool {
+    s.demo.on && need == Need::Fit && rate < 0 && level <= fit_floor() as i32
+}
+
+/// Demo lines for one need (levels, as `lvl(..)`), appended by
+/// `solver::extra_levels` while demo is on. The fitness floor is a line only
+/// while fitness is above it; Task 3 adds the policy lines.
+pub fn levels(s: &GameState, need: Need) -> ([i32; 8], usize) {
+    let mut v = [0; 8];
+    let mut n = 0;
+    if need == Need::Fit && s.fitness > fit_floor() {
+        v[0] = fit_floor() as i32;
+        n = 1;
+    }
+    debug_assert!(v[..n].iter().all(|&l| l <= MAX));
+    (v, n)
 }
 
 /// A nonzero rng state from two numbers (xorshift32 would stick at 0).

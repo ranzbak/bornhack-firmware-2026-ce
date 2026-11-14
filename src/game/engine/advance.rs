@@ -60,6 +60,7 @@ pub fn advance(s: &mut GameState, dt: u32) {
     let asleep = s.is_sleeping;
     let cap = energy_cap(s);
     let was_full_energy = s.energy as i32 >= cap;
+    let health_before = s.health;
 
     // Sleep counters.
     if asleep {
@@ -120,7 +121,7 @@ pub fn advance(s: &mut GameState, dt: u32) {
     s.dirt = bump(s.dirt, step(Need::Dirt));
     s.booze = bump(s.booze, step(Need::Booze));
     s.strain = bump(s.strain, step(Need::Strain));
-    s.fitness = bump(s.fitness, step(Need::Fit));
+    s.fitness = super::demo::fit_after_fall(s, s.fitness, bump(s.fitness, step(Need::Fit)));
     s.weight = bump(s.weight, step(Need::Weight));
 
     // Booze peak and hangover.
@@ -139,7 +140,7 @@ pub fn advance(s: &mut GameState, dt: u32) {
     } else {
         t::DEPENDENCE_ONSET_MIN()
     };
-    if !s.dependent && s.dependence_min >= dependence_line as u32 * SLOW_SCALE {
+    if !s.demo.on && !s.dependent && s.dependence_min >= dependence_line as u32 * SLOW_SCALE {
         s.dependent = true;
     }
     if !s.diabetic && s.diabetes_min >= t::DIABETES_ONSET_MIN() as u32 * SLOW_SCALE {
@@ -211,6 +212,9 @@ pub fn advance(s: &mut GameState, dt: u32) {
         (h - t::HEALTH_EXCESS_DECAY_PM() as i64 * dt as i64).max(ceiling)
     };
     s.health = h.clamp(0, MAX as i64) as u16;
+    if s.demo.on {
+        s.health = super::demo::floor(health_before, s.health, super::demo::health_floor());
+    }
 
     let reach = t::MOOD_STEP() as i64 * dt as i64;
     let mood = s.mood as i64;
@@ -219,7 +223,7 @@ pub fn advance(s: &mut GameState, dt: u32) {
         .clamp(0, MAX as i64) as u16;
 
     // Leaving.
-    if s.health == 0 {
+    if s.health == 0 && !s.demo.on {
         s.leaving_min = s.leaving_min.saturating_add(dt * LEAVING_SCALE);
         if s.leaving_min >= t::LEAVING_MIN() as u32 * LEAVING_SCALE {
             s.phase = Phase::Gone;
@@ -237,8 +241,10 @@ pub fn advance(s: &mut GameState, dt: u32) {
         }
     }
 
-    // Care counters.
-    if !asleep {
+    // Care counters. Demo time is not care time.
+    if s.demo.on {
+        s.demo.demo_min = s.demo.demo_min.saturating_add(dt);
+    } else if !asleep {
         s.care_awake_min = s.care_awake_min.saturating_add(dt);
         if s.mood as i32 >= lvl(t::CARE_GOOD_MOOD_PCT()) {
             s.care_good_min = s.care_good_min.saturating_add(dt);
@@ -289,7 +295,8 @@ pub fn wake(s: &mut GameState, by_player: bool) {
     if s.oversleep_min > t::GROGGY_LINE_MIN() {
         s.groggy_min = t::GROGGY_MIN();
         s.energy = bump(s.energy, -(lvl(t::GROGGY_ENERGY_PCT()) as i64));
-        s.fitness = bump(s.fitness, -(lvl(t::GROGGY_FIT_PCT()) as i64));
+        let fit = bump(s.fitness, -(lvl(t::GROGGY_FIT_PCT()) as i64));
+        s.fitness = super::demo::fit_after_fall(s, s.fitness, fit);
         s.causes.push(Cause::Groggy);
     }
     let bad_night = poor >= RESTLESS_MIN && poor as u32 * BAD_NIGHT_POOR_SHARE_DEN > span as u32;

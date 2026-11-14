@@ -8,6 +8,7 @@
 //! own lines are not handled here.
 
 use super::advance::{LEAVING_SCALE, SLOW_SCALE};
+use super::demo;
 use super::needs::{self, MAX, NEEDS, Need, P};
 use super::regime::{energy_cap, health_ceiling, mood_penalty, rates};
 use super::thresholds as t;
@@ -27,7 +28,7 @@ fn ceil_div(a: i64, b: i64) -> i64 {
 /// Levels a need's rate or a penalty branches on that the edge table does
 /// not guarantee: its fixed rows hold literals while these are tunable, and
 /// the table lacks the thirst steps (booze 40 %) outright.
-const MAX_EXTRA: usize = 8;
+const MAX_EXTRA: usize = 16;
 
 fn extra_levels(s: &GameState, need: Need) -> ([i32; MAX_EXTRA], usize) {
     let mut v = [0; MAX_EXTRA];
@@ -101,6 +102,12 @@ fn extra_levels(s: &GameState, need: Need) -> ([i32; MAX_EXTRA], usize) {
             4
         }
     };
+    let mut n = n;
+    if s.demo.on {
+        let (lines, k) = demo::levels(s, need);
+        v[n..n + k].copy_from_slice(&lines[..k]);
+        n += k;
+    }
     (v, n)
 }
 
@@ -147,10 +154,14 @@ fn level_bound(s: &GameState) -> u32 {
     let mut best = u32::MAX;
     for i in 0..NEEDS {
         let (level, rate) = (levels[i] as i32, r[i]);
-        if rate == 0 || rate < 0 && level == 0 || rate > 0 && level == MAX {
+        let need = NEED_ORDER[i];
+        if rate == 0
+            || rate < 0 && level == 0
+            || rate > 0 && level == MAX
+            || demo::pinned(s, need, level, rate)
+        {
             continue;
         }
-        let need = NEED_ORDER[i];
         let (extra, extras) = extra_levels(s, need);
         let tabled = table.edges[i][..table.len[i] as usize]
             .iter()
@@ -195,8 +206,8 @@ fn timer_bound(s: &GameState) -> u32 {
     ] {
         plain(m as i64);
     }
-    if s.health != 0 {
-        // Counting down; reaching 0 returns a Leaving pet to Active.
+    if s.health != 0 || s.demo.on {
+        // Counting down (a demo pet never leaves, so health 0 counts down too); reaching 0 returns a Leaving pet to Active.
         plain(s.leaving_min as i64);
     } else {
         plain(scaled_left(t::LEAVING_MIN(), LEAVING_SCALE, s.leaving_min));
@@ -231,7 +242,7 @@ fn timer_bound(s: &GameState) -> u32 {
             feeds(t::OVERSLEEP_WAKE_MIN() as i64 - s.oversleep_min as i64);
         }
     }
-    if s.booze as i32 > needs::booze_hi() && !s.dependent {
+    if s.booze as i32 > needs::booze_hi() && !s.dependent && !s.demo.on {
         let line = if s.recovering_min > 0 {
             t::DEPENDENCE_RELAPSE_MIN()
         } else {
@@ -290,7 +301,8 @@ pub fn seg_len(s: &GameState, max: u32) -> u32 {
 /// Health lines (`health > line`, and `== 0`):
 /// - 0: leaving, `health_damage` floor;
 /// - `needs::HEALTH_DANGER_PCT`: the status word's danger line (shared with `status`);
-/// - 25 % and 45 % (brief; no term reads them yet);
+/// - `DEMO_HEALTH_FLOOR_PCT`: the demo health floor; `DEMO_MED_HEALTH_PCT`
+///   and `DEMO_HELP_HEALTH_PCT`: where the demo pet looks after itself;
 /// - `DMG_ENERGY_HEALTH_PCT`: energy damage stops at this floor;
 /// - `COLLAPSE_HEALTH_FLOOR_PCT`: collapse damage applies above it;
 /// - `MOOD_HEALTH_FLOOR_PCT`: `mood_target` term `floor - health`;
@@ -309,10 +321,11 @@ pub fn sig(s: &GameState) -> u32 {
     ];
     let health_lines = [
         lvl(needs::HEALTH_DANGER_PCT),
-        lvl(25),
+        lvl(t::DEMO_HEALTH_FLOOR_PCT()),
+        lvl(t::DEMO_HELP_HEALTH_PCT()),
         lvl(t::DMG_ENERGY_HEALTH_PCT()),
         lvl(t::COLLAPSE_HEALTH_FLOOR_PCT()),
-        lvl(45),
+        lvl(t::DEMO_MED_HEALTH_PCT()),
         lvl(t::MOOD_HEALTH_FLOOR_PCT()),
     ];
     let flags = [

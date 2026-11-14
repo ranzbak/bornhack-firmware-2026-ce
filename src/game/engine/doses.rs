@@ -349,6 +349,13 @@ fn exercise(s: &mut GameState) {
     }
 }
 
+/// A dose that takes fitness: held at the demo floor while demo is on.
+fn lower_fitness(s: &mut GameState, amount: i32) {
+    let before = s.fitness;
+    bump(&mut s.fitness, -amount);
+    s.fitness = super::demo::fit_after_fall(s, before, s.fitness);
+}
+
 fn relax(s: &mut GameState) {
     let fun = s.fun as i32;
     bump(&mut s.fun, -lvl(t::DOSE_RELAX_FUN_PCT()));
@@ -357,7 +364,7 @@ fn relax(s: &mut GameState) {
     }
     bump(&mut s.strain, -lvl(t::DOSE_RELAX_STRAIN_PCT()));
     bump(&mut s.energy, lvl(t::DOSE_RELAX_ENERGY_PCT()));
-    bump(&mut s.fitness, -lvl(t::DOSE_RELAX_FIT_PCT()));
+    lower_fitness(s, lvl(t::DOSE_RELAX_FIT_PCT()));
 }
 
 /// Medicine: halves an injury (and numbs: booze), does nothing but numb a
@@ -377,7 +384,7 @@ fn heal(s: &mut GameState) {
 
 fn ozempic(s: &mut GameState) {
     bump(&mut s.weight, -lvl(t::DOSE_OZEMPIC_WEIGHT_PCT()));
-    bump(&mut s.fitness, -lvl(t::DOSE_OZEMPIC_FIT_PCT()));
+    lower_fitness(s, lvl(t::DOSE_OZEMPIC_FIT_PCT()));
     s.ozempic_min = t::DOSE_OZEMPIC_MIN();
     s.ozempic_cd_min = t::DOSE_OZEMPIC_CD_MIN();
 }
