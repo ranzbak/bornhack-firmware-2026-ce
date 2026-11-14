@@ -290,7 +290,7 @@ pub struct GameState {
     pub demo: demo::Demo,
     /// The demo pet's dice. Transient: `new_egg` seeds it from `seed`,
     /// `from_bytes` derives it from the age and generation; never 0.
-    pub(crate) demo_rng: demo::Dice,
+    pub(crate) demo_rng: u32,
 
     // Diabetes — permanent once triggered by sustained overweight.
     pub diabetic: bool,
@@ -1324,9 +1324,10 @@ pub struct PetStats {
     pub losses: u16,
 
     /// Current HAX balance. Only meaningful (displayed/priced) when
-    /// `money_enabled`.
+    /// `money_enabled` (which is false in demo mode).
     pub money: u32,
-    /// Whether the money layer is active for this pet — gates HAX display,
+    /// Whether HAX is live for this pet: the money layer is on and demo mode
+    /// is not freezing it (`GameState::money_live`). Gates HAX display,
     /// pricing, and menu affordability checks.
     pub money_enabled: bool,
     /// Whether Hard (US) prices are in effect. Only meaningful when
@@ -1958,10 +1959,10 @@ impl GameState {
         s.active_food = food_from_u8(r.u8());
         s.active_drink = drink_from_u8(r.u8());
         s.saved_unix = r.u32();
-        if let Ok(block) = b[demo::BLOCK_AT..demo::BLOCK_AT + demo::BLOCK_LEN].try_into() {
-            s.demo = demo::Demo::read(block);
-        }
-        s.demo_rng = demo::seed_rng(s.age_ticks as u64, s.generation as u64);
+        let block: &[u8; demo::BLOCK_LEN] = b[demo::BLOCK_AT..demo::BLOCK_AT + demo::BLOCK_LEN]
+            .try_into()
+            .expect("length checked above");
+        s.demo = demo::Demo::read(block);
         Some(s)
     }
 
@@ -2130,6 +2131,8 @@ impl Head {
         s.phase = phase_from_u8(self.phase);
         s.hatching_countdown = self.hatching_countdown;
         s.generation = self.generation;
+        // Both load paths seed the dice here, from the age and generation.
+        s.demo_rng = demo::seed_rng(self.age_ticks as u64, self.generation as u64);
         s.is_sleeping = self.is_sleeping;
         s.hibernating = self.hibernating;
         s.diabetic = self.diabetic;

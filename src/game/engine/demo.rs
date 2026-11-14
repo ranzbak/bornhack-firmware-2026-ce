@@ -21,6 +21,15 @@ const PET_ACTION_BIT: u16 = 1 << 15;
 /// Most whole hours the saved lifetime holds (3.7 years).
 const HOURS_MAX: u16 = PET_ACTION_BIT - 1;
 const MIN_PER_HOUR: u32 = 60;
+/// Mixing multipliers for `seed_rng` (the 64-bit golden ratio, xxHash prime 2).
+const GOLDEN_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
+const XXH_PRIME64_2: u64 = 0xC2B2_AE3D_27D4_EB4F;
+
+// Flags byte of the block.
+const FLAG_ON: u8 = 1;
+const FLAG_SOFT_ARMED: u8 = 2;
+const FLAG_CLOCK_ARMED: u8 = 4;
+const FLAG_ANIMATED: u8 = 8;
 
 /// The saved demo block (save bytes 149..160). All zero = demo off.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -49,10 +58,11 @@ pub struct Demo {
 
 impl Demo {
     pub fn write(&self, b: &mut [u8; BLOCK_LEN]) {
-        b[0] = self.on as u8
-            | (self.soft_armed as u8) << 1
-            | (self.clock_armed as u8) << 2
-            | (self.animated as u8) << 3
+        let flag = |on: bool, bit: u8| if on { bit } else { 0 };
+        b[0] = flag(self.on, FLAG_ON)
+            | flag(self.soft_armed, FLAG_SOFT_ARMED)
+            | flag(self.clock_armed, FLAG_CLOCK_ARMED)
+            | flag(self.animated, FLAG_ANIMATED)
             | (self.lazy.min(LAZY_MAX)) << LAZY_SHIFT;
         b[1..3].copy_from_slice(&self.clock_min.to_le_bytes());
         b[3..5].copy_from_slice(&self.whim_min.to_le_bytes());
@@ -67,10 +77,10 @@ impl Demo {
     pub fn read(b: &[u8; BLOCK_LEN]) -> Demo {
         let last = u16::from_le_bytes([b[9], b[10]]);
         Demo {
-            on: b[0] & 1 != 0,
-            soft_armed: b[0] & 2 != 0,
-            clock_armed: b[0] & 4 != 0,
-            animated: b[0] & 8 != 0,
+            on: b[0] & FLAG_ON != 0,
+            soft_armed: b[0] & FLAG_SOFT_ARMED != 0,
+            clock_armed: b[0] & FLAG_CLOCK_ARMED != 0,
+            animated: b[0] & FLAG_ANIMATED != 0,
             lazy: b[0] >> LAZY_SHIFT,
             clock_min: u16::from_le_bytes([b[1], b[2]]),
             whim_min: u16::from_le_bytes([b[3], b[4]]),
@@ -83,21 +93,32 @@ impl Demo {
     }
 }
 
-/// The demo pet's dice state. Transient (never saved), so two states that
-/// differ only in their dice compare equal: a save round trip must not
-/// change equality.
-#[derive(Clone, Copy, Debug)]
-pub struct Dice(pub u32);
-
-impl PartialEq for Dice {
-    fn eq(&self, _: &Dice) -> bool {
-        true
-    }
+/// A nonzero rng state from two numbers (xorshift32 would stick at 0).
+pub fn seed_rng(a: u64, b: u64) -> u32 {
+    let mixed = a.wrapping_mul(GOLDEN_GAMMA) ^ b.wrapping_mul(XXH_PRIME64_2);
+    let folded = (mixed ^ (mixed >> 32)) as u32;
+    if folded == 0 { 1 } else { folded }
 }
 
-/// A nonzero rng state from two numbers (xorshift32 would stick at 0).
-pub fn seed_rng(a: u64, b: u64) -> Dice {
-    let mixed = a.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ b.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
-    let folded = (mixed ^ (mixed >> 32)) as u32;
-    Dice(if folded == 0 { 1 } else { folded })
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::engine::{GameState, PetKind, Phase, SAVE_SIZE_V2};
+
+    #[test]
+    fn both_load_paths_seed_the_dice_alike() {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.phase = Phase::Active;
+        s.age_ticks = 12_345;
+        s.generation = 3;
+        let v3 = s.to_bytes();
+        let mut v2 = [0u8; SAVE_SIZE_V2];
+        v2.copy_from_slice(&v3[..SAVE_SIZE_V2]);
+        v2[0] = 2;
+        let a = GameState::from_bytes(&v3).unwrap();
+        let b = GameState::from_bytes_v2(&v2).unwrap();
+        assert_eq!(a.demo_rng, b.demo_rng);
+        assert_eq!(a.demo_rng, seed_rng(12_345, 3));
+        assert_ne!(a.demo_rng, 0);
+    }
 }

@@ -1741,7 +1741,8 @@ pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
     }),
     ("DOSE_FRIEND_SMALL_FUN_PCT", |t, v| {
         t.DOSE_FRIEND_SMALL_FUN_PCT = v.min(100) as u8
-    }),    ("DEMO_FIT_FLOOR_PCT", |t, v| {
+    }),
+    ("DEMO_FIT_FLOOR_PCT", |t, v| {
         t.DEMO_FIT_FLOOR_PCT = clamp_pct(v)
     }),
     ("DEMO_HEALTH_FLOOR_PCT", |t, v| {
@@ -1808,10 +1809,10 @@ pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
         t.DEMO_WHIM_BOOZE_HI_PCT = clamp_pct(v)
     }),
     ("DEMO_WHIM_BEER_LO_PCT", |t, v| {
-        t.DEMO_WHIM_BEER_LO_PCT = clamp_pct(v)
+        t.DEMO_WHIM_BEER_LO_PCT = v.min(100) as u8
     }),
     ("DEMO_WHIM_BEER_HI_PCT", |t, v| {
-        t.DEMO_WHIM_BEER_HI_PCT = clamp_pct(v)
+        t.DEMO_WHIM_BEER_HI_PCT = v.min(100) as u8
     }),
     ("DEMO_BEER_STOP_MIN", |t, v| {
         t.DEMO_BEER_STOP_MIN = clamp_u16(v)
@@ -1874,7 +1875,7 @@ pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
         t.DEMO_UP_SPREAD_MIN = clamp_u16(v).clamp(1, DAY_SPREAD_MAX_MIN)
     }),
     ("DEMO_PAUSE_MIN", |t, v| {
-        t.DEMO_PAUSE_MIN = v.min(255) as u8
+        t.DEMO_PAUSE_MIN = v.min(u8::MAX as u32) as u8
     }),
     ("DEMO_PICK_APPLE_PCT", |t, v| {
         t.DEMO_PICK_APPLE_PCT = v.min(100) as u8

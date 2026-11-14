@@ -125,6 +125,64 @@ mod state {
     }
 
     #[test]
+    fn set_demo_edges() {
+        use bornhack_aegg::game::engine::thresholds::{DEMO_ON_HEALTH_PCT, DEMO_WHIM_BASE_MIN};
+
+        // A running action does not block the toggle.
+        let mut busy = active();
+        assert!(busy.feed(FoodKind::Apple));
+        assert!(busy.active_action.is_some());
+        assert_eq!(busy.set_demo(true), Ok(()));
+
+        let mut h = active();
+        h.hibernating = true;
+        assert_eq!(h.set_demo(true), Err(Reason::Hibernating));
+        let mut g = active();
+        g.phase = Phase::Gone;
+        assert_eq!(g.set_demo(true), Err(Reason::Gone));
+
+        // Exactly the line is fair shape; one level under is not.
+        let line = DEMO_ON_HEALTH_PCT() as i32 * P;
+        let mut edge = active();
+        edge.health = line as u16;
+        assert_eq!(edge.set_demo(true), Ok(()));
+        assert_eq!(edge.demo.whim_min, DEMO_WHIM_BASE_MIN());
+        let mut under = active();
+        under.health = (line - 1) as u16;
+        assert_eq!(
+            under.set_demo(true),
+            Err(Reason::Refused(Refusal::FixMeFirst))
+        );
+
+        // Care mode and whose action runs survive both ways.
+        let mut k = active();
+        k.demo.animated = true;
+        k.demo.pet_action = true;
+        k.demo.soft_armed = true;
+        assert_eq!(k.set_demo(true), Ok(()));
+        assert!(k.demo.animated && k.demo.pet_action && !k.demo.soft_armed);
+        assert_eq!(k.set_demo(false), Ok(()));
+        assert!(k.demo.animated && k.demo.pet_action);
+    }
+
+    #[test]
+    fn demo_work_reward_pays_nothing() {
+        use bornhack_aegg::game::engine::{Action, doses};
+        let mut o = active();
+        o.money_enabled = true;
+        o.money = 50;
+        doses::apply(&mut o, Action::OnlyPets).unwrap();
+        assert!(o.money > 50);
+
+        let mut s = active();
+        s.money_enabled = true;
+        s.money = 50;
+        s.demo.on = true;
+        doses::apply(&mut s, Action::OnlyPets).unwrap();
+        assert_eq!(s.money, 50);
+    }
+
+    #[test]
     fn demo_freezes_hax() {
         let mut s = active();
         s.money_enabled = true;

@@ -5181,6 +5181,7 @@ mod hint {
             Reason::Refused(Refusal::Asleep),
             Reason::Refused(Refusal::NoNeed),
             Reason::Refused(Refusal::Tired),
+            Reason::Refused(Refusal::FixMeFirst),
             Reason::Wait(59),
             Reason::Wait(72 * 3600),
             Reason::CantAfford,

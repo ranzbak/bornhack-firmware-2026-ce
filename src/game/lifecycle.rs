@@ -977,14 +977,22 @@ pub fn money() -> u32 {
     }
 }
 
-/// Whether HAX money mode is enabled for the current pet (defaults to
-/// false if no game).
+/// Whether HAX is live for the current pet: money mode on and not frozen by
+/// demo mode (defaults to false if no game).
 pub fn money_enabled() -> bool {
     let state = unsafe { (*GAME.get()).as_ref() };
     match state {
         Some(s) => s.money_live(),
         None => false,
     }
+}
+
+/// Whether the pet's money mode was chosen at creation, demo or not (false
+/// if no game). Unlike `money_enabled()` it ignores the demo freeze; menu
+/// rows that exist because of the mode (Only pets) read it.
+pub fn money_mode() -> bool {
+    let state = unsafe { (*GAME.get()).as_ref() };
+    state.is_some_and(|s| s.money_enabled)
 }
 
 /// Whether Hard (US) prices are in effect for the current pet (defaults

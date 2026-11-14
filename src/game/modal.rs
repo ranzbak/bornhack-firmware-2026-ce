@@ -125,7 +125,7 @@ impl ModalKind {
                 Item::Cancel,
             ],
             Self::Play => {
-                if super::lifecycle::money_enabled() {
+                if super::lifecycle::money_mode() {
                     &[
                         Item::Battle,
                         Item::PlayNow,
@@ -1643,6 +1643,20 @@ mod tests {
     }
 
     #[test]
+    fn only_pets_row_stays_in_demo_mode() {
+        let _guard = crate::game::lock_test_state();
+        let _stats = menu_pet(true, false, |_| {});
+        assert!(ModalKind::Play.items().contains(&Item::OnlyPets));
+        lifecycle::with_state(|s| {
+            s.demo.on = true;
+            true
+        });
+        assert!(!lifecycle::money_enabled());
+        assert!(ModalKind::Play.items().contains(&Item::OnlyPets));
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
     fn every_reason_fits_the_title() {
         use crate::game::engine::doses::{Reason, Refusal};
         let mut all = vec![
@@ -1660,6 +1674,7 @@ mod tests {
             Refusal::Asleep,
             Refusal::NoNeed,
             Refusal::Tired,
+            Refusal::FixMeFirst,
         ] {
             all.push(Reason::Refused(r));
         }
