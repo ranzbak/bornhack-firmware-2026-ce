@@ -200,6 +200,31 @@
 // Screen width for the walk-through.
 #let shot-s = 32mm
 
+// Medium screen width, and the large one for an annotated screen.
+#let shot-m = 40mm
+#let shot-l = 56mm
+
+// A round letter to point at a spot on a screen.
+#let mark(l) = box(width: 11pt, height: 11pt, radius: 5.5pt, fill: rgb("#f6dd9a"),
+  stroke: 1.2pt + ink, align(center + horizon, text(font: head-font, size: 6pt, l)))
+// A screen with letters on it. `marks` are (letter, fx, fy), fractions of the
+// screen's size.
+#let annotated(name, marks, width: shot-l) = box({
+  screen(name, width: width)
+  for (l, fx, fy) in marks {
+    place(top + left, dx: 4pt + (width - 1pt) * fx, dy: 4pt + (width - 1pt) * fy, mark(l))
+  }
+})
+
+#let content-marks = (
+  ("A", 0.40, 0.45), ("B", 0.16, 0.66), ("C", 0.02, 0.24),
+  ("D", 0.86, 0.24), ("E", 0.04, 0.04), ("F", 0.04, 0.86))
+#let gap-s = 3mm
+
+// A plain ruled table for word lists.
+#let word-table(see: false, ..cells) = table(
+  columns: if see { (auto, 1fr, auto) } else { (1fr, 1fr) }, stroke: 0.5pt + ink, inset: 3.5pt, align: left, ..cells)
+
 // The hero hatching: three egg frames, then the happy pet.
 #let egg-strip() = align(center, grid(columns: 4, column-gutter: 3mm, align: bottom + center,
   ..range(3).map(i => sprite-fit("hero", "egg", frame: i, w: 70pt, h: 70pt)),
