@@ -115,7 +115,10 @@ uf2conv = "0.1"
 [profile.dev]
 debug = 2
 opt-level = "z"
-lto = "thin"
+# Fat LTO keeps the debug SSD1680 image (embassy-1680-full) inside the 960 KiB
+# FLASH region; with thin LTO it overflowed by about 9.6 KiB. Debug info and
+# debug-assertions stay; debug info does not go to flash.
+lto = "fat"
 codegen-units = 1
 panic = "abort"
 overflow-checks = false
