@@ -595,23 +595,34 @@ impl GameState {
             Phase::Leaving | Phase::Active => {}
         }
 
-        // A running action eats the fresh ticks first and does not age the
-        // needs; the sub-minute remainder is never spent on it.
-        let mut ticks = total_delta;
-        if self.active_action.is_some() {
-            ticks = self.consume_action_ticks(ticks);
+        // A player's running action eats the fresh ticks first and does not
+        // age the needs; the sub-minute remainder is never spent on it.
+        let mut fresh = total_delta;
+        if self.active_action.is_some() && !self.demo.pet_action {
+            fresh = self.consume_action_ticks(fresh);
         }
-        ticks += self.tick_rem as u32;
-        let mut minutes = ticks / TICKS_PER_MINUTE;
-        self.tick_rem = (ticks % TICKS_PER_MINUTE) as u8;
+        // The engine-time stream: the fresh ticks and the carried remainder.
+        // A pet's own action is spent from this stream, remainder included,
+        // so it starts and ends at the same stream position wherever the
+        // update is cut.
+        let mut ticks = fresh + self.tick_rem as u32;
         // Minutes still to step singly after a runaway target was seen.
         let mut steep = 0u32;
-        loop {
+        while self.phase != Phase::Gone {
             // The demo pet looks after itself at every boundary (and at the
             // start, where the player or a switch may have left a choice
-            // pending). Its acts take no ticks.
+            // pending). Instant care takes no ticks; animated care starts
+            // an action that the stream then runs.
             demo::run(self);
-            if minutes == 0 || self.phase == Phase::Gone {
+            if self.demo.pet_action {
+                ticks = self.consume_action_ticks(ticks);
+                if self.demo.pet_action {
+                    break; // still running: the stream is spent
+                }
+                continue; // it ended: the policy looks again at once
+            }
+            let minutes = ticks / TICKS_PER_MINUTE;
+            if minutes == 0 {
                 break;
             }
             let dt = self.segment(minutes, &mut steep);
@@ -622,14 +633,15 @@ impl GameState {
             advance::advance(self, dt);
             #[cfg(feature = "simulator")]
             sim::note_segment(mood_before, self.mood, health_before, self.health, dt);
-            minutes -= dt;
+            ticks -= dt * TICKS_PER_MINUTE;
         }
         // Gone partway through the gap: the pet lived only the time it was
         // advanced, not the rest of the gap.
-        if minutes > 0 {
-            self.age_ticks -= minutes * TICKS_PER_MINUTE + self.tick_rem as u32;
-            self.tick_rem = 0;
+        if self.phase == Phase::Gone && ticks > 0 {
+            self.age_ticks -= ticks;
+            ticks = 0;
         }
+        self.tick_rem = ticks as u8;
     }
 
     /// Length in minutes of the next closed-form step, at most `minutes`
@@ -708,12 +720,18 @@ impl GameState {
 
     /// Apply the running action's dose now and end the action. The animation
     /// end calls it; the demo pet's instant care calls it right after the
-    /// starter, so the dose lands in the same minute.
+    /// starter, so the dose lands in the same minute. An action the pet
+    /// started itself (`demo.pet_action`) is its own act all through the end:
+    /// no pause, no `thanks!`, no grumpy wake, and the note goes up here.
     fn finish_action(&mut self) {
         self.action_ticks_remaining = 0;
+        let own = core::mem::take(&mut self.demo.pet_action);
+        let was_self_care = self.self_care;
+        self.self_care |= own;
         let Some(action) = self.active_action.take() else {
             self.active_food = None;
             self.active_drink = None;
+            self.self_care = was_self_care;
             return;
         };
         let player_in_demo = self.demo.on && !self.self_care;
@@ -735,9 +753,13 @@ impl GameState {
         if player_in_demo && helped && !warned && !self.woke_grumpy {
             self.causes.push(causes::Cause::Thanks);
         }
+        if own {
+            demo::note_own_act(self, action, &queued);
+        }
         self.woke_grumpy = false;
         self.active_food = None;
         self.active_drink = None;
+        self.self_care = was_self_care;
     }
 
     /// Run `f` and hand back the causes it queued, apart from what was
@@ -1324,6 +1346,28 @@ impl GameState {
         Ok(())
     }
 
+    /// Choose how the demo pet looks after itself: instantly with a note
+    /// (`false`, the default) or by running the real animated action.
+    pub fn set_demo_care(&mut self, animated: bool) {
+        self.demo.animated = animated;
+        self.request_save();
+    }
+
+    /// The tick a running action ends. A player's action ends
+    /// `action_ticks_remaining` after the last update. A pet's own action
+    /// (`demo.pet_action`) is spent from the engine-time stream, so it spends
+    /// the carried remainder first: it ends that much sooner, at least one
+    /// tick after the last update.
+    pub fn action_end_tick(&self) -> u32 {
+        let end = self.last_update_tick + self.action_ticks_remaining as u32;
+        if self.demo.pet_action {
+            end.saturating_sub(self.tick_rem as u32)
+                .max(self.last_update_tick + 1)
+        } else {
+            end
+        }
+    }
+
     /// The reasons that stop every action alike.
     fn cannot_act(&self) -> Option<doses::Reason> {
         if self.hibernating {
@@ -1379,8 +1423,7 @@ impl GameState {
         let cap = self.last_update_tick.saturating_add(MAX_SLEEP_TICKS());
         // A running action ages nothing; it is its own bound.
         if self.active_action.is_some() {
-            let end = self.last_update_tick + (self.action_ticks_remaining as u32).max(1);
-            return end.min(cap);
+            return self.action_end_tick().max(self.last_update_tick + 1).min(cap);
         }
         let mut c = self.clone();
         // The bookkeeping `update` does at a boundary comes first, so the

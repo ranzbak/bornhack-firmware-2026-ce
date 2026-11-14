@@ -5,7 +5,7 @@
 //! the format-3 save, so a plan-2 save (zeros there) reads as demo off.
 
 use super::advance::SLOW_SCALE;
-use super::causes::Cause;
+use super::causes::{Cause, CauseQueue};
 use super::needs::{MAX, Need, P};
 use super::thresholds as t;
 use super::{Action, DrinkKind, FoodKind, GameState, MiniGame, Phase, TICKS_PER_MINUTE};
@@ -628,8 +628,7 @@ pub fn act(s: &mut GameState, c: Choice) {
 /// `act`, with the row that chose `c` already known.
 fn act_row(s: &mut GameState, c: Choice, row: Option<Row>) {
     s.self_care = true;
-    // The causes this act queues, apart from what was waiting already.
-    let (started, queued) = s.queued_by(|s| act_start(s, c));
+    let started = act_start(s, c);
     debug_assert!(started, "{c:?} was refused");
     match row {
         Some(Row::Whim) => {
@@ -643,19 +642,40 @@ fn act_row(s: &mut GameState, c: Choice, row: Option<Row>) {
         Some(Row::Urgent) | None => {}
     }
     s.demo_rng = crate::platform::xorshift32(s.demo_rng);
-    let too_many = queued.iter().any(|&q| q == Cause::OneTooMany);
-    let note = if too_many {
-        Note::OneTooMany
-    } else {
-        note_for(c)
-    };
-    s.note = Some((note, super::status::status_line(s)));
+    // A timed act leaves its note when it ends (`note_own_act`), at once in
+    // instant care, at the animation's end in animated care.
+    if action_of(c).is_none() {
+        s.note = Some((note_for(c), super::status::status_line(s)));
+    }
     s.self_care = false;
     #[cfg(feature = "simulator")]
     super::sim::note_self_care();
 }
 
-/// Start `c` through its starter and land the dose of a timed one.
+/// The note an act of its own leaves when `action` ends, with the causes its
+/// dose queued.
+pub(super) fn note_own_act(s: &mut GameState, action: Action, queued: &CauseQueue) {
+    let note = match action {
+        Action::Feed => s.active_food.map(Note::Ate),
+        Action::Drink => s.active_drink.map(Note::Drank),
+        Action::Wash => Some(Note::Washing),
+        Action::Play => Some(Note::Played),
+        Action::Relax => Some(Note::Rested),
+        Action::Heal => Some(Note::Medicine),
+        Action::Medicate => Some(Note::Insulin),
+        Action::Rehab => Some(Note::Rehab),
+        Action::Exercise | Action::Ozempic | Action::OnlyPets => None,
+    };
+    let too_many = queued.iter().any(|&q| q == Cause::OneTooMany);
+    let note = if too_many {
+        Some(Note::OneTooMany)
+    } else {
+        note
+    };
+    s.note = note.map(|n| (n, super::status::status_line(s)));
+}
+
+/// Start `c` through its starter; a timed one is left running (see `act_row`).
 fn act_start(s: &mut GameState, c: Choice) -> bool {
     let started = match (action_of(c), c) {
         (Some((a, food, drink)), _) => s.start_choice(a, food, drink),
@@ -675,8 +695,13 @@ fn act_start(s: &mut GameState, c: Choice) -> bool {
         // `action_of` answers every other choice.
         (None, _) => false,
     };
-    if action_of(c).is_some() {
-        s.finish_action();
+    if started && action_of(c).is_some() {
+        // The pet's own action: instant care ends it now, animated care
+        // leaves it to run out of the engine-time stream.
+        s.demo.pet_action = true;
+        if !s.demo.animated {
+            s.finish_action();
+        }
     }
     started
 }
@@ -687,12 +712,19 @@ fn act_start(s: &mut GameState, c: Choice) -> bool {
 /// asserts; `thresholds::validate` keeps the lines from making one.
 pub fn run(s: &mut GameState) -> u8 {
     let (acts, capped) = run_capped(s);
-    debug_assert!(!capped, "the demo policy cycles: {acts} acts and more to do");
+    debug_assert!(
+        !capped,
+        "the demo policy cycles: {acts} acts and more to do"
+    );
     acts
 }
 
 /// `run`, also saying whether the cap stopped it with a choice left.
 pub fn run_capped(s: &mut GameState) -> (u8, bool) {
+    // The pet's own action is under way: the policy looks again when it ends.
+    if s.demo.pet_action {
+        return (0, false);
+    }
     let mut acts = 0;
     loop {
         settle(s);

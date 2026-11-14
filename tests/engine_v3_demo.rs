@@ -1346,6 +1346,7 @@ mod wake {
             s.cooldown_nim = if next(2) == 0 { next(900) as u16 } else { 0 };
             s.cooldown_lightsout = if next(3) == 0 { next(900) as u16 } else { 0 };
             s.demo.on = true;
+            s.demo.animated = i % 2 == 0;
             s.demo.lazy = next(15) as u8;
             s.demo.lazy_min = next(300) as u16;
             s.demo.whim_min = next(300) as u16;
@@ -1833,5 +1834,245 @@ mod split {
         }
         assert!(acted > 100, "only {acted} of 200 pets acted");
         assert!(cut_at_acts > 500, "only {cut_at_acts} act points were cut");
+    }
+}
+
+mod animated {
+    use super::policy::{at, lcg, pct, quiet, random_demo};
+    use bornhack_aegg::game::engine::causes::Cause;
+    use bornhack_aegg::game::engine::demo::{self, Choice, Note};
+    use bornhack_aegg::game::engine::doses::Reason;
+    use bornhack_aegg::game::engine::thresholds as t;
+    use bornhack_aegg::game::engine::{
+        Action, DrinkKind, FoodKind, GameState, Phase, TICKS_PER_MINUTE,
+    };
+
+    const HOUR: u16 = 60;
+    const DAY_TICKS: u32 = 1440 * TICKS_PER_MINUTE;
+
+    /// A hungry animated pet at noon.
+    fn hungry() -> GameState {
+        let mut s = quiet();
+        s.money_enabled = true;
+        s.money = 100;
+        s.set_demo_care(true);
+        at(&mut s, 12 * HOUR);
+        s.fullness = pct(19);
+        s
+    }
+
+    /// A hungry animated pet with its meal under way (one tick in).
+    fn eating() -> GameState {
+        let mut s = hungry();
+        s.update(s.last_update_tick + 1);
+        assert!(s.demo.pet_action);
+        s
+    }
+
+    #[test]
+    fn set_demo_care_sets_the_mode_and_saves() {
+        let mut s = quiet();
+        s.mark_saved();
+        s.set_demo_care(true);
+        assert!(s.demo.animated && s.needs_save());
+        s.mark_saved();
+        s.set_demo_care(false);
+        assert!(!s.demo.animated && s.needs_save());
+    }
+
+    #[test]
+    fn animated_care_runs_the_real_action() {
+        let mut s = hungry();
+        let (money, age) = (s.money, s.age_ticks);
+        // The wake after a pending choice is one tick: the meal starts.
+        s.update(s.last_update_tick + 1);
+        assert_eq!(s.active_action, Some(Action::Feed));
+        assert!(format!("{:?}", s.display_anim()).contains("Feeding"));
+        assert!(s.demo.pet_action);
+        assert_eq!(s.fullness, pct(19), "the dose lands at the end");
+        assert!(s.note().is_none(), "the note comes with the end");
+        assert_eq!(s.age_ticks - age, 1);
+        s.update(s.last_update_tick + t::FEED_DURATION() as u32);
+        assert!(s.fullness > pct(19), "fullness {}", s.fullness);
+        assert_eq!(s.active_action, None);
+        assert!(!s.demo.pet_action);
+        assert!(
+            matches!(s.note(), Some((Note::Ate(FoodKind::Pizza), _))),
+            "{:?}",
+            s.note()
+        );
+        assert_eq!(s.demo.pause_min, 0);
+        assert!(!s.take_causes().iter().any(|&c| c == Cause::Thanks));
+        assert_eq!(s.money, money);
+    }
+
+    #[test]
+    fn a_pet_action_spends_the_remainder() {
+        let mut s = hungry();
+        s.tick_rem = 4;
+        assert!(matches!(demo::decide(&s), Some(Choice::Eat(_))));
+        let needs = (s.hydration, s.energy, s.fun);
+        s.update(s.last_update_tick + 1);
+        // 4 + 1 = 5 ticks of stream: 2 for the meal, 3 left over.
+        assert_eq!(s.active_action, None);
+        assert_eq!(s.tick_rem, 3);
+        assert!(s.fullness > pct(19));
+        assert_eq!((s.hydration, s.energy, s.fun), needs, "needs did not age");
+    }
+
+    #[test]
+    fn animated_update_is_split_invariant() {
+        let snapshot = |s: &GameState| {
+            (
+                s.to_bytes().to_vec(),
+                s.age_ticks,
+                s.tick_rem,
+                s.demo_rng(),
+                format!("{:?}", s.note()),
+                s.active_action,
+                s.action_ticks_remaining,
+            )
+        };
+        let drive = |start: &GameState, span: u32, cuts: &[u32]| {
+            let t0 = start.last_update_tick;
+            let mut s = start.clone();
+            for &c in cuts.iter().chain(&[span]) {
+                s.update(t0 + c);
+            }
+            s
+        };
+        let (mut acted, mut mid_action) = (0, 0);
+        for seed in 0..200u64 {
+            let mut next = lcg(5000 + seed);
+            let mut start = random_demo(&mut next);
+            start.set_demo_care(true);
+            let span = 3 * DAY_TICKS;
+            let mut cuts: Vec<u32> = (0..50).map(|_| next(span as u64 - 1) as u32 + 1).collect();
+            // Cut at, before and after every tick where a pet action runs.
+            let mut probe = start.clone();
+            let t0 = probe.last_update_tick;
+            let mut at_tick = 0;
+            while at_tick < span {
+                let step = (at_tick + TICKS_PER_MINUTE).min(span);
+                probe.update(t0 + step);
+                if probe.demo.pet_action {
+                    cuts.extend([step.saturating_sub(1), step, step + 1]);
+                    mid_action += 1;
+                }
+                at_tick = step;
+            }
+            cuts.retain(|&c| c > 0 && c < span);
+            cuts.sort_unstable();
+            cuts.dedup();
+            let whole = drive(&start, span, &[]);
+            let split = drive(&start, span, &cuts);
+            assert_eq!(snapshot(&whole), snapshot(&split), "seed {seed}");
+            acted += whole.note().is_some() as u32;
+        }
+        assert!(acted > 100, "only {acted} of 200 pets acted");
+        assert!(
+            mid_action > 50,
+            "only {mid_action} minutes ended inside an action"
+        );
+    }
+
+    #[test]
+    fn pet_action_wake_lands_on_its_end() {
+        let mut s = eating();
+        s.tick_rem = 3;
+        s.action_ticks_remaining = 9;
+        let end = s.last_update_tick + 9 - 3;
+        assert_eq!(s.action_end_tick(), end);
+        assert_eq!(s.next_wake_tick(), end);
+        // A player's action does not spend the remainder.
+        let mut p = quiet();
+        p.demo.on = false;
+        p.tick_rem = 3;
+        assert!(p.feed(FoodKind::Apple));
+        assert_eq!(
+            p.action_end_tick(),
+            p.last_update_tick + t::FEED_DURATION() as u32
+        );
+        // The end is at least one tick away.
+        let mut s = eating();
+        s.tick_rem = 5;
+        s.action_ticks_remaining = 2;
+        assert_eq!(s.action_end_tick(), s.last_update_tick + 1);
+    }
+
+    #[test]
+    fn the_player_waits_for_the_pet() {
+        let s = eating();
+        assert_eq!(s.refusal_for(Action::Feed, None), Some(Reason::Busy));
+    }
+
+    #[test]
+    fn a_pet_action_survives_a_save() {
+        let s = eating();
+        let b = GameState::from_bytes(&s.to_bytes()).expect("loads");
+        assert!(b.demo.pet_action);
+        assert_eq!(b.active_action, s.active_action);
+        assert_eq!(b.action_ticks_remaining, s.action_ticks_remaining);
+    }
+
+    #[test]
+    fn a_pet_action_finishes_after_demo_goes_off() {
+        let mut s = eating();
+        s.set_demo(false).unwrap();
+        assert!(s.demo.pet_action);
+        s.update(s.last_update_tick + t::FEED_DURATION() as u32);
+        assert!(!s.demo.pet_action && s.active_action.is_none());
+        assert!(s.fullness > pct(19));
+        assert!(!s.take_causes().iter().any(|&c| c == Cause::Thanks));
+    }
+
+    /// C11: a pet's own wake costs nothing, through the whole animated act.
+    #[test]
+    fn an_animated_self_wake_is_not_grumpy() {
+        let mut s = quiet();
+        s.set_demo_care(true);
+        s.is_sleeping = true;
+        s.energy = pct(40);
+        s.fullness = pct(5);
+        let mood = s.mood;
+        // The pet wakes, then eats, all on its own.
+        s.update(s.last_update_tick + 1);
+        s.update(s.last_update_tick + t::FEED_DURATION() as u32 + 1);
+        assert!(!s.is_sleeping);
+        assert!(s.fullness > pct(5));
+        assert_eq!(s.mood, mood);
+        let got: Vec<_> = s.take_causes().iter().copied().collect();
+        assert!(!got.contains(&Cause::Grumpy), "{got:?}");
+        assert!(!got.contains(&Cause::Thanks), "{got:?}");
+        // The act itself, started on a sleeper, wakes it without the dent.
+        let mut s = quiet();
+        s.set_demo_care(true);
+        s.is_sleeping = true;
+        s.energy = pct(40);
+        demo::act(&mut s, Choice::Drink(DrinkKind::Water));
+        assert!(!s.is_sleeping && s.demo.pet_action);
+        s.update(s.last_update_tick + t::DRINK_DURATION() as u32);
+        assert_eq!(s.mood, mood);
+        assert!(!s.take_causes().iter().any(|&c| c == Cause::Grumpy));
+    }
+
+    #[test]
+    fn animated_pet_alone_for_three_days() {
+        let mut s = quiet();
+        s.set_demo_care(true);
+        s.set_demo(true).unwrap();
+        at(&mut s, 8 * HOUR);
+        s.fullness = pct(40);
+        let t0 = s.last_update_tick;
+        let (mut feeding, mut wakes) = (0, 0u32);
+        while s.last_update_tick < t0 + 3 * DAY_TICKS {
+            let now = s.next_wake_tick().max(s.last_update_tick + 1);
+            s.update(now);
+            wakes += 1;
+            assert_ne!(s.phase, Phase::Leaving);
+            assert!(s.health >= pct(t::DEMO_HEALTH_FLOOR_PCT() as i32));
+            feeding += format!("{:?}", s.display_anim()).contains("Feeding") as u32;
+        }
+        assert!(feeding > 0, "never saw it feeding in {wakes} wakes");
     }
 }

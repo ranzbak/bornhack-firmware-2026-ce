@@ -466,7 +466,7 @@ pub(super) fn log_cause(cause: super::engine::causes::Cause, at_min: u32) {
 pub fn action_ticks_remaining() -> u8 {
     let state = unsafe { (*GAME.get()).as_ref() };
     state.map_or(0, |s| {
-        let end = s.last_update_tick.saturating_add(s.action_ticks_remaining as u32);
+        let end = s.action_end_tick();
         end.saturating_sub(now_tick()).min(s.action_ticks_remaining as u32) as u8
     })
 }
