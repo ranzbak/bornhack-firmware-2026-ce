@@ -365,7 +365,9 @@ fn play_or_game(s: &GameState) -> Choice {
 }
 
 /// The dependence counter is past the line where the pet stops asking for
-/// beer (`dependence_min` counts quarter-minutes).
+/// beer (`dependence_min` counts quarter-minutes). Demo never adds to the
+/// counter (it only decays), so this only holds back a pet that carries a
+/// high counter in from player time.
 fn beer_stopped(s: &GameState) -> bool {
     s.dependence_min > beer_stop_counter()
 }
@@ -473,7 +475,9 @@ pub fn decide(s: &GameState) -> Option<Choice> {
         ),
         ((s.energy as i32) < l.edge_energy, Choice::Sleep),
         (
-            (s.health as i32) < lvl(t::DEMO_MED_HEALTH_PCT()),
+            // The solver's line is `health > MED` (`sig`), so "below" is its
+            // complement and the flip lands on a segment boundary.
+            (s.health as i32) <= lvl(t::DEMO_MED_HEALTH_PCT()),
             Choice::Medicine,
         ),
     ];
@@ -513,11 +517,18 @@ pub fn wake_view(s: &GameState) -> u8 {
 // Time: the clock minute and the timers
 // ---------------------------------------------------------------------------
 
-/// Timers in `timers`: clock, whim, lazy, soft delay, pause, the dependence
+/// Slots of `timers`: clock, whim, lazy, soft delay, pause, the dependence
 /// line, then one per mini-game cooldown.
-pub const TIMER_COUNT: usize = 6 + GAME_COUNT;
-const T_DEPENDENCE: usize = 5;
+const T_CLOCK: usize = 0;
+const T_WHIM: usize = 1;
+const T_LAZY: usize = 2;
+const T_NEXT: usize = 3;
+const T_PAUSE: usize = 4;
+/// Minutes until the beer counter decays to the line where beer stops being
+/// refused.
+pub const T_DEPENDENCE: usize = 5;
 const T_GAMES: usize = 6;
+pub const TIMER_COUNT: usize = T_GAMES + GAME_COUNT;
 
 /// Remaining minutes of each running timer, for `solver::timer_bound`;
 /// `u32::MAX` when it is not running. All of them are plain: nothing the
@@ -530,11 +541,11 @@ pub fn timers(s: &GameState) -> [u32; TIMER_COUNT] {
     }
     let d = &s.demo;
     let running = |on: bool, minutes: u32| if on && minutes > 0 { minutes } else { u32::MAX };
-    v[0] = running(d.clock_armed, d.clock_min as u32);
-    v[1] = running(true, d.whim_min as u32);
-    v[2] = running(true, d.lazy_min as u32);
-    v[3] = running(d.soft_armed, d.next_min as u32);
-    v[4] = running(true, d.pause_min as u32);
+    v[T_CLOCK] = running(d.clock_armed, d.clock_min as u32);
+    v[T_WHIM] = running(true, d.whim_min as u32);
+    v[T_LAZY] = running(true, d.lazy_min as u32);
+    v[T_NEXT] = running(d.soft_armed, d.next_min as u32);
+    v[T_PAUSE] = running(true, d.pause_min as u32);
     // The beer counter decays while sober; it crosses its line at a minute.
     let sober = (s.booze as i32) < lvl(t::BOOZE_CLEAR_PCT());
     v[T_DEPENDENCE] = running(sober, s.dependence_min.saturating_sub(beer_stop_counter()));
@@ -558,7 +569,9 @@ pub fn tick(s: &mut GameState, dt: u32) {
     }
     let sub = |timer: u32| timer.saturating_sub(dt);
     let d = &mut s.demo;
-    d.clock_min = sub(d.clock_min as u32) as u16;
+    if d.clock_armed {
+        d.clock_min = sub(d.clock_min as u32) as u16;
+    }
     d.whim_min = sub(d.whim_min as u32) as u16;
     d.lazy_min = sub(d.lazy_min as u32) as u16;
     d.next_min = sub(d.next_min as u32) as u8;
@@ -650,8 +663,11 @@ fn arm_clock(s: &mut GameState) {
 /// Arm the soft delay when a reason shows up, disarm it when none is left.
 fn arm_soft(s: &mut GameState) {
     let wanted = soft_wanted(s);
-    if wanted && !s.demo.soft_armed {
-        let (base, spread) = if drunk(s) {
+    let dry = drunk(s);
+    // A delay armed in the other state (sober or drunk) is re-armed.
+    if wanted && (!s.demo.soft_armed || s.soft_dry != dry) {
+        s.soft_dry = dry;
+        let (base, spread) = if dry {
             (t::DEMO_DRY_BASE_MIN(), t::DEMO_DRY_SPREAD_MIN())
         } else {
             (t::DEMO_REACT_BASE_MIN(), t::DEMO_REACT_SPREAD_MIN())
@@ -661,6 +677,7 @@ fn arm_soft(s: &mut GameState) {
         s.demo.soft_armed = true;
     } else if !wanted && s.demo.soft_armed {
         s.demo.soft_armed = false;
+        s.soft_dry = false;
         s.demo.next_min = 0;
     }
 }

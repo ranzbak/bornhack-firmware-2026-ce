@@ -1149,6 +1149,84 @@ mod policy {
     }
 
     #[test]
+    fn beer_stops_while_a_carried_in_counter_is_high() {
+        use bornhack_aegg::game::engine::advance::SLOW_SCALE;
+        use bornhack_aegg::game::engine::solver;
+        let stop = t::DEMO_BEER_STOP_MIN() as u32 * SLOW_SCALE;
+        let mut s = quiet();
+        s.booze = 0;
+        s.demo.whim_min = 0;
+        s.dependence_min = stop + 20;
+        // Rng 10 would take the beer (10 < the beer chance): the counter says no.
+        assert_ne!(demo::decide(&s), Some(Choice::Drink(DrinkKind::Beer)));
+        // The counter decays 1 per minute while sober: 20 minutes to the line.
+        assert_eq!(demo::timers(&s)[demo::T_DEPENDENCE], 20);
+        assert!(solver::seg_len(&s, 1000) <= 20);
+        let mut at_line = s.clone();
+        at_line.update(at_line.last_update_tick + 19 * TICKS_PER_MINUTE);
+        assert_ne!(demo::decide(&at_line), Some(Choice::Drink(DrinkKind::Beer)));
+        at_line.update(at_line.last_update_tick + TICKS_PER_MINUTE);
+        assert_eq!(at_line.dependence_min, stop);
+        assert_eq!(demo::decide(&at_line), Some(Choice::Drink(DrinkKind::Beer)));
+        // A drunk pet's counter does not decay: no timer.
+        let mut drunk = s.clone();
+        drunk.booze = pct(t::BOOZE_CLEAR_PCT() as i32 + 5);
+        assert_eq!(demo::timers(&drunk)[demo::T_DEPENDENCE], u32::MAX);
+    }
+
+    #[test]
+    fn the_soft_delay_follows_sober_and_drunk() {
+        use bornhack_aegg::platform::xorshift32;
+        let spread = |base: u16, spread: u16, rng: u32| base as u32 + rng % (spread as u32 + 1);
+        let mut s = quiet();
+        s.hydration = pct(t::DEMO_SOFT_WATER_PCT() as i32 - 3);
+        let r0 = 12_345;
+        s.set_demo_rng(r0);
+        demo::settle(&mut s);
+        let react = spread(t::DEMO_REACT_BASE_MIN(), t::DEMO_REACT_SPREAD_MIN(), r0);
+        assert_eq!(s.demo.next_min as u32, react);
+        // Drunk with the delay running: re-armed as the dry-out interval.
+        s.booze = pct(t::DEMO_EDGE_BOOZE_PCT() as i32 + 1);
+        demo::settle(&mut s);
+        let r1 = xorshift32(r0);
+        let dry = spread(t::DEMO_DRY_BASE_MIN(), t::DEMO_DRY_SPREAD_MIN(), r1);
+        assert_eq!(s.demo.next_min as u32, dry);
+        // Settling again changes nothing.
+        let again = s.to_bytes();
+        demo::settle(&mut s);
+        assert_eq!(again, s.to_bytes());
+        // Sober again: back to a reaction delay.
+        s.booze = pct(t::DEMO_EDGE_BOOZE_PCT() as i32 - 20);
+        demo::settle(&mut s);
+        let r2 = xorshift32(r1);
+        let react = spread(t::DEMO_REACT_BASE_MIN(), t::DEMO_REACT_SPREAD_MIN(), r2);
+        assert_eq!(s.demo.next_min as u32, react);
+    }
+
+    #[test]
+    fn health_at_the_line_is_below_it() {
+        // The solver's line is `health > MED`: on the line counts as below.
+        let med = pct(t::DEMO_MED_HEALTH_PCT() as i32);
+        let mut s = quiet();
+        s.health = med;
+        assert_eq!(demo::decide(&s), Some(Choice::Medicine));
+        s.health = med + 1;
+        assert_eq!(demo::decide(&s), None);
+    }
+
+    #[test]
+    fn an_unarmed_clock_does_not_count() {
+        let mut s = quiet();
+        s.demo.clock_armed = false;
+        s.demo.clock_min = 50;
+        s.update(s.last_update_tick + 10 * TICKS_PER_MINUTE);
+        assert_eq!(s.demo.clock_min, 50);
+        s.demo.clock_armed = true;
+        s.update(s.last_update_tick + 10 * TICKS_PER_MINUTE);
+        assert_eq!(s.demo.clock_min, 40);
+    }
+
+    #[test]
     fn a_game_on_cooldown_is_skipped_for_the_next_one() {
         let mut s = quiet();
         s.fun = pct(t::DEMO_SOFT_FUN_PCT() as i32 - 3);

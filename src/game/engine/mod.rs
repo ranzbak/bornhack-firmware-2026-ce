@@ -295,6 +295,9 @@ pub struct GameState {
     /// the wall clock is unknown (the pet keeps its own rhythm). Transient:
     /// `lifecycle` hands it in through `sync_clock` before each update.
     pub(crate) day_min: Option<u16>,
+    /// The armed soft delay was drawn as the dry-out interval. Transient: a
+    /// reload at worst re-arms the delay once.
+    pub(crate) soft_dry: bool,
 
     // Diabetes — permanent once triggered by sustained overweight.
     pub diabetic: bool,
@@ -465,6 +468,7 @@ impl GameState {
             demo: demo::Demo::default(),
             demo_rng: demo::seed_rng(seed, 0),
             day_min: None,
+            soft_dry: false,
 
             diabetic: false,
             diabetes_min: 0,

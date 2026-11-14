@@ -259,7 +259,13 @@ pub fn boot_catch_up_minutes(
     }
     let minutes = deferred_catch_up_minutes(boot_saved_unix, now_unix, uptime_s);
     if minutes > 0 {
+        // The replay stands for the time before boot: the demo clock reads
+        // the time of day it started at, then the pet's own time again.
+        let boot_unix = now_unix.saturating_sub(uptime_s);
+        let start_unix = boot_unix.saturating_sub(minutes * SECS_PER_MIN as u32);
+        s.sync_clock(s.last_update_tick, Some(minute_of_day(start_unix)));
         s.catch_up(minutes);
+        s.sync_clock(s.last_update_tick, Some(minute_of_day(boot_unix)));
         s.request_save();
     }
     Some(minutes)
@@ -303,11 +309,11 @@ pub fn forget_boot_gap(boot_saved: &AtomicU32, done: &AtomicBool) {
 #[cfg(feature = "embassy-core")]
 pub fn on_wall_clock_set(now_unix: u32) {
     if let Some(s) = unsafe { (*GAME.get()).as_mut() } {
-        // The clock was unknown until now: the pet learns the time of day.
-        s.sync_clock(now_tick(), Some(minute_of_day(now_unix)));
         let uptime_s = (crate::platform::uptime_ms() / 1000) as u32;
         let saved = BOOT_SAVED_UNIX.load(Ordering::Relaxed);
         let applied = boot_catch_up_minutes(s, &CATCH_UP_DONE, saved, now_unix, uptime_s);
+        // The clock was unknown until now: the pet learns the time of day.
+        s.sync_clock(now_tick(), Some(minute_of_day(now_unix)));
         if applied.is_some_and(|m| m > 0) {
             // The pet jumped ahead: wake the display loop so the screen, the
             // status line show it now, not at the next scheduled wake.
@@ -1321,6 +1327,39 @@ mod tests {
         let done = AtomicBool::new(false);
         // Clock unknown for the saved time: taken, nothing applied, no wake.
         assert_eq!(boot_catch_up_minutes(&mut s, &done, 0, 5000, 0), Some(0));
+    }
+
+    /// Unix time whose local minute of the day is `minute` (day `day`).
+    fn unix_at(day: u32, minute: u32) -> u32 {
+        (day * 86_400 + minute * 60).wrapping_add_signed(-(crate::tz_offset_secs() as i32))
+    }
+
+    #[test]
+    fn a_catch_up_across_bedtime_arms_the_bed_at_the_right_minute() {
+        use crate::game::engine::thresholds as t;
+        const HOUR: u32 = 60;
+        // Off from 23:00 to 08:00: the replay starts at night, tired pet.
+        let mut s = pet();
+        s.demo.on = true;
+        s.energy = (60 * crate::game::engine::needs::P) as u16;
+        let done = AtomicBool::new(false);
+        let (saved, boot) = (unix_at(100, 23 * HOUR), unix_at(101, 8 * HOUR));
+        assert_eq!(boot_catch_up_minutes(&mut s, &done, saved, boot, 0), Some(9 * HOUR));
+        assert!(s.demo.clock_armed);
+        assert_eq!(s.demo.clock_min, 0, "bed was due at 23:00");
+        // The pet's own minute is the time of day at the tick base again.
+        assert_eq!(s.day_min, Some(super::minute_of_day(boot)));
+
+        // Off from 07:00 to 08:00, rested: bed tonight, 14 h from 08:00.
+        let mut s = pet();
+        s.demo.on = true;
+        s.energy = (99 * crate::game::engine::needs::P) as u16;
+        let done = AtomicBool::new(false);
+        let (saved, boot) = (unix_at(100, 7 * HOUR), unix_at(100, 8 * HOUR));
+        boot_catch_up_minutes(&mut s, &done, saved, boot, 0);
+        let to_bed = t::DEMO_BED_AT_MIN() as u32 - 8 * HOUR;
+        let want = to_bed..=to_bed + t::DEMO_BED_SPREAD_MIN() as u32;
+        assert!(want.contains(&(s.demo.clock_min as u32)), "{}", s.demo.clock_min);
     }
 
     #[test]
