@@ -14,7 +14,12 @@
 #let sweep(key, preset: classic) = fmt-min(calc.quo(level-max, num(key, preset: preset)))
 
 // A raw amount as percent points of a bar: 1965 raw is "3 %".
-#let raw-pct(key, preset: classic) = str(calc.round(num(key, preset: preset) / level-pct)) + " %"
+#let raw-pct(key, preset: classic) = {
+  let tenth = calc.round(num(key, preset: preset) / level-pct * 10)
+  let whole = calc.quo(tenth, 10)
+  let frac = calc.rem(tenth, 10)
+  str(whole) + if frac > 0 { "." + str(frac) } else { "" } + " %"
+}
 
 // One box of the flow diagram.
 #let _node(title, sub, fill: white) = box(width: 100%, stroke: 1.5pt + ink, fill: fill, inset: 4pt,

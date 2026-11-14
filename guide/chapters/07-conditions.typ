@@ -30,7 +30,7 @@ and #w("well rested"). With more than two, a count shows after them, like
 
     *What it does.* The mood target loses #v("MOOD_PEN_HANGOVER_PCT").
     Energy drains at #v("ENERGY_MULT_HANGOVER_PCT") of the usual speed while the
-    pet is awake. The word buzzes (@ch-reading).
+    pet is awake. As the first word it buzzes (@ch-reading).
   ],
   screen("hung-over", width: shot-m, caption: [Hung over.]))
 
@@ -55,11 +55,11 @@ badge counts those minutes. When the pet wakes with more than
 also loses #v("GROGGY_ENERGY_PCT") energy and #v("GROGGY_FIT_PCT") fitness.
 The toast is #w("groggy") with #w("overslept"). A pet left alone wakes by
 itself after #v("OVERSLEEP_WAKE_MIN") of oversleeping, which is past that
-line, so it wakes groggy. It also wakes after #v("SELF_WAKE_MIN") of sleep in
+line, so it wakes groggy. (A rest at a magic place is the exception: it wipes the count, see @ch-friends.) It also wakes after #v("SELF_WAKE_MIN") of sleep in
 all. A worn-out pet is full sooner, so it oversleeps sooner. Being awake with energy under #v("OVERSLEEP_RESET_PCT")
 wipes the count.
 
-*What it does.* The mood target loses #v("MOOD_PEN_GROGGY_PCT"). The word buzzes.
+*What it does.* The mood target loses #v("MOOD_PEN_GROGGY_PCT"). As the first word it buzzes.
 
 *How to get rid of it.* Water takes #v("DOSE_WATER_GROGGY_MIN") off, play
 #v("DOSE_PLAY_GROGGY_MIN"). A session of exercise ends it on the spot. The
@@ -109,7 +109,7 @@ long a badge hacker lasts at a hacker camp. Nobody has a cure for that.]
     #v("STRAIN_INJ_PCT", preset: casual).
 
     *What it does.* #w("sore") is only a warning. #w("injured") pulls the
-    mood target down by #v("MOOD_PEN_INJURED_PCT") and buzzes. An
+    mood target down by #v("MOOD_PEN_INJURED_PCT") and, as the first word, buzzes. An
     injured pet refuses #w("Play now"), #w("Exercise now") and
     #w("Only pets") with #w("injured").
   ],
@@ -196,16 +196,17 @@ is no longer #w("diabetic"). The count does not fall when the pet slips. A
 new onset starts it again from zero. Exercise and #w("Ozempic") take weight
 off. Ozempic also takes fitness off, so it is a mixed blessing here.
 
-#tip[Insulin is for the ceiling. The cure is for the weight. Do both.]
 
 == Well rested
 
 *How it starts.* While asleep, settled and short of full energy, the pet counts
 *good sleep*. Settled means none of the reasons under #w("bad night") below
 applies. If it wakes with at least
-#v("GOOD_SLEEP_LINE_MIN") of it, and the night was not bad, it is
-#w("well rested") for #v("RESTED_MIN"). The toast is #w("well rested") with
-#w("good sleep"). It is the one toast that is good news.
+#v("GOOD_SLEEP_LINE_MIN") of it, it is #w("well rested") for
+#v("RESTED_MIN"). The toast is #w("well rested") with #w("good sleep"). It is
+the one toast that is good news. After a bad night the pet is still well
+rested if it slept enough good minutes. Only the toast changes: it says
+#w("bad night") instead.
 
 *What it does.* Exercise strains #v("DOSE_STRAIN_RESTED_PCT") as hard. The
 status line shows #w("well rested") when nothing worse is going on. It has
@@ -251,7 +252,7 @@ last ones (@ch-reading). This is every one:
   [#w("food coma") #linebreak() #w("ate too much")], [A meal took the belly past #v("FULL_HI_PCT").], [Wait. The excess goes to weight and energy.],
   [#w("barely felt") #linebreak() #w("treat too soon")], [A treat inside #v("DOSE_JUNK_MIN") of the last one.], [Space treats out.],
   [#w("no buzz") #linebreak() #w("on Ozempic")], [A treat while Ozempic works.], [Wait for it to wear off.],
-  [#w("barely felt") #linebreak() #w("drunk already")], [A drink for a pet with more than half a bar of booze.], [Stop. Give water.],
+  [#w("barely felt") #linebreak() #w("drunk already")], [A drink for a pet with more than half a bar of booze (any booze at all if the pet is #w("dependent")).], [Stop. Give water.],
   [#w("sloppy") #linebreak() #w("one too many")], [A drink took booze over #v("BOOZE_HI_PCT").], [Water.],
   [#w("dry mouth") #linebreak() #w("booze, no water")], [A drink with water under #v("WATER_LO_PCT").], [Water first.],
   [#w("sloshing") #linebreak() #w("drank too much")], [A drink pushed water over #v("WATER_HI_PCT") or the belly over #v("FULL_HI_PCT").], [Let it settle.],

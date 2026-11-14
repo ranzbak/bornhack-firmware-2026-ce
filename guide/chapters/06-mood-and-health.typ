@@ -12,8 +12,6 @@ is how long it can stay. The nine needs of @ch-needs feed both, and this
 chapter shows how. It ends with the sad part: what happens when health runs
 out.
 
-#pic-row((("happy", [Mood up.]), ("sick", [Health down.]), ("critical", [Both down.])))
-
 == The big picture
 
 #mood-flow()
@@ -60,9 +58,6 @@ a flat amount, as long as they last.
 
 \* Craving: dependent, awake, booze under #v("MOOD_CRAVING_BOOZE_PCT"), not in
 rehab.
-
-Hunger, thirst, tiredness and wired nerves hurt most. Weight and fitness hurt
-least. A sleeping pet does not mind being tired or bored.
 
 The pulls add up. The target never goes under empty.
 
@@ -117,25 +112,26 @@ Casual drains at half the speed.
 
 Every line is strict: *at* the line does not hurt, past it does. Lack of
 sleep alone cannot finish a pet. The tiredness drain stops once health is
-down to #v("DMG_ENERGY_HEALTH_PCT"). Being too thin is the cruellest line.
-Being too heavy is the kindest.
+down to #v("DMG_ENERGY_HEALTH_PCT"). Of the two weight lines, too thin is the cruel one and too heavy the kind one.
 
 == Recovery
 
 Health heals only while it is under the ceiling, and only when the mood is
 good:
 
+#grid(columns: (1fr, auto), column-gutter: 5mm, align: horizon,
+  [
 - Mood from #v("REC_GOOD_MOOD_PCT"): a full bar in #sweep("REC_GOOD_PM").
 - Mood from #v("REC_FAIR_MOOD_PCT"): a full bar in #sweep("REC_FAIR_PM").
 - Mood under that: no healing at all.
 - A #w("worn out") pet heals at #v("REC_DEPRIVED_PCT") of that speed.
+  ],
+  hero-pic("healing"))
 
 Damage and recovery work in the same minute. The pet gains the difference.
 Healing is slow. Damage can be quick. Keep the needs in their bands and
 neither matters.
 
-#joke[Recovery takes days. Damage takes an afternoon. The pet is not being
-dramatic. The numbers just say so.]
 
 == Collapse
 
@@ -172,9 +168,6 @@ pet has no farewell picture. Below it, in red, the badge says #w("Press Fire")
 and #w("for a new egg"). Fire starts the next egg. The pet that left joins
 the others in the Unicorn Realm, see @ch-realm.
 
-#warn[Gone is final. There is no undo. A leaving pet is *not* gone yet.
-While the clock runs, you can still save it.]
-
-#tip[#w("poorly") is the danger word for low health. It is under
-#v("HEALTH_DANGER_PCT"). If you see it, stop everything and look at the
-needs. The pet's #w("Hint") row names the fix.]
+Gone is final. A leaving pet is *not* gone yet: while the clock runs, you can
+still save it. #w("poorly") is the danger word for low health, under
+#v("HEALTH_DANGER_PCT"). The #w("Hint") row names the fix.
