@@ -19,3 +19,7 @@ firmware/*
 /guide/build/
 /guide/out/
 !/guide/fonts/*.txt
+
+# Python bytecode
+__pycache__/
+*.pyc
