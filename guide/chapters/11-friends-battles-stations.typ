@@ -132,10 +132,7 @@ capitals. Anything else is ignored without a word.
   [#w("Sleep bonus!")],
 )
 
-*The cooldown.* Each phrase has its own rest of #v("STATION_COOLDOWN"). The
-first tap after a boot always works. A tap too soon does nothing to the pet
-and shows a countdown in the toast corner, like #raw("wait 4:50"), minutes
-and seconds. The rests live in memory only, so a reboot clears them.
-
-#tip[Tapping a station twice in a row gains nothing. The second tap only
-shows the countdown. Go for a walk and come back.]
+*The cooldown.* Each phrase rests for #v("STATION_COOLDOWN"). The first tap
+after a boot always works. A tap too soon does nothing to the pet. It shows a
+countdown in the toast corner, like #raw("wait 4:50"). A reboot clears the
+rests.
