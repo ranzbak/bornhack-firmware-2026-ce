@@ -4,21 +4,25 @@
 
 #cover()
 
-= Contents
+#chapter-plain("Contents")
+#align(center, sprite("hero", "idle", width: 40mm))
+The chapters, the appendix and the index arrive in later tasks.
 
-This page is a placeholder. The chapters, the appendix and the index arrive
-in later tasks.
-
-An egg on this badge hatches after #v("HATCHING_TICKS"). A hungry pet
-shows the word #w("hungry") under its picture.
-
-#align(center, grid(
-  columns: 2,
-  column-gutter: 6mm,
-  screen("content"),
-  sprite("hero", "idle", width: 46mm),
-))
-
-#align(center, pixel-heart(size: 8pt))
+#include "chapters/00-meet-the-pets.typ"
+#include "chapters/01-legend.typ"
+#include "chapters/02-getting-started.typ"
+#include "chapters/03-reading-your-pet.typ"
+#include "chapters/04-the-nine-needs.typ"
+#include "chapters/05-care-actions.typ"
+#include "chapters/06-mood-and-health.typ"
+#include "chapters/07-conditions.typ"
+#include "chapters/08-off-time.typ"
+#include "chapters/09-money-and-hax.typ"
+#include "chapters/10-hard-mode.typ"
+#include "chapters/11-friends-battles-stations.typ"
+#include "chapters/12-unicorn-realm.typ"
+#include "chapters/13-secrets.typ"
+#include "chapters/14-for-hackers.typ"
+#include "chapters/15-index.typ"
 
 #finish()

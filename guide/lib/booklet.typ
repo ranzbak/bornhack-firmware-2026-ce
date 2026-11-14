@@ -33,8 +33,16 @@
 // A missing file or key fails the compile.
 #let roster = json("/guide/build/sprites/roster.json")
 
+// Marks the page as having a picture. build_guide.py queries `<pic>` and fails
+// any page from 2 up to the back cover that lacks one.
+#let pic() = context [#metadata(here().page()) <pic>]
+
+// The guide's walking example (the first pet kind of the roster).
+#let hero = roster.hero.name
+
 // A simulator screen in a bezel frame. `name` is a shot of `guide shots`.
 #let screen(name, width: 46mm, caption: none) = {
+  pic()
   let img = image("/guide/build/screens/" + name + ".png", width: width, scaling: "pixelated")
   let framed = box(
     stroke: 2.5pt + ink,
@@ -53,6 +61,7 @@
 // "05", ...) or "hero". `anim` is a name from roster.json's anims.
 #let sprite(pet, anim, frame: 0, width: auto) = {
   let prefix = if pet == "hero" { roster.hero.prefix } else { pet }
+  pic()
   image(
     "/guide/build/sprites/" + prefix + "-" + anim + "-" + str(frame) + ".png",
     width: width,
@@ -82,6 +91,119 @@
   })
 }
 
+// A US flag from square "pixels": 13 stripes, a canton of dots.
+#let pixel-flag(width) = {
+  pic()
+  let cols = 20
+  let px = width / cols
+  let red = rgb("#b22234")
+  let blue = rgb("#3c3b6e")
+  box(width: width, height: 13 * px * 0.9, stroke: 1.5pt + ink, {
+    for r in range(13) {
+      let y = r * px * 0.9
+      for c in range(cols) {
+        let in-canton = r < 7 and c < 8
+        let fill = if in-canton { blue } else if calc.even(r) { red } else { white }
+        place(top + left, dx: c * px, dy: y, rect(width: px, height: px * 0.9, fill: fill, stroke: none))
+        if in-canton and calc.odd(r + c) and r > 0 and r < 6 and c > 0 and c < 7 {
+          place(top + left, dx: c * px + px * 0.3, dy: y + px * 0.25,
+            rect(width: px * 0.4, height: px * 0.4, fill: white, stroke: none))
+        }
+      }
+    }
+  })
+}
+
+// A frame for a hand-drawn diagram.
+#let diagram-box(body) = {
+  pic()
+  chunky(align(center, body), fill: white.transparentize(70%))
+}
+
+// A 0 to 100 bar. `zones`: (from, to, label, kind), kind "ok" (cream),
+// "warn" (hatched) or "danger" (red). `value`: optional marker.
+#let band-bar(zones, value: none, width: 100%) = {
+  pic()
+  let hatch = tiling(size: (4pt, 4pt), {
+    place(line(start: (0pt, 4pt), end: (4pt, 0pt), stroke: 0.8pt + ink))
+  })
+  let fills = (ok: cream, warn: hatch, danger: rgb("#c0392b"))
+  block(width: width, breakable: false, layout(size => {
+    let bar-w = size.width
+    let h = 9pt
+    box(width: bar-w, height: h + 22pt, {
+      for z in zones {
+        let x0 = bar-w * z.at(0) / 100
+        let zw = bar-w * (z.at(1) - z.at(0)) / 100
+        place(top + left, dx: x0, rect(width: zw, height: h, fill: fills.at(z.at(3)), stroke: 1.5pt + ink))
+        place(top + left, dx: x0, dy: h + 3pt,
+          box(width: zw, align(center, text(size: 7pt, z.at(2)))))
+      }
+      if value != none {
+        let mx = bar-w * value / 100
+        place(top + left, dx: mx - 3pt, dy: -3pt,
+          polygon(fill: ink, (0pt, 0pt), (6pt, 0pt), (3pt, 6pt)))
+        place(top + left, dx: mx - 0.75pt, dy: 0pt, rect(width: 1.5pt, height: h, fill: ink, stroke: none))
+      }
+    })
+  }))
+}
+
+// Sidebar boxes: a chunky border, a small pixel icon, a title.
+#let sidebar(title, icon, fill, body) = block(
+  width: 100%,
+  breakable: false,
+  chunky(
+    grid(columns: (14mm, 1fr), column-gutter: 8pt, align: horizon,
+      box(width: 14mm, icon),
+      {
+        text(font: head-font, size: 6.5pt, title)
+        parbreak()
+        body
+      }),
+    fill: fill,
+  ),
+)
+#let tip(body) = sidebar("TIP", sprite("hero", "happy", width: 14mm), rgb("#e4efc9"), body)
+#let joke(body) = sidebar("JOKE", sprite("hero", "playing", width: 14mm), rgb("#f6dd9a"), body)
+#let warn(body) = sidebar("WARNING", sprite("hero", "sick", width: 14mm), rgb("#f1b8a8"), body)
+
+// A chapter. `name` is its label ("ch-care"), so `@ch-care` works. The
+// heading starts a new page and carries the chapter number in the pixel font
+// and a sprite of the hero.
+#let chapter(name, title) = {
+  pagebreak(weak: true)
+  [#heading(level: 1, numbering: "1", title) #label(name)]
+}
+
+// One roster pet: idle and happy faces, its name, the hero marked.
+#let pet-card(p) = {
+  let is-hero = p.prefix == roster.hero.prefix
+  chunky(
+    align(center, {
+      grid(columns: (1fr, 1fr), column-gutter: 2mm, align: bottom + center,
+        sprite(p.prefix, "idle", width: 62%),
+        sprite(p.prefix, "happy", width: 62%))
+      block(height: 2mm)
+      text(font: head-font, size: 6.5pt, p.name)
+      if is-hero {
+        parbreak()
+        text(size: 8pt)[Walks you through this guide as #hero.]
+      }
+    }),
+    fill: if is-hero { rgb("#f6dd9a") } else { white.transparentize(50%) },
+  )
+}
+
+#let roster-grid() = grid(columns: 2, column-gutter: 5mm, row-gutter: 3mm,
+  ..roster.pets.map(pet-card))
+
+// An unnumbered chapter-style page (Contents, Meet the pets).
+#let chapter-plain(title) = {
+  pagebreak(weak: true)
+  heading(level: 1, title)
+}
+
 // Show rule for the whole book.
 #let booklet(body) = {
   set document(title: "BornPets Player's Guide")
@@ -98,27 +220,48 @@
   )
   set text(font: body-font, size: 10.5pt, fill: ink, lang: "en")
   set par(justify: true, leading: 0.65em)
-  show heading: it => block(
-    above: 1.2em,
-    below: 0.8em,
-    text(font: head-font, size: if it.level == 1 { 13pt } else { 9pt }, fill: ink, it.body),
-  )
+  show heading: it => if it.level == 1 {
+    block(
+      width: 100%,
+      above: 0pt,
+      below: 1em,
+      stroke: (bottom: 2.5pt + ink),
+      inset: (bottom: 6pt),
+      grid(columns: (1fr, auto), align: (left + horizon, right + horizon), column-gutter: 8pt,
+        {
+          if it.numbering != none {
+            text(font: head-font, size: 20pt, counter(heading).display(it.numbering))
+            v(3pt)
+          }
+          text(font: head-font, size: 13pt, fill: ink, it.body)
+        },
+        sprite("hero", "idle", width: 18mm)),
+    )
+  } else {
+    block(above: 1.2em, below: 0.8em, text(font: head-font, size: 9pt, fill: ink, it.body))
+  }
   show raw: set text(font: screen-font, size: 0.9em)
   body
 }
 
+// The cover. The start screen (start.png) is not pet art, so the cover shows
+// the roster's idle sprites instead.
 #let cover() = {
   set page(footer: none)
+  pic()
   align(center + horizon, {
     chunky(
       {
+        v(6mm)
+        text(font: head-font, size: 24pt, "BornPets")
+        v(5mm)
+        text(font: head-font, size: 9pt, "The official player's guide")
         v(8mm)
-        text(font: head-font, size: 22pt, "BornPets")
+        grid(columns: (22mm,) * 4, column-gutter: 4mm, row-gutter: 5mm, align: bottom + center,
+          ..roster.pets.map(p => sprite(p.prefix, "idle", width: 22mm)))
+        v(6mm)
+        pixel-heart(size: 8pt)
         v(4mm)
-        text(font: head-font, size: 10pt, "PLAYER'S GUIDE")
-        v(8mm)
-        pixel-heart(size: 9pt)
-        v(8mm)
       },
       fill: white.transparentize(60%),
     )
@@ -128,9 +271,9 @@
 
 // Closes the book: pads with "Notes" pages so the total, back cover included,
 // is a multiple of 4, then the back cover with the colophon.
-// `notes-art(i)` is a hook: it returns the picture for the i-th Notes page
-// (Task 5 fills it with a sprite so the picture check passes).
-#let finish(notes-art: i => pixel-heart(size: 5pt)) = {
+// `notes-art(i)` returns the picture for the i-th Notes page: a roster pet
+// (cycling), so the picture check passes.
+#let finish(notes-art: i => sprite(roster.pets.at(calc.rem(i, roster.pets.len())).prefix, "happy", width: 40mm)) = {
   [#metadata(none) <content-end>]
   context {
     let last = query(<content-end>).first().location().page()

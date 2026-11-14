@@ -52,6 +52,10 @@ class GuideChecks(unittest.TestCase):
         self.assertEqual(bg.covered_groups("status\n\n", words), {"status"})
         self.assertEqual(bg.covered_groups("", words), set())
 
+    def test_page_without_picture_fails(self):
+        self.assertEqual(bg.check_pictures({2, 3}, 5), [])
+        self.assertEqual(bg.check_pictures({2}, 5), ["page 3 has no picture"])
+
 
 if __name__ == "__main__":
     unittest.main()

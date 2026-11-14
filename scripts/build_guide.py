@@ -82,6 +82,13 @@ def check_pages(end_page):
     return []
 
 
+def check_pictures(pic_pages, end_page):
+    """Pages 2 .. end_page - 2 need a picture (a `pic()` mark); the brief's
+    test fixes this range. `check()` passes the back cover's page + 1, so the
+    last content page (the one before the back cover) is covered too."""
+    return [f"page {n} has no picture" for n in range(2, end_page - 1) if n not in pic_pages]
+
+
 def check_colophon(found, expected):
     if found != expected:
         return [f"colophon commit {found!r} does not match build commit {expected!r}"]
@@ -211,6 +218,15 @@ def covered_groups(text, words):
     return {line.strip() for line in text.splitlines() if line.strip()}
 
 
+def pic_pages(commit):
+    env = dict(os.environ, SOURCE_DATE_EPOCH=git("log", "-1", "--format=%ct"))
+    out = subprocess.check_output(
+        ["typst", "query", *typst_args(commit), "guide/main.typ", "<pic>",
+         "--field", "value"], text=True, env=env)
+    import json
+    return set(json.loads(out))
+
+
 def marked_words(commit):
     env = dict(os.environ, SOURCE_DATE_EPOCH=git("log", "-1", "--format=%ct"))
     out = subprocess.check_output(
@@ -232,6 +248,7 @@ def check(commit):
     for p in sorted(glob.glob("guide/chapters/*.typ")):
         errors += lint_digits(p, open(p).read())
     errors += check_pages(query("<guide-end>", commit))
+    errors += check_pictures(pic_pages(commit), query("<guide-end>", commit) + 1)
     errors += check_colophon(query("<colophon-commit>", commit), commit)
     errors += check_words(commit)
     if errors:
