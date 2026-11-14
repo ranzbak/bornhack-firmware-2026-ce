@@ -523,18 +523,41 @@ pub fn demo_menu_words() -> [&'static str; 7] {
     ]
 }
 
+/// The label that says why the demo switch is refused. Every reason is named,
+/// with no catch-all, so a new `Reason` or `Refusal` fails to compile here
+/// until someone decides what the row says.
+fn demo_refusal_label(why: super::engine::doses::Reason) -> &'static str {
+    use super::engine::doses::{Reason, Refusal};
+    match why {
+        Reason::Refused(Refusal::FixMeFirst) => DEMO_LABEL_FIX_ME_FIRST,
+        Reason::Hibernating => DEMO_LABEL_FROZEN,
+        Reason::Egg | Reason::Gone => DEMO_LABEL_NO_PET,
+        // `GameState::demo_refusal` never answers these (it drops `Busy`, and
+        // the rest belong to an action, not the switch). The test
+        // `the_demo_refusal_has_a_label` pins that.
+        Reason::Busy
+        | Reason::CantAfford
+        | Reason::Wait(_)
+        | Reason::Refused(
+            Refusal::NotThirsty
+            | Refusal::AlreadyClean
+            | Refusal::Injured
+            | Refusal::Asleep
+            | Refusal::NoNeed
+            | Refusal::Tired,
+        ) => DEMO_LABEL_NO_PET,
+    }
+}
+
 /// The demo row of the game settings menu. The refusal is the engine's, so
 /// the label says why the press would do nothing.
 pub fn demo_menu_label() -> &'static str {
-    use super::engine::doses::{Reason, Refusal};
     let state = unsafe { (*GAME.get()).as_ref() };
     match state.map(|s| (s.is_demo(), s.demo_refusal())) {
         None => DEMO_LABEL_NO_PET,
         Some((true, _)) => DEMO_LABEL_ON,
         Some((false, None)) => DEMO_LABEL_OFF,
-        Some((false, Some(Reason::Refused(Refusal::FixMeFirst)))) => DEMO_LABEL_FIX_ME_FIRST,
-        Some((false, Some(Reason::Hibernating))) => DEMO_LABEL_FROZEN,
-        Some((false, Some(_))) => DEMO_LABEL_NO_PET,
+        Some((false, Some(why))) => demo_refusal_label(why),
     }
 }
 
@@ -1256,8 +1279,9 @@ pub async fn save_if_needed() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        Severity, apply_boot_catch_up, boot_catch_up_minutes, catch_up_minutes, current_severity, deferred_catch_up_minutes,
-        alert_due, event_at, forget_boot_gap, onset_alert_due, saved_unix_to_write,
+        Severity, alert_due, apply_boot_catch_up, boot_catch_up_minutes, catch_up_minutes,
+        current_severity, deferred_catch_up_minutes, event_at, forget_boot_gap, onset_alert_due,
+        saved_unix_to_write,
     };
     use crate::game::engine::status::{Word, status_line};
     use crate::game::engine::needs::P;
@@ -1674,6 +1698,60 @@ mod tests {
         set_state_for_test(None);
         assert_eq!(demo_menu_label(), "Demo: no pet");
         assert!(toggle_demo().is_err());
+    }
+
+    /// The switch only ever answers with a reason the row has a word for: an
+    /// unmapped one would read "Demo: no pet" and hide the real cause.
+    #[test]
+    fn the_demo_refusal_has_a_label() {
+        use super::{
+            DEMO_LABEL_FIX_ME_FIRST, DEMO_LABEL_FROZEN, DEMO_LABEL_NO_PET, demo_refusal_label,
+        };
+        let mut states = vec![GameState::new_egg(7, PetKind(0))];
+        for (health, hibernating, phase, busy, leaving) in [
+            (30, false, Phase::Active, false, false),
+            (60, false, Phase::Active, false, false),
+            (60, false, Phase::Active, true, false),
+            (60, true, Phase::Active, false, false),
+            (60, false, Phase::Gone, false, false),
+            (60, false, Phase::Leaving, false, true),
+            (0, false, Phase::Active, false, false),
+        ] {
+            let mut s = GameState::new_egg(7, PetKind(0));
+            s.phase = phase;
+            s.health = (health * P) as u16;
+            s.hibernating = hibernating;
+            if leaving {
+                s.leaving_min = 10;
+            }
+            if busy {
+                assert!(s.drink(crate::game::engine::DrinkKind::Water));
+            }
+            states.push(s);
+        }
+        let mut reasons = 0;
+        for s in states {
+            let Some(why) = s.demo_refusal() else { continue };
+            reasons += 1;
+            assert!(
+                matches!(
+                    why,
+                    Reason::Refused(Refusal::FixMeFirst)
+                        | Reason::Hibernating
+                        | Reason::Egg
+                        | Reason::Gone
+                ),
+                "demo_refusal answered {why:?}, which the row has no word for"
+            );
+        }
+        assert!(reasons >= 5, "{reasons} refusals checked");
+        assert_eq!(
+            demo_refusal_label(Reason::Refused(Refusal::FixMeFirst)),
+            DEMO_LABEL_FIX_ME_FIRST
+        );
+        assert_eq!(demo_refusal_label(Reason::Hibernating), DEMO_LABEL_FROZEN);
+        assert_eq!(demo_refusal_label(Reason::Egg), DEMO_LABEL_NO_PET);
+        assert_eq!(demo_refusal_label(Reason::Gone), DEMO_LABEL_NO_PET);
     }
 
     #[test]

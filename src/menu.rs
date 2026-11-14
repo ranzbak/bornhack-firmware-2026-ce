@@ -2903,14 +2903,15 @@ mod tests {
 
     /// The game settings menu has the two demo rows between Mode and Reset
     /// Pet, and every label they can show fits a menu row: `MENU_W` less
-    /// the 1 px border each side, in 7 px columns (the rows are drawn
-    /// centred, with no stepper arrows).
+    /// the 1 px border each side, in columns of the row font (the rows are
+    /// drawn centred, with no stepper arrows).
     #[cfg(feature = "game")]
     #[test]
     fn game_settings_has_the_demo_rows() {
         use crate::game::engine::{GameState, PetKind, Phase};
         use crate::game::lifecycle::set_state_for_test;
-        const ROW_COLS: usize = (MENU_W as usize - 2) / 7;
+        const ROW_COLS: usize =
+            (MENU_W as usize - 2) / FONT_7X13_BOLD.character_size.width as usize;
         assert_eq!(ROW_COLS, 20);
         assert_eq!(BORNAGOTCHI_ITEMS.len(), 9);
         assert!(matches!(
@@ -2958,6 +2959,7 @@ mod tests {
             "Demo mode: on",
             "Demo mode: off",
             "Demo: fix me first",
+            "Demo: frozen",
             "Demo: no pet",
             "Demo care: instant",
             "Demo care: animated",
