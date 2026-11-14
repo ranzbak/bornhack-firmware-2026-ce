@@ -38,6 +38,8 @@ Every task's requirements include this section.
 - "Alarms: the diabetes and dependence alarms fire again on every boot, unless the pet is hibernating. The guide says so."
 - Labels: "If the labels in the game need to be changed to make the game flow more clear to the player, do so." Renames touch on-screen text only, never rules, save bytes, kv keys or config keys. Each one ships as its own small firmware commit with its tests.
 - Unbuilt features stay out: no "coming soon" pages. Chapters 9 to 12 describe what the badge does today. A joke never implies a mechanic the badge lacks (today there are no deductibles, copays, bills or evictions).
+- Public source (owner, 2026-11-14): "Public is fine". The whole guide source, the US chapter included, may go on the public GitHub mirror for CI. The owner still reads the PDF before anything is handed out.
+- Chapters 9 to 12 (owner, 2026-11-14): write them now, in short form, describing today's badge only. No "coming soon" pages.
 - Language: English, short sentences, plain words.
 
 **Firmware safety:**
