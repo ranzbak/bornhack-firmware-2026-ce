@@ -16,7 +16,7 @@ use crate::{BLACK, TriColor, WHITE};
 /// (under that cfg) after the store.
 macro_rules! bool_toggle {
     (
-        $label:ident, $action:ident, $atomic:path, $when_true:literal, $when_false:literal
+        $label:ident, $action:ident, $atomic:path, $when_true:expr, $when_false:expr
         $(, signal = $sig:path, cfg = $cfg:meta)?
     ) => {
         fn $label() -> &'static str {
@@ -1134,12 +1134,14 @@ fn label_telemetry_share() -> &'static str {
 
 // ── Ignore blink toggle ────────────────────────────────────────────────────
 
+const LABEL_MUTE_ON: &str = "Mute (On)";
+const LABEL_MUTE_OFF: &str = "Mute (Off)";
 bool_toggle!(
     label_game_mute,
     action_game_mute_toggle,
     crate::GAME_MUTE,
-    "Mute (On)",
-    "Mute (Off)"
+    LABEL_MUTE_ON,
+    LABEL_MUTE_OFF
 );
 
 fn label_game_enabled() -> &'static str {
@@ -1981,8 +1983,14 @@ const LABEL_MODE: &str = "Mode:";
 
 /// The fixed labels (host-only, for the guide's word list).
 #[cfg(any(test, feature = "simulator"))]
-pub fn main_menu_words() -> [&'static str; 3] {
-    [LABEL_BORNAGOTCHI, LABEL_UNICORN_REALM, LABEL_MODE]
+pub fn main_menu_words() -> [&'static str; 5] {
+    [
+        LABEL_BORNAGOTCHI,
+        LABEL_UNICORN_REALM,
+        LABEL_MODE,
+        LABEL_MUTE_ON,
+        LABEL_MUTE_OFF,
+    ]
 }
 
 static BORNAGOTCHI_ITEMS: [MenuItem; 7] = [

@@ -218,7 +218,7 @@
 
 #let content-marks = (
   ("A", 0.40, 0.45), ("B", 0.16, 0.66), ("C", 0.02, 0.24),
-  ("D", 0.86, 0.24), ("E", 0.04, 0.04), ("F", 0.04, 0.86))
+  ("D", 0.90, 0.17), ("E", -0.07, 0.10), ("F", -0.07, 0.88))
 #let gap-s = 3mm
 
 // A plain ruled table for word lists.
@@ -242,6 +242,10 @@
 
 // The hero, big enough to sit beside a paragraph.
 #let hero-pic(anim) = sprite-fit("hero", anim, w: 70pt, h: 70pt)
+
+// A row of hero sprites with captions: (anim, caption) pairs.
+#let pic-row(items) = grid(columns: items.map(_ => 1fr), column-gutter: 3mm, align: bottom + center,
+  ..items.map(i => stack(spacing: gap-s, hero-pic(i.at(0)), text(size: 8pt, i.at(1)))))
 
 // A keycap for the button diagram.
 #let keycap(label, round: false, fill: white) = box(

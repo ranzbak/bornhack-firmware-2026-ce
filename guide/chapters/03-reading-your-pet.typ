@@ -41,7 +41,8 @@ one or two words. Here is how the badge picks them.
 
     The *first word* is, in this order:
     + a *danger word*, if there is one;
-    + else the biggest problem.
+    + else the biggest problem;
+    + else a prompt, if there is one.
 
     Then come the *prompts*, #w("no insulin") and #w("needs rehab"). They
     say that a lasting condition needs a drug. A prompt takes the second
@@ -127,11 +128,14 @@ them in this order:
 
 == The buzz
 
-The badge has a buzzer, and it speaks up less than you might fear. It buzzes
-only when things get *worse*, and only for these words. Think of a ladder
+The badge has a buzzer, and it speaks up less than you might fear. For the
+status line, it buzzes only when things get *worse*, and only when the
+*first* word is one of these. A second word never buzzes. Think of a ladder
 with four steps: calm, warning, danger and leaving.
 
-- *Buzzes:* #w("hungry"), #w("starving"), #w("thirsty"), #w("parched"),
+#pic-row((("hungry", [Hungry: buzz.]), ("idle", [Calm: quiet.])))
+
+- *Buzzes, as the first word:* #w("hungry"), #w("starving"), #w("thirsty"), #w("parched"),
   #w("exhausted"), #w("wasted"), #w("filthy"), #w("hung over"),
   #w("injured"), #w("groggy") and #w("poorly"). Any danger word buzzes.
 - *Quiet:* every other word, such as #w("peckish"), #w("sleepy"),
@@ -144,7 +148,14 @@ stays silent right after the badge boots, so a pet that was already hungry
 does not wake the room. A pet that has just gone gets a short, silly tune of
 its own.
 
-The Mute row in the badge's main menu turns the game's buzzer off.
+Two more buzzes do not come from the status line. The diabetes and
+dependence alarms sound on *every boot*, unless the pet is hibernating.
+@ch-conditions tells the full story.
+
+To silence the game, go to the Main screen, then #w("Bornagotchi"). The
+second row is the mute switch. It reads #w("Mute (On)") while the game is
+muted and #w("Mute (Off)") while it is not. Muting silences the status
+buzz, the two alarms and the tune for a pet that has gone.
 
 #joke[The pet does not buzz for #w("peckish"). It is only peckish. It will
 survive. It always says that.]
@@ -164,9 +175,10 @@ The screen also redraws when something happens, such as a toast, a new status
 word or a menu. So if your pet looks frozen, it is not. It is napping
 between frames.
 
-#grid(columns: (1fr, 1fr), column-gutter: 3mm, align: bottom + center,
-  hero-pic("idle"),
-  hero-pic("happy"))
+#pic-row((("idle", [Idle.]), ("happy", [Happy.]), ("sleeping", [Asleep.])))
+
+Each of these looks, and every other one, gets one frame at a time. One
+frame, then a long nap.
 
 == The Hint row
 
@@ -185,8 +197,7 @@ pet's name: #w("<name> says"). A pet with no name says
       #w("needs rehab").
     - #w("Zzz...") when asleep, #w("I feel great!") when well rested, and
       #w("I'm happy!") when content.
-    - A tired-out pet with nothing worse to say reads #w("I'm <word>!") with
-      the word "worn out".
+    - A tired-out pet with nothing worse to say reads #w("I'm worn out!").
     - #w("*wobble*") for an egg, #w("...") for a pet that has left, and
       #w("Brrr, frozen!") for a hibernating one.
   ])
@@ -206,7 +217,7 @@ The *second line* is what the pet wants you to do:
   [#w("I need medicine.")], [Heal, for an injury or poor health.],
   [#w("I need insulin.")], [Give insulin, from the Heal menu.],
   [#w("I need rehab.")], [Rehab, from the Heal menu.],
-  [#w("Defrost me!")], [Defrost.],
+  [#w("Defrost me!")], [Defrost, from the Hibernate menu. See @ch-offtime.],
 )
 
 Some words have nothing to ask for. The pet then says a fixed line:
@@ -257,8 +268,8 @@ first.
     - The ages tick on by themselves while it is open.
   ])
 
-If a full-screen view is open when something goes wrong, the toast stays
-away. The cause still lands in the diary.
+If a full-screen view or a menu is open when something goes wrong, the
+toast stays away. The cause still lands in the diary.
 
 #joke[Never mind. Nobody reads their own diary after a bad night. Your pet
 does not, either.]

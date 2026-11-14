@@ -134,7 +134,10 @@ fn build() -> Vec<Entry> {
             Subject::Word(w) if line == alloc::format!("I'm {}!", w.text()) => {
                 add("hint", "I'm <word>!")
             }
-            Subject::WornOut if line == WORN_OUT_LINE => add("hint", "I'm <word>!"),
+            Subject::WornOut if line == WORN_OUT_LINE => {
+                add("hint", "I'm <word>!");
+                add("hint", WORN_OUT_LINE)
+            }
             _ => add("hint", line),
         }
         for r in remedies(*s) {
