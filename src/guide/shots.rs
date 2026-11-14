@@ -8,7 +8,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::game::engine::doses::{Reason, Refusal};
 use crate::game::engine::sim;
@@ -239,8 +239,13 @@ fn has_word(w: Word) -> bool {
     line().is_some_and(|l| l.first == w || l.second == Some(w))
 }
 
-fn has_condition(c: Condition) -> bool {
-    lifecycle::cycle().is_some_and(|s| s.conditions.has(c))
+/// Whether the pet was hung over when `note_hung_over` ran. A step reads the
+/// state (`cycle()` advances it), so the expectation only reads this flag.
+static HUNG_OVER: AtomicBool = AtomicBool::new(false);
+
+fn note_hung_over() {
+    let has = lifecycle::cycle().is_some_and(|s| s.conditions.has(Condition::HungOver));
+    HUNG_OVER.store(has, Ordering::Relaxed);
 }
 
 fn menu_is(kind: ModalKind) -> bool {
@@ -313,8 +318,8 @@ pub static SHOTS: &[Shot] = &[
     ),
     shot!(
         "hung-over",
-        [Do(content), Poke(DebugPoke::HungOver)],
-        || { has_condition(Condition::HungOver) }
+        [Do(content), Poke(DebugPoke::HungOver), Do(note_hung_over)],
+        || { HUNG_OVER.load(Ordering::Relaxed) }
     ),
     shot!("injured", [Do(content), Poke(DebugPoke::Injured)], || {
         first_is(Word::Injured)
