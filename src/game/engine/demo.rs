@@ -1,11 +1,13 @@
-//! Demo mode state and its save block (plan 3). The pet looks after itself
-//! through the delta engine's events; this file holds only the saved state.
-//! The block sits in the reserved tail of the format-3 save, so a plan-2
-//! save (zeros there) reads as demo off.
+//! Demo mode (plan 3). The pet looks after itself through the delta engine's
+//! events: its thresholds are solver lines (`levels`), its timers are solver
+//! bounds (`timers`), and `settle` and `decide` read the state at a segment
+//! boundary. Nothing here polls. The saved state sits in the reserved tail of
+//! the format-3 save, so a plan-2 save (zeros there) reads as demo off.
 
-use super::GameState;
+use super::advance::SLOW_SCALE;
 use super::needs::{MAX, Need, P};
 use super::thresholds as t;
+use super::{Action, DrinkKind, FoodKind, GameState, MiniGame, Phase, TICKS_PER_MINUTE};
 
 /// Where the demo block starts in the save, right after `saved_unix`.
 pub const BLOCK_AT: usize = 149;
@@ -14,6 +16,14 @@ pub const BLOCK_LEN: usize = 11;
 
 /// Minutes in a day: bedtime and getting-up lines count minutes since 00:00.
 pub const MINUTES_PER_DAY: u16 = 1440;
+/// Mini-games the pet can pick from.
+pub const GAME_COUNT: usize = MiniGame::ALL.len();
+/// Grades a finished mini-game can have (0..=2).
+pub const GRADES: u8 = 3;
+/// Percent scale of the dice rolls (`rng % 100`).
+const PERCENT: u32 = 100;
+/// Most minutes the saved soft delay (one byte) holds.
+const BYTE_MAX_MIN: u32 = u8::MAX as u32;
 /// Bits the temperament takes in the flags byte.
 pub const LAZY_BITS: u8 = 4;
 /// Largest temperament the flags byte holds.
@@ -130,18 +140,529 @@ pub fn pinned(s: &GameState, need: Need, level: i32, rate: i32) -> bool {
     s.demo.on && need == Need::Fit && rate < 0 && level <= fit_floor() as i32
 }
 
-/// Demo lines for one need (levels, as `lvl(..)`), appended by
-/// `solver::extra_levels` while demo is on. The fitness floor is a line only
-/// while fitness is above it; Task 3 adds the policy lines.
-pub fn levels(s: &GameState, need: Need) -> ([i32; 8], usize) {
-    let mut v = [0; 8];
-    let mut n = 0;
-    if need == Need::Fit && s.fitness > fit_floor() {
-        v[0] = fit_floor() as i32;
-        n = 1;
+/// `pct` percent as a level.
+#[inline]
+fn lvl(pct: u8) -> i32 {
+    pct as i32 * P
+}
+
+/// A policy line as a level, kept inside the level range.
+#[inline]
+fn line(level: i32) -> i32 {
+    level.clamp(0, MAX)
+}
+
+/// Every level the policy reads, with the temperament applied. `decide` and
+/// `levels` both take their lines from here, so the solver stops on exactly
+/// the lines the choice reads.
+struct Lines {
+    wake_full: i32,
+    edge_full: i32,
+    soft_full: i32,
+    edge_water: i32,
+    soft_water: i32,
+    water_refuse: i32,
+    edge_energy: i32,
+    soft_energy: i32,
+    play_energy: i32,
+    nap_energy: i32,
+    rise_energy: i32,
+    wired_fun: i32,
+    soft_fun: i32,
+    nap_fun: i32,
+    soft_dirt: i32,
+    wash_refuse: i32,
+    edge_booze: i32,
+    whim_lo: i32,
+    whim_hi: i32,
+    light_food: i32,
+    rich_food: i32,
+}
+
+fn lines(s: &GameState) -> Lines {
+    let lazy = lvl(s.demo.lazy);
+    let half_lazy = lvl(s.demo.lazy / 2);
+    Lines {
+        wake_full: line(lvl(t::DEMO_WAKE_FULL_PCT())),
+        edge_full: line(lvl(t::DEMO_EDGE_FULL_PCT())),
+        soft_full: line(lvl(t::DEMO_SOFT_FULL_PCT()) - lazy),
+        edge_water: line(lvl(t::DEMO_EDGE_WATER_PCT())),
+        soft_water: line(lvl(t::DEMO_SOFT_WATER_PCT()) - lazy),
+        water_refuse: line(super::doses::WATER_REFUSE_PCT * P),
+        edge_energy: line(lvl(t::DEMO_EDGE_ENERGY_PCT())),
+        soft_energy: line(lvl(t::DEMO_SOFT_ENERGY_PCT()) - half_lazy),
+        play_energy: line(lvl(t::DEMO_PLAY_ENERGY_PCT())),
+        nap_energy: line(lvl(t::DEMO_NAP_ENERGY_PCT())),
+        rise_energy: line(lvl(t::DEMO_RISE_ENERGY_PCT())),
+        wired_fun: line(lvl(t::DEMO_WIRED_FUN_PCT()) + lazy),
+        soft_fun: line(lvl(t::DEMO_SOFT_FUN_PCT()) - lazy),
+        nap_fun: line(lvl(t::DEMO_NAP_FUN_PCT())),
+        soft_dirt: line(lvl(t::DEMO_SOFT_DIRT_PCT()) + lazy),
+        wash_refuse: line(super::doses::WASH_REFUSE_PCT * P),
+        edge_booze: line(lvl(t::DEMO_EDGE_BOOZE_PCT())),
+        whim_lo: line(lvl(t::DEMO_WHIM_BOOZE_LO_PCT())),
+        whim_hi: line(lvl(t::DEMO_WHIM_BOOZE_HI_PCT())),
+        light_food: line(lvl(t::DEMO_LIGHT_FOOD_PCT())),
+        rich_food: line(lvl(t::DEMO_RICH_FOOD_PCT())),
     }
-    debug_assert!(v[..n].iter().all(|&l| l <= MAX));
+}
+
+/// Most policy lines one need carries (energy: five).
+pub const MAX_LINES: usize = 8;
+
+/// Demo lines for one need (levels, as `lvl(..)`), appended by
+/// `solver::extra_levels` while demo is on: the policy lines of `decide` and
+/// `settle`, and the fitness floor while fitness is above it. Health lines
+/// are in `solver::sig`.
+pub fn levels(s: &GameState, need: Need) -> ([i32; MAX_LINES], usize) {
+    let l = lines(s);
+    let mut v = [0; MAX_LINES];
+    let mut set = |xs: &[i32]| {
+        v[..xs.len()].copy_from_slice(xs);
+        xs.len()
+    };
+    let n = match need {
+        Need::Full => set(&[l.wake_full, l.edge_full, l.soft_full]),
+        Need::Water => set(&[l.edge_water, l.soft_water, l.water_refuse]),
+        Need::Energy => set(&[
+            l.edge_energy,
+            l.soft_energy,
+            l.play_energy,
+            l.nap_energy,
+            l.rise_energy,
+        ]),
+        Need::Fun => set(&[l.wired_fun, l.soft_fun, l.nap_fun]),
+        Need::Dirt => set(&[l.soft_dirt, l.wash_refuse]),
+        Need::Booze => set(&[l.edge_booze, l.whim_lo, l.whim_hi]),
+        Need::Weight => set(&[l.light_food, l.rich_food]),
+        Need::Fit if s.fitness > fit_floor() => set(&[fit_floor() as i32]),
+        Need::Fit | Need::Strain => 0,
+    };
+    debug_assert!(v[..n].iter().all(|&l| (0..=MAX).contains(&l)));
     (v, n)
+}
+
+// ---------------------------------------------------------------------------
+// Policy: what the pet chooses
+// ---------------------------------------------------------------------------
+
+/// What the pet does next. Every choice maps onto a public starter.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Choice {
+    Eat(FoodKind),
+    Drink(DrinkKind),
+    Sleep,
+    Nap,
+    Wake,
+    Wash,
+    Play,
+    /// A mini-game and the grade it ends with (0..`GRADES`).
+    Game(MiniGame, u8),
+    Relax,
+    Medicine,
+    Insulin,
+    Rehab,
+}
+
+/// Whether the starter behind `c` would take it now. The pet never takes a
+/// choice its starter would refuse: the row falls through to the next.
+fn allowed(s: &GameState, c: Choice) -> bool {
+    match c {
+        Choice::Eat(_) => s.refusal_for(Action::Feed, None).is_none(),
+        Choice::Drink(d) => s.refusal_for(Action::Drink, Some(d)).is_none(),
+        Choice::Sleep | Choice::Nap => s.sleep_refusal().is_none(),
+        Choice::Wake => s.is_sleeping,
+        Choice::Wash => s.refusal_for(Action::Wash, None).is_none(),
+        Choice::Play => s.refusal_for(Action::Play, None).is_none(),
+        Choice::Game(g, _) => s.game_refusal(Some(g)).is_none(),
+        Choice::Relax => s.refusal_for(Action::Relax, None).is_none(),
+        Choice::Medicine => s.refusal_for(Action::Heal, None).is_none(),
+        Choice::Insulin => s.refusal_for(Action::Medicate, None).is_none(),
+        Choice::Rehab => s.refusal_for(Action::Rehab, None).is_none(),
+    }
+}
+
+/// The first row that applies and is allowed.
+fn first(s: &GameState, rows: &[(bool, Choice)]) -> Option<Choice> {
+    rows.iter()
+        .find(|&&(on, c)| on && allowed(s, c))
+        .map(|&(_, c)| c)
+}
+
+/// The dice, without stepping them: a roll of 0..100.
+fn roll(s: &GameState) -> u32 {
+    s.demo_rng % PERCENT
+}
+
+/// A draw of 0..=`n` that steps the dice (`settle` only).
+fn draw(s: &mut GameState, n: u32) -> u32 {
+    let v = s.demo_rng % (n + 1);
+    s.demo_rng = crate::platform::xorshift32(s.demo_rng);
+    v
+}
+
+fn food_draw(s: &GameState) -> FoodKind {
+    let v = roll(s);
+    let mut upto = t::DEMO_PICK_APPLE_PCT() as u32;
+    let mut food = if v < upto {
+        FoodKind::Apple
+    } else {
+        upto += t::DEMO_PICK_SALAD_PCT() as u32;
+        if v < upto {
+            FoodKind::Salad
+        } else {
+            upto += t::DEMO_PICK_PIZZA_PCT() as u32;
+            if v < upto {
+                FoodKind::Pizza
+            } else {
+                upto += t::DEMO_PICK_FRIK_PCT() as u32;
+                if v < upto {
+                    FoodKind::Frikandel
+                } else {
+                    FoodKind::Cake
+                }
+            }
+        }
+    };
+    let (weight, l) = (s.weight as i32, lines(s));
+    if weight > l.light_food
+        && matches!(food, FoodKind::Pizza | FoodKind::Frikandel | FoodKind::Cake)
+    {
+        food = FoodKind::Salad;
+    }
+    if weight < l.rich_food && matches!(food, FoodKind::Apple | FoodKind::Salad) {
+        food = FoodKind::Pizza;
+    }
+    food
+}
+
+fn drink_draw(s: &GameState) -> DrinkKind {
+    let v = roll(s);
+    let water = t::DEMO_PICK_WATER_PCT() as u32;
+    let cola = water + t::DEMO_PICK_COLA_PCT() as u32;
+    if v < water {
+        DrinkKind::Water
+    } else if v < cola || s.booze as i32 > lines(s).whim_lo {
+        DrinkKind::Cola
+    } else {
+        DrinkKind::Beer
+    }
+}
+
+/// A mini-game (the first one not cooling down, from the dice's pick) or
+/// plain play.
+fn play_or_game(s: &GameState) -> Choice {
+    if roll(s) < t::DEMO_PICK_GAME_PCT() as u32 {
+        let start = s.demo_rng as usize % GAME_COUNT;
+        let game = (0..GAME_COUNT)
+            .map(|k| MiniGame::ALL[(start + k) % GAME_COUNT])
+            .find(|&g| s.game_refusal(Some(g)).is_none());
+        if let Some(g) = game {
+            return Choice::Game(g, (s.demo_rng % GRADES as u32) as u8);
+        }
+    }
+    Choice::Play
+}
+
+/// The dependence counter is past the line where the pet stops asking for
+/// beer (`dependence_min` counts quarter-minutes).
+fn beer_stopped(s: &GameState) -> bool {
+    s.dependence_min > beer_stop_counter()
+}
+
+fn beer_stop_counter() -> u32 {
+    t::DEMO_BEER_STOP_MIN() as u32 * SLOW_SCALE
+}
+
+/// The soft rows (row 12): the first one that is true and allowed.
+fn soft_pick(s: &GameState) -> Option<Choice> {
+    let l = lines(s);
+    let rows = [
+        (
+            (s.hydration as i32) < l.soft_water,
+            Choice::Drink(drink_draw(s)),
+        ),
+        ((s.fullness as i32) < l.soft_full, Choice::Eat(food_draw(s))),
+        (
+            s.day_min.is_none() && (s.energy as i32) < l.soft_energy,
+            Choice::Sleep,
+        ),
+        (s.dirt as i32 > l.soft_dirt, Choice::Wash),
+        (
+            (s.fun as i32) < l.soft_fun && s.energy as i32 > l.play_energy && s.injured_min == 0,
+            play_or_game(s),
+        ),
+    ];
+    first(s, &rows)
+}
+
+/// The whim rows (row 13).
+fn whim_pick(s: &GameState) -> Option<Choice> {
+    let l = lines(s);
+    let (booze, dice) = (s.booze as i32, roll(s));
+    let beer = !beer_stopped(s);
+    let rows = [
+        (
+            booze < l.whim_lo && beer && dice < t::DEMO_WHIM_BEER_LO_PCT() as u32,
+            Choice::Drink(DrinkKind::Beer),
+        ),
+        (
+            booze < l.whim_lo && s.weight as i32 <= l.light_food,
+            Choice::Eat(FoodKind::Cake),
+        ),
+        (
+            booze < l.whim_hi && beer && dice < t::DEMO_WHIM_BEER_HI_PCT() as u32,
+            Choice::Drink(DrinkKind::Beer),
+        ),
+        (
+            (s.energy as i32) < l.nap_energy && (s.fun as i32) < l.nap_fun,
+            Choice::Nap,
+        ),
+    ];
+    first(s, &rows)
+}
+
+/// While the pet is drunk the soft delay is the dry-out interval, and the
+/// pet wants water as soon as it is allowed.
+fn drunk(s: &GameState) -> bool {
+    s.booze as i32 > lines(s).edge_booze
+}
+
+/// Whether the soft delay should be running: an awake pet with a soft row
+/// true, or a drunk one that may drink water.
+fn soft_wanted(s: &GameState) -> bool {
+    if s.is_sleeping {
+        false
+    } else if drunk(s) {
+        allowed(s, Choice::Drink(DrinkKind::Water))
+    } else {
+        soft_pick(s).is_some()
+    }
+}
+
+/// What the pet does now, or `None`. Pure: reads the dice without stepping
+/// them. The first row that applies and is not refused (table in the plan).
+pub fn decide(s: &GameState) -> Option<Choice> {
+    if !s.demo.on
+        || s.phase != Phase::Active
+        || s.hibernating
+        || s.active_action.is_some()
+        || s.demo.pause_min != 0
+    {
+        return None;
+    }
+    let d = &s.demo;
+    let l = lines(s);
+    let clock_due = d.clock_armed && d.clock_min == 0;
+    if s.is_sleeping {
+        let wake = clock_due || (s.fullness as i32) < l.wake_full;
+        return wake.then_some(Choice::Wake);
+    }
+    let food = if s.weight as i32 > l.light_food {
+        FoodKind::Apple
+    } else {
+        FoodKind::Pizza
+    };
+    let rows = [
+        (s.is_diabetic_unmedicated(), Choice::Insulin),
+        (s.is_alcoholic_untreated(), Choice::Rehab),
+        ((s.fullness as i32) < l.edge_full, Choice::Eat(food)),
+        (
+            (s.hydration as i32) < l.edge_water,
+            Choice::Drink(DrinkKind::Water),
+        ),
+        ((s.energy as i32) < l.edge_energy, Choice::Sleep),
+        (
+            (s.health as i32) < lvl(t::DEMO_MED_HEALTH_PCT()),
+            Choice::Medicine,
+        ),
+    ];
+    if let Some(c) = first(s, &rows) {
+        return Some(c);
+    }
+    let delay_done = d.soft_armed && d.next_min == 0;
+    if drunk(s) {
+        let water = Choice::Drink(DrinkKind::Water);
+        return (delay_done && allowed(s, water)).then_some(water);
+    }
+    if let Some(c) = first(
+        s,
+        &[
+            (clock_due, Choice::Sleep),
+            (s.fun as i32 > l.wired_fun, Choice::Relax),
+        ],
+    ) {
+        return Some(c);
+    }
+    if delay_done && let Some(c) = soft_pick(s) {
+        return Some(c);
+    }
+    if d.whim_min == 0 {
+        return whim_pick(s);
+    }
+    None
+}
+
+/// The demo part of the wake view: bit 0 a choice is waiting, bit 1 the
+/// help line (Task 6 sets it).
+pub fn wake_view(s: &GameState) -> u8 {
+    decide(s).is_some() as u8
+}
+
+// ---------------------------------------------------------------------------
+// Time: the clock minute and the timers
+// ---------------------------------------------------------------------------
+
+/// Timers in `timers`: clock, whim, lazy, soft delay, pause, the dependence
+/// line, then one per mini-game cooldown.
+pub const TIMER_COUNT: usize = 6 + GAME_COUNT;
+const T_DEPENDENCE: usize = 5;
+const T_GAMES: usize = 6;
+
+/// Remaining minutes of each running timer, for `solver::timer_bound`;
+/// `u32::MAX` when it is not running. All of them are plain: nothing the
+/// regime reads depends on them, so the segment simply ends when one runs
+/// out and `settle` and `decide` see it at that boundary.
+pub fn timers(s: &GameState) -> [u32; TIMER_COUNT] {
+    let mut v = [u32::MAX; TIMER_COUNT];
+    if !s.demo.on {
+        return v;
+    }
+    let d = &s.demo;
+    let running = |on: bool, minutes: u32| if on && minutes > 0 { minutes } else { u32::MAX };
+    v[0] = running(d.clock_armed, d.clock_min as u32);
+    v[1] = running(true, d.whim_min as u32);
+    v[2] = running(true, d.lazy_min as u32);
+    v[3] = running(d.soft_armed, d.next_min as u32);
+    v[4] = running(true, d.pause_min as u32);
+    // The beer counter decays while sober; it crosses its line at a minute.
+    let sober = (s.booze as i32) < lvl(t::BOOZE_CLEAR_PCT());
+    v[T_DEPENDENCE] = running(sober, s.dependence_min.saturating_sub(beer_stop_counter()));
+    for (slot, game) in v[T_GAMES..].iter_mut().zip(MiniGame::ALL) {
+        // A cooldown counts ticks; the starter takes the game at 0.
+        *slot = running(
+            true,
+            (s.game_cooldown(game) as u32).div_ceil(TICKS_PER_MINUTE),
+        );
+    }
+    v
+}
+
+/// Time passes by `dt` minutes (called from `advance`): the local minute of
+/// the day moves on whatever the mode, the demo timers count down.
+pub fn tick(s: &mut GameState, dt: u32) {
+    let day = MINUTES_PER_DAY as u32;
+    s.day_min = s.day_min.map(|m| ((m as u32 + dt) % day) as u16);
+    if !s.demo.on {
+        return;
+    }
+    let sub = |timer: u32| timer.saturating_sub(dt);
+    let d = &mut s.demo;
+    d.clock_min = sub(d.clock_min as u32) as u16;
+    d.whim_min = sub(d.whim_min as u32) as u16;
+    d.lazy_min = sub(d.lazy_min as u32) as u16;
+    d.next_min = sub(d.next_min as u32) as u8;
+    d.pause_min = sub(d.pause_min as u32) as u8;
+}
+
+// ---------------------------------------------------------------------------
+// Settle: the bookkeeping at a segment boundary
+// ---------------------------------------------------------------------------
+
+/// Minutes from minute-of-day `from` to the next `to` (0 when equal).
+fn until(from: u16, to: u16) -> u32 {
+    let day = MINUTES_PER_DAY as u32;
+    (to as u32 % day + day - from as u32 % day) % day
+}
+
+/// Inside the night window (bedtime to getting up, wrapping midnight).
+fn in_night(m: u16) -> bool {
+    let (bed, up) = (t::DEMO_BED_AT_MIN(), t::DEMO_UP_AT_MIN());
+    if bed >= up {
+        m >= bed || m < up
+    } else {
+        (bed..up).contains(&m)
+    }
+}
+
+/// Bookkeeping at a segment boundary: re-roll the temperament, arm or
+/// disarm the soft delay, arm the clock, re-arm a whim that has nothing to
+/// do. Never acts and never changes what the player sees (`visible()`
+/// apart from the choice bit of the wake view).
+pub fn settle(s: &mut GameState) {
+    if !s.demo.on {
+        return;
+    }
+    if s.demo.lazy_min == 0 {
+        let lazy = draw(s, t::DEMO_LAZY_MAX_PCT() as u32).min(LAZY_MAX as u32);
+        s.demo.lazy = lazy as u8;
+        s.demo.lazy_min = t::DEMO_LAZY_MIN();
+    }
+    arm_clock(s);
+    arm_soft(s);
+    if s.demo.whim_min == 0 && whim_pick(s).is_none() {
+        let wait = t::DEMO_WHIM_BASE_MIN() as u32 + draw(s, t::DEMO_WHIM_SPREAD_MIN() as u32);
+        s.demo.whim_min = wait.min(u16::MAX as u32) as u16;
+    }
+}
+
+/// Arm the clock for the pet's present state, when it is not armed.
+fn arm_clock(s: &mut GameState) {
+    if s.demo.clock_armed {
+        return;
+    }
+    let rested = s.energy as i32 >= lines(s).rise_energy;
+    let (bed, up) = (t::DEMO_BED_AT_MIN(), t::DEMO_UP_AT_MIN());
+    let minutes = match (s.day_min, s.is_sleeping) {
+        // Own rhythm: a rested sleeper gets up after a while.
+        (None, true) if rested => {
+            Some(t::DEMO_RISE_BASE_MIN() as u32 + draw(s, t::DEMO_RISE_SPREAD_MIN() as u32))
+        }
+        (None, _) => None,
+        (Some(m), false) if in_night(m) && !rested => Some(0),
+        (Some(m), false) => {
+            let bed_at = bed as u32 + draw(s, t::DEMO_BED_SPREAD_MIN() as u32);
+            let bed_at = (bed_at % MINUTES_PER_DAY as u32) as u16;
+            // Awake at night and rested: the next evening, so a pet woken
+            // at night does not flap in and out of bed.
+            Some(if in_night(m) {
+                until(m, up) + until(up, bed_at)
+            } else {
+                until(m, bed_at)
+            })
+        }
+        (Some(m), true) => {
+            let before_bed = until(m, bed) <= t::DEMO_BED_SPREAD_MIN() as u32;
+            Some(if in_night(m) || before_bed {
+                let up_at = up as u32 + draw(s, t::DEMO_UP_SPREAD_MIN() as u32);
+                until(m, (up_at % MINUTES_PER_DAY as u32) as u16)
+            } else {
+                t::DEMO_EDGE_NAP_MIN() as u32
+            })
+        }
+    };
+    if let Some(minutes) = minutes {
+        s.demo.clock_min = minutes.min(u16::MAX as u32) as u16;
+        s.demo.clock_armed = true;
+    }
+}
+
+/// Arm the soft delay when a reason shows up, disarm it when none is left.
+fn arm_soft(s: &mut GameState) {
+    let wanted = soft_wanted(s);
+    if wanted && !s.demo.soft_armed {
+        let (base, spread) = if drunk(s) {
+            (t::DEMO_DRY_BASE_MIN(), t::DEMO_DRY_SPREAD_MIN())
+        } else {
+            (t::DEMO_REACT_BASE_MIN(), t::DEMO_REACT_SPREAD_MIN())
+        };
+        let wait = base as u32 + draw(s, spread as u32);
+        s.demo.next_min = wait.min(BYTE_MAX_MIN) as u8;
+        s.demo.soft_armed = true;
+    } else if !wanted && s.demo.soft_armed {
+        s.demo.soft_armed = false;
+        s.demo.next_min = 0;
+    }
 }
 
 /// A nonzero rng state from two numbers (xorshift32 would stick at 0).

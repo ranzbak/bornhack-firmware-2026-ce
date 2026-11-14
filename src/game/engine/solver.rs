@@ -213,6 +213,11 @@ fn timer_bound(s: &GameState) -> u32 {
     } else {
         plain(scaled_left(t::LEAVING_MIN(), LEAVING_SCALE, s.leaving_min));
     }
+    if s.demo.on {
+        for minutes in demo::timers(s) {
+            plain(minutes as i64);
+        }
+    }
     let asleep = s.is_sleeping;
     let at_cap = asleep && s.energy as i32 >= energy_cap(s);
     if at_cap {

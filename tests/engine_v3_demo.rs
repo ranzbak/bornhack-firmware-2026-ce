@@ -539,6 +539,65 @@ mod floors {
         }
     }
 
+    /// The demo events (lazy re-rolls, soft delays, the clock, whims) fire
+    /// at boundaries the solver computes: one long advance and many small
+    /// ones leave the same save, the same dice and the same pending choice.
+    #[test]
+    fn events_hold_across_splits() {
+        use bornhack_aegg::game::engine::demo;
+        let at = |s: &mut GameState, minute: u16| s.sync_clock(s.last_update_tick, Some(minute));
+        let mut starts: Vec<(&str, GameState)> = Vec::new();
+        for (name, minute) in [
+            ("none", None),
+            ("evening", Some(20 * 60)),
+            ("night", Some(60)),
+        ] {
+            for (kind, asleep, energy, fullness) in [
+                ("rested", false, 90, 70),
+                ("tired", false, 40, 70),
+                ("hungry", false, 70, 30),
+                ("asleep", true, 55, 70),
+                ("asleep, rested", true, 98, 70),
+            ] {
+                let mut s = calm(true);
+                s.is_sleeping = asleep;
+                s.energy = pct(energy);
+                s.fullness = pct(fullness);
+                s.demo.whim_min = 90;
+                s.demo.lazy_min = 200;
+                s.sync_clock(s.last_update_tick, minute);
+                starts.push((Box::leak(format!("{name} {kind}").into_boxed_str()), s));
+            }
+        }
+        let mut late = calm(true);
+        run(&mut late, 3 * 60);
+        at(&mut late, 20 * 60);
+        starts.push(("clock set late", late));
+        for (name, start) in starts {
+            for (total, step) in [(3 * DAY, 37), (DAY, 11), (6 * 60, 1)] {
+                let mut whole = start.clone();
+                run(&mut whole, total);
+                let mut split = start.clone();
+                for _ in 0..total / step {
+                    run(&mut split, step);
+                }
+                run(&mut split, total - step * (total / step));
+                assert_eq!(
+                    whole.to_bytes(),
+                    split.to_bytes(),
+                    "{name}: {total} min by {step}"
+                );
+                assert_eq!(demo::decide(&whole), demo::decide(&split), "{name}: choice");
+                assert_eq!(demo::timers(&whole), demo::timers(&split), "{name}: timers");
+                assert_eq!(
+                    whole.next_wake_tick(),
+                    split.next_wake_tick(),
+                    "{name}: wake"
+                );
+            }
+        }
+    }
+
     #[test]
     fn relax_dose_does_not_break_the_floor() {
         for (demo, holds) in [(true, true), (false, false)] {
@@ -548,5 +607,688 @@ mod floors {
             run(&mut s, 30);
             assert_eq!(s.fitness >= fit_floor(), holds, "demo {demo}");
         }
+    }
+}
+
+mod policy {
+    use bornhack_aegg::game::engine::demo::{self, Choice};
+    use bornhack_aegg::game::engine::needs::{MAX, P};
+    use bornhack_aegg::game::engine::thresholds as t;
+    use bornhack_aegg::game::engine::{
+        DrinkKind, FoodKind, GameState, MiniGame, PetKind, Phase, TICKS_PER_MINUTE,
+    };
+
+    const HOUR: u16 = 60;
+
+    fn pct(p: i32) -> u16 {
+        (p * P) as u16
+    }
+
+    /// A demo pet with every line quiet: nothing to choose.
+    fn quiet() -> GameState {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.phase = Phase::Active;
+        s.is_sleeping = false;
+        s.money_enabled = false;
+        s.fullness = pct(70);
+        s.hydration = pct(70);
+        s.energy = pct(80);
+        s.fun = pct(60);
+        s.dirt = pct(20);
+        s.booze = pct(30);
+        s.strain = pct(20);
+        s.fitness = pct(55);
+        s.weight = pct(50);
+        s.health = pct(80);
+        s.mood = MAX as u16;
+        s.demo.on = true;
+        s.demo.whim_min = 100;
+        s.demo.lazy_min = 100;
+        s.demo.lazy = 0;
+        s.set_demo_rng(10);
+        s
+    }
+
+    fn at(s: &mut GameState, minute_of_day: u16) {
+        s.sync_clock(s.last_update_tick, Some(minute_of_day));
+    }
+
+    fn soft(s: &mut GameState) {
+        s.demo.soft_armed = true;
+        s.demo.next_min = 0;
+    }
+
+    #[test]
+    fn decide_follows_the_table() {
+        assert_eq!(demo::decide(&quiet()), None);
+        // Each case: the one row made true, and what the pet does (rng 10:
+        // rng % 100 is 10, % 5 is 0, % 3 is 1).
+        type Make = fn(&mut GameState);
+        let cases: [(&str, Make, Option<Choice>); 20] = [
+            (
+                "1 wake on the clock",
+                |s| {
+                    s.is_sleeping = true;
+                    s.demo.clock_armed = true;
+                    s.demo.clock_min = 0;
+                },
+                Some(Choice::Wake),
+            ),
+            (
+                "1 wake on hunger",
+                |s| {
+                    s.is_sleeping = true;
+                    s.fullness = pct(t::DEMO_WAKE_FULL_PCT() as i32 - 1);
+                },
+                Some(Choice::Wake),
+            ),
+            ("2 asleep", |s| s.is_sleeping = true, None),
+            (
+                "3 insulin",
+                |s| {
+                    s.diabetic = true;
+                    s.insulin_min = 0;
+                },
+                Some(Choice::Insulin),
+            ),
+            (
+                "4 rehab",
+                |s| {
+                    s.dependent = true;
+                    s.rehab_min = 0;
+                },
+                Some(Choice::Rehab),
+            ),
+            (
+                "5 hungry, light pet: pizza",
+                |s| s.fullness = pct(t::DEMO_EDGE_FULL_PCT() as i32 - 1),
+                Some(Choice::Eat(FoodKind::Pizza)),
+            ),
+            (
+                "5 hungry, heavy pet: apple",
+                |s| {
+                    s.fullness = pct(t::DEMO_EDGE_FULL_PCT() as i32 - 1);
+                    s.weight = pct(t::DEMO_LIGHT_FOOD_PCT() as i32 + 2);
+                },
+                Some(Choice::Eat(FoodKind::Apple)),
+            ),
+            (
+                "6 thirsty",
+                |s| s.hydration = pct(t::DEMO_EDGE_WATER_PCT() as i32 - 1),
+                Some(Choice::Drink(DrinkKind::Water)),
+            ),
+            (
+                "7 tired",
+                |s| s.energy = pct(t::DEMO_EDGE_ENERGY_PCT() as i32 - 1),
+                Some(Choice::Sleep),
+            ),
+            (
+                "8 unwell",
+                |s| s.health = pct(t::DEMO_MED_HEALTH_PCT() as i32 - 1),
+                Some(Choice::Medicine),
+            ),
+            (
+                "9 drunk, delay done",
+                |s| {
+                    s.booze = pct(t::DEMO_EDGE_BOOZE_PCT() as i32 + 1);
+                    soft(s);
+                },
+                Some(Choice::Drink(DrinkKind::Water)),
+            ),
+            (
+                "9 drunk, delay running: the rest waits",
+                |s| {
+                    s.booze = pct(t::DEMO_EDGE_BOOZE_PCT() as i32 + 1);
+                    s.demo.clock_armed = true;
+                    s.demo.clock_min = 0;
+                    s.demo.whim_min = 0;
+                },
+                None,
+            ),
+            (
+                "10 bedtime",
+                |s| {
+                    s.demo.clock_armed = true;
+                    s.demo.clock_min = 0;
+                },
+                Some(Choice::Sleep),
+            ),
+            (
+                "11 wired",
+                |s| s.fun = pct(t::DEMO_WIRED_FUN_PCT() as i32 + 2),
+                Some(Choice::Relax),
+            ),
+            (
+                "12 soft thirst",
+                |s| {
+                    s.hydration = pct(t::DEMO_SOFT_WATER_PCT() as i32 - 3);
+                    soft(s);
+                },
+                Some(Choice::Drink(DrinkKind::Water)),
+            ),
+            (
+                "12 soft hunger",
+                |s| {
+                    s.fullness = pct(t::DEMO_SOFT_FULL_PCT() as i32 - 3);
+                    soft(s);
+                },
+                Some(Choice::Eat(FoodKind::Apple)),
+            ),
+            (
+                "12 soft dirt",
+                |s| {
+                    s.dirt = pct(t::DEMO_SOFT_DIRT_PCT() as i32 + 3);
+                    soft(s);
+                },
+                Some(Choice::Wash),
+            ),
+            (
+                "12 soft boredom: play",
+                |s| {
+                    s.fun = pct(t::DEMO_SOFT_FUN_PCT() as i32 - 3);
+                    s.set_demo_rng(90);
+                    soft(s);
+                },
+                Some(Choice::Play),
+            ),
+            (
+                "12 soft boredom: a game",
+                |s| {
+                    s.fun = pct(t::DEMO_SOFT_FUN_PCT() as i32 - 3);
+                    soft(s);
+                },
+                Some(Choice::Game(MiniGame::TicTacToe, 1)),
+            ),
+            (
+                "13 whim: beer",
+                |s| {
+                    s.booze = pct(t::DEMO_WHIM_BOOZE_LO_PCT() as i32 - 5);
+                    s.demo.whim_min = 0;
+                },
+                Some(Choice::Drink(DrinkKind::Beer)),
+            ),
+        ];
+        for (name, make, want) in cases {
+            let mut s = quiet();
+            make(&mut s);
+            assert_eq!(demo::decide(&s), want, "{name}");
+        }
+        // The cake and the nap whims, and "soft energy" without a clock.
+        let mut s = quiet();
+        s.booze = pct(t::DEMO_WHIM_BOOZE_LO_PCT() as i32 - 5);
+        s.demo.whim_min = 0;
+        s.set_demo_rng(60);
+        assert_eq!(
+            demo::decide(&s),
+            Some(Choice::Eat(FoodKind::Cake)),
+            "13 whim: cake"
+        );
+        let mut s = quiet();
+        s.booze = pct(t::DEMO_WHIM_BOOZE_HI_PCT() as i32 + 5);
+        s.energy = pct(t::DEMO_NAP_ENERGY_PCT() as i32 - 5);
+        s.fun = pct(t::DEMO_NAP_FUN_PCT() as i32 - 5);
+        s.demo.whim_min = 0;
+        assert_eq!(demo::decide(&s), Some(Choice::Nap), "13 whim: nap");
+        let mut s = quiet();
+        s.energy = pct(t::DEMO_SOFT_ENERGY_PCT() as i32 - 5);
+        soft(&mut s);
+        assert_eq!(
+            demo::decide(&s),
+            Some(Choice::Sleep),
+            "12 soft energy, own rhythm"
+        );
+        at(&mut s, 12 * HOUR);
+        assert_eq!(demo::decide(&s), None, "12 soft energy waits for the clock");
+    }
+
+    /// A small deterministic generator for the seeded state tests.
+    fn lcg(seed: u64) -> impl FnMut(u64) -> u64 {
+        let mut x = seed;
+        move |bound| {
+            x = x
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (x >> 33) % (bound + 1)
+        }
+    }
+
+    fn random_demo(next: &mut impl FnMut(u64) -> u64) -> GameState {
+        let mut s = quiet();
+        let mut level = |n: &mut dyn FnMut(u64) -> u64| pct(n(100) as i32);
+        s.fullness = level(next);
+        s.hydration = level(next);
+        s.energy = level(next);
+        s.fun = level(next);
+        s.dirt = level(next);
+        s.booze = level(next);
+        s.fitness = level(next);
+        s.weight = level(next);
+        s.health = level(next);
+        s.is_sleeping = next(1) == 1;
+        s.diabetic = next(3) == 0;
+        s.dependent = next(3) == 0;
+        s.insulin_min = if next(1) == 1 { 0 } else { next(300) as u16 };
+        s.rehab_min = if next(1) == 1 { 0 } else { next(300) as u16 };
+        s.injured_min = if next(2) == 0 { next(100) as u16 } else { 0 };
+        s.med_cd_min = if next(2) == 0 { next(100) as u16 } else { 0 };
+        s.cooldown_tictactoe = if next(2) == 0 { next(600) as u16 } else { 0 };
+        s.cooldown_nim = if next(2) == 0 { next(600) as u16 } else { 0 };
+        s.cooldown_blackhole = if next(2) == 0 { next(600) as u16 } else { 0 };
+        s.demo.lazy = next(15) as u8;
+        s.demo.soft_armed = next(1) == 1;
+        s.demo.next_min = if next(1) == 1 { 0 } else { next(30) as u8 };
+        s.demo.clock_armed = next(1) == 1;
+        s.demo.clock_min = if next(1) == 1 { 0 } else { next(200) as u16 };
+        s.demo.whim_min = if next(1) == 1 { 0 } else { next(200) as u16 };
+        s.demo.pause_min = 0;
+        s.set_demo_rng(1 + next(1_000_000) as u32);
+        s
+    }
+
+    #[test]
+    fn demo_never_takes_a_refused_choice() {
+        let mut next = lcg(11);
+        let mut seen = 0;
+        for i in 0..2000 {
+            let s = random_demo(&mut next);
+            let Some(choice) = demo::decide(&s) else {
+                continue;
+            };
+            seen += 1;
+            let mut c = s.clone();
+            let ok = match choice {
+                Choice::Eat(f) => c.feed(f),
+                Choice::Drink(d) => c.drink(d),
+                Choice::Sleep | Choice::Nap => c.sleep(),
+                Choice::Wake => c.wake(),
+                Choice::Wash => c.wash(),
+                Choice::Play => c.play(),
+                Choice::Game(g, _) => c.game_refusal(Some(g)).is_none(),
+                Choice::Relax => c.relax(),
+                Choice::Medicine => c.heal(),
+                Choice::Insulin => c.medicate(),
+                Choice::Rehab => c.rehab(),
+            };
+            assert!(ok, "state {i}: {choice:?} would be refused");
+        }
+        assert!(seen > 1000, "only {seen} of 2000 states chose something");
+    }
+
+    #[test]
+    fn decide_waits_for_the_player_and_for_actions() {
+        let mut s = quiet();
+        s.fullness = pct(5);
+        assert!(demo::decide(&s).is_some());
+        let mut paused = s.clone();
+        paused.demo.pause_min = 5;
+        assert_eq!(demo::decide(&paused), None);
+        let mut busy = s.clone();
+        assert!(busy.play());
+        assert_eq!(demo::decide(&busy), None);
+        let mut off = s.clone();
+        off.demo.on = false;
+        assert_eq!(demo::decide(&off), None);
+        let mut hibernating = s.clone();
+        hibernating.hibernating = true;
+        assert_eq!(demo::decide(&hibernating), None);
+    }
+
+    #[test]
+    fn a_heavy_pet_eats_light() {
+        let heavy = pct(t::DEMO_LIGHT_FOOD_PCT() as i32 + 4);
+        for rng in 0..100u32 {
+            let mut s = quiet();
+            s.weight = heavy;
+            s.fullness = pct(t::DEMO_SOFT_FULL_PCT() as i32 - 3);
+            soft(&mut s);
+            s.set_demo_rng(rng);
+            match demo::decide(&s) {
+                Some(Choice::Eat(FoodKind::Apple | FoodKind::Salad)) => {}
+                other => panic!("rng {rng}: {other:?}"),
+            }
+            let mut whim = quiet();
+            whim.weight = heavy;
+            whim.booze = pct(t::DEMO_WHIM_BOOZE_LO_PCT() as i32 - 5);
+            whim.demo.whim_min = 0;
+            whim.set_demo_rng(rng);
+            assert_ne!(
+                demo::decide(&whim),
+                Some(Choice::Eat(FoodKind::Cake)),
+                "rng {rng}"
+            );
+        }
+        // A thin pet gets rich food instead of apples and salad.
+        for rng in 0..100u32 {
+            let mut s = quiet();
+            s.weight = pct(t::DEMO_RICH_FOOD_PCT() as i32 - 4);
+            s.fullness = pct(t::DEMO_SOFT_FULL_PCT() as i32 - 3);
+            soft(&mut s);
+            s.set_demo_rng(rng);
+            match demo::decide(&s) {
+                Some(Choice::Eat(FoodKind::Apple | FoodKind::Salad)) => {
+                    panic!("rng {rng}: a thin pet ate light")
+                }
+                Some(Choice::Eat(_)) => {}
+                other => panic!("rng {rng}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn bedtime_follows_the_clock() {
+        let bed = t::DEMO_BED_AT_MIN();
+        let up = t::DEMO_UP_AT_MIN();
+        // 21:00 awake, energy 60: bed in 60..=150 minutes.
+        let mut s = quiet();
+        s.energy = pct(60);
+        at(&mut s, 21 * HOUR);
+        demo::settle(&mut s);
+        assert!(s.demo.clock_armed);
+        let want = (bed - 21 * HOUR)..=(bed - 21 * HOUR + t::DEMO_BED_SPREAD_MIN());
+        assert!(want.contains(&s.demo.clock_min), "{}", s.demo.clock_min);
+        // 01:00 awake and tired: bed at once.
+        let mut s = quiet();
+        s.energy = pct(60);
+        at(&mut s, HOUR);
+        demo::settle(&mut s);
+        assert_eq!((s.demo.clock_armed, s.demo.clock_min), (true, 0));
+        assert_eq!(demo::decide(&s), Some(Choice::Sleep));
+        // 01:00 awake at full energy: the next evening, not the next minutes.
+        let mut s = quiet();
+        s.energy = pct(98);
+        at(&mut s, HOUR);
+        demo::settle(&mut s);
+        let to_bed = (up - HOUR) + (bed - up);
+        let want = to_bed..=to_bed + t::DEMO_BED_SPREAD_MIN();
+        assert!(want.contains(&s.demo.clock_min), "{}", s.demo.clock_min);
+        assert_eq!(demo::decide(&s), None);
+        // 23:00 asleep: up at 07:00 to 08:30.
+        let mut s = quiet();
+        s.is_sleeping = true;
+        s.energy = pct(60);
+        at(&mut s, 23 * HOUR);
+        demo::settle(&mut s);
+        let to_up = 24 * HOUR - 23 * HOUR + up;
+        let want = to_up..=to_up + t::DEMO_UP_SPREAD_MIN();
+        assert!(want.contains(&s.demo.clock_min), "{}", s.demo.clock_min);
+        // A daytime sleep with no whim nap behind it: the edge nap.
+        let mut s = quiet();
+        s.is_sleeping = true;
+        at(&mut s, 14 * HOUR);
+        demo::settle(&mut s);
+        assert_eq!(s.demo.clock_min, t::DEMO_EDGE_NAP_MIN());
+    }
+
+    #[test]
+    fn without_a_clock_the_pet_keeps_its_own_rhythm() {
+        // Awake, no clock: the clock never arms; tiredness arms the soft delay.
+        let mut s = quiet();
+        s.energy = pct(t::DEMO_SOFT_ENERGY_PCT() as i32 - 5);
+        demo::settle(&mut s);
+        assert!(!s.demo.clock_armed);
+        assert!(s.demo.soft_armed);
+        let delay = s.demo.next_min as u16;
+        let base = t::DEMO_REACT_BASE_MIN();
+        assert!((base..=base + t::DEMO_REACT_SPREAD_MIN()).contains(&delay));
+        s.demo.next_min = 0;
+        assert_eq!(demo::decide(&s), Some(Choice::Sleep));
+        // Asleep and rested: up in 10..=120 minutes, then Wake.
+        let mut s = quiet();
+        s.is_sleeping = true;
+        s.energy = pct(t::DEMO_RISE_ENERGY_PCT() as i32 + 1);
+        demo::settle(&mut s);
+        assert!(s.demo.clock_armed);
+        let base = t::DEMO_RISE_BASE_MIN();
+        assert!((base..=base + t::DEMO_RISE_SPREAD_MIN()).contains(&s.demo.clock_min));
+        assert_eq!(demo::decide(&s), None);
+        s.demo.clock_min = 0;
+        assert_eq!(demo::decide(&s), Some(Choice::Wake));
+        // Asleep and still tired: nothing armed.
+        let mut s = quiet();
+        s.is_sleeping = true;
+        s.energy = pct(40);
+        demo::settle(&mut s);
+        assert!(!s.demo.clock_armed);
+    }
+
+    #[test]
+    fn setting_the_clock_late_arms_the_bedtime() {
+        let mut s = quiet();
+        s.energy = pct(70);
+        demo::settle(&mut s);
+        assert!(!s.demo.clock_armed);
+        s.update(s.last_update_tick + 3 * 60 * TICKS_PER_MINUTE);
+        s.sync_clock(s.last_update_tick, Some(20 * HOUR));
+        demo::settle(&mut s);
+        assert!(s.demo.clock_armed);
+        let to_bed = t::DEMO_BED_AT_MIN() - 20 * HOUR;
+        assert!((to_bed..=to_bed + t::DEMO_BED_SPREAD_MIN()).contains(&s.demo.clock_min));
+    }
+
+    #[test]
+    fn the_clock_minute_is_stored_at_the_last_update() {
+        let mut s = quiet();
+        let t0 = s.last_update_tick;
+        // 10 minutes after the last update it is 00:05: it was 23:55 then.
+        s.sync_clock(t0 + 10 * TICKS_PER_MINUTE, Some(5));
+        s.update(t0 + 10 * TICKS_PER_MINUTE);
+        let mut c = quiet();
+        c.sync_clock(t0, Some(23 * HOUR + 55));
+        c.update(t0 + 10 * TICKS_PER_MINUTE);
+        assert_eq!(s.to_bytes(), c.to_bytes());
+    }
+
+    /// Everything the player sees, with the demo choice bit masked out.
+    fn seen(s: &GameState) -> String {
+        format!(
+            "{:?}",
+            (
+                bornhack_aegg::game::engine::status::status_line(s),
+                s.display_anim(),
+                s.is_sleeping,
+                s.phase,
+                s.active_action,
+                s.onset_bits(),
+                demo::wake_view(s) & !1,
+            )
+        )
+    }
+
+    #[test]
+    fn settle_never_changes_what_the_player_sees() {
+        let mut next = lcg(5);
+        for i in 0..2000 {
+            let mut s = random_demo(&mut next);
+            s.demo.lazy_min = if next(1) == 1 { 0 } else { 100 };
+            s.demo.clock_armed = false;
+            if next(1) == 1 {
+                at(&mut s, next(1439) as u16);
+            }
+            let before = seen(&s);
+            demo::settle(&mut s);
+            assert_eq!(before, seen(&s), "state {i}");
+        }
+    }
+
+    #[test]
+    fn settle_is_idempotent() {
+        let mut next = lcg(9);
+        for i in 0..500 {
+            let mut s = random_demo(&mut next);
+            demo::settle(&mut s);
+            let once = s.to_bytes();
+            demo::settle(&mut s);
+            assert_eq!(once, s.to_bytes(), "state {i}");
+        }
+    }
+
+    #[test]
+    fn timers_name_what_is_running() {
+        let mut s = quiet();
+        s.demo.clock_armed = false;
+        s.demo.clock_min = 50;
+        s.demo.soft_armed = false;
+        s.demo.next_min = 7;
+        s.demo.whim_min = 0;
+        s.demo.lazy_min = 9;
+        s.demo.pause_min = 3;
+        s.cooldown_nim = 7; // a minute and a bit: two minutes to go
+        let tm = demo::timers(&s);
+        assert_eq!(tm[0], u32::MAX, "an unarmed clock is not running");
+        assert_eq!(tm[1], u32::MAX, "whim at 0");
+        assert_eq!(tm[2], 9);
+        assert_eq!(tm[3], u32::MAX, "a soft delay that is not armed");
+        assert_eq!(tm[4], 3);
+        assert!(tm.contains(&2), "the game cooldown remainder: {tm:?}");
+        s.demo.clock_armed = true;
+        s.demo.soft_armed = true;
+        let tm = demo::timers(&s);
+        assert_eq!((tm[0], tm[3]), (50, 7));
+        s.demo.on = false;
+        assert!(demo::timers(&s).iter().all(|&m| m == u32::MAX));
+    }
+
+    #[test]
+    fn a_game_on_cooldown_is_skipped_for_the_next_one() {
+        let mut s = quiet();
+        s.fun = pct(t::DEMO_SOFT_FUN_PCT() as i32 - 3);
+        soft(&mut s);
+        s.set_demo_rng(5);
+        s.cooldown_tictactoe = 12;
+        match demo::decide(&s) {
+            Some(Choice::Game(g, _)) => assert_ne!(g, MiniGame::TicTacToe),
+            other => panic!("{other:?}"),
+        }
+        for g in MiniGame::ALL {
+            s.award_inspiration(g, 1);
+        }
+        s.fun = pct(t::DEMO_SOFT_FUN_PCT() as i32 - 3);
+        assert_eq!(
+            demo::decide(&s),
+            Some(Choice::Play),
+            "every game cooling down"
+        );
+    }
+}
+
+mod wake {
+    use bornhack_aegg::game::engine::demo;
+    use bornhack_aegg::game::engine::needs::{MAX, P};
+    use bornhack_aegg::game::engine::status::status_line;
+    use bornhack_aegg::game::engine::thresholds::MAX_SLEEP_TICKS;
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase, TICKS_PER_MINUTE};
+
+    fn pct(p: i32) -> u16 {
+        (p * P) as u16
+    }
+
+    fn obs(s: &GameState) -> String {
+        format!(
+            "{:?}",
+            (
+                status_line(s),
+                s.display_anim(),
+                s.is_sleeping,
+                s.phase,
+                s.active_action,
+                s.onset_bits(),
+                demo::wake_view(s),
+            )
+        )
+    }
+
+    #[test]
+    fn demo_wake_is_exact_on_random_states() {
+        const STATES: usize = 2000;
+        const LOOKAHEAD_MIN: u32 = 120;
+        let mut x = 3u64;
+        let mut next = |bound: u64| {
+            x = x
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (x >> 33) % (bound + 1)
+        };
+        assert_eq!(MAX_SLEEP_TICKS(), LOOKAHEAD_MIN * TICKS_PER_MINUTE);
+        let (mut pending, mut timed, mut flipped) = (0, 0, 0);
+        for i in 0..STATES {
+            let mut s = GameState::new_egg(7, PetKind(0));
+            s.phase = Phase::Active;
+            s.money_enabled = false;
+            s.tick_rem = 0;
+            let mut level = |n: &mut dyn FnMut(u64) -> u64| pct(n(100) as i32);
+            s.fullness = level(&mut next);
+            s.hydration = level(&mut next);
+            s.energy = level(&mut next);
+            s.fun = level(&mut next);
+            s.dirt = level(&mut next);
+            s.booze = level(&mut next);
+            s.fitness = level(&mut next);
+            s.weight = level(&mut next);
+            s.health = pct(30 + next(70) as i32);
+            s.mood = MAX as u16;
+            s.is_sleeping = next(1) == 1;
+            s.diabetic = next(4) == 0;
+            s.dependent = next(4) == 0;
+            s.insulin_min = next(200) as u16;
+            s.injured_min = if next(2) == 0 { next(100) as u16 } else { 0 };
+            s.cooldown_nim = if next(2) == 0 { next(900) as u16 } else { 0 };
+            s.cooldown_lightsout = if next(3) == 0 { next(900) as u16 } else { 0 };
+            s.demo.on = true;
+            s.demo.lazy = next(15) as u8;
+            s.demo.lazy_min = next(300) as u16;
+            s.demo.whim_min = next(300) as u16;
+            s.demo.pause_min = if next(1) == 1 { 0 } else { next(90) as u8 };
+            s.demo.soft_armed = next(2) == 0;
+            s.demo.next_min = if s.demo.soft_armed { next(40) as u8 } else { 0 };
+            s.demo.clock_armed = next(2) == 0;
+            s.demo.clock_min = next(200) as u16;
+            s.set_demo_rng(1 + next(1_000_000) as u32);
+            let clock = if next(1) == 1 {
+                Some(next(1439) as u16)
+            } else {
+                None
+            };
+            s.sync_clock(s.last_update_tick, clock);
+
+            let t0 = s.last_update_tick;
+            let mut c = s.clone();
+            demo::settle(&mut c);
+            let expect = if demo::decide(&c).is_some() {
+                pending += 1;
+                t0 + 1
+            } else {
+                let o = obs(&c);
+                let first = (1..=LOOKAHEAD_MIN).find(|m| {
+                    c.update(t0 + m * TICKS_PER_MINUTE);
+                    demo::settle(&mut c);
+                    obs(&c) != o
+                });
+                if first.is_some() {
+                    timed += 1;
+                    if demo::decide(&c).is_some() {
+                        flipped += 1;
+                    }
+                }
+                first.map_or(t0 + MAX_SLEEP_TICKS(), |m| t0 + m * TICKS_PER_MINUTE)
+            };
+            assert_eq!(s.next_wake_tick(), expect, "random state {i}");
+        }
+        assert!(pending > 100, "{pending} states had a choice waiting");
+        assert!(timed > 100, "{timed} states changed within the look-ahead");
+        assert!(flipped > 20, "{flipped} states woke for a new choice");
+    }
+
+    #[test]
+    fn a_pending_choice_wakes_the_badge_at_once() {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.phase = Phase::Active;
+        s.money_enabled = false;
+        s.fullness = pct(5);
+        s.set_demo(true).unwrap();
+        assert!(demo::decide(&s).is_some());
+        assert_eq!(s.next_wake_tick(), s.last_update_tick + 1);
+        // The same pet with the demo mode off waits for its own changes.
+        s.set_demo(false).unwrap();
+        assert!(s.next_wake_tick() > s.last_update_tick + 1);
     }
 }

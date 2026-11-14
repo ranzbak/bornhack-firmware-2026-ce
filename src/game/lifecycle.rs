@@ -50,6 +50,21 @@ pub fn now_tick() -> u32 {
     }
 }
 
+/// Seconds in a minute, for the wall-clock arithmetic.
+const SECS_PER_MIN: i64 = 60;
+
+/// The local minute of the day (0..1440), or `None` while the wall clock is
+/// not set. The demo pet's bedtime follows it.
+pub fn local_minute() -> Option<u16> {
+    crate::platform::unix_secs().map(minute_of_day)
+}
+
+/// The local minute of the day at unix time `unix` (time zone applied).
+fn minute_of_day(unix: u32) -> u16 {
+    let local_min = (unix as i64 + crate::tz_offset_secs()).div_euclid(SECS_PER_MIN);
+    local_min.rem_euclid(super::engine::demo::MINUTES_PER_DAY as i64) as u16
+}
+
 /// Advance the uptime tick by `delta` ticks (for tests/simulator only).
 pub fn advance_ticks(delta: u32) {
     UPTIME_TICKS.fetch_add(delta, Ordering::Relaxed);
@@ -288,6 +303,8 @@ pub fn forget_boot_gap(boot_saved: &AtomicU32, done: &AtomicBool) {
 #[cfg(feature = "embassy-core")]
 pub fn on_wall_clock_set(now_unix: u32) {
     if let Some(s) = unsafe { (*GAME.get()).as_mut() } {
+        // The clock was unknown until now: the pet learns the time of day.
+        s.sync_clock(now_tick(), Some(minute_of_day(now_unix)));
         let uptime_s = (crate::platform::uptime_ms() / 1000) as u32;
         let saved = BOOT_SAVED_UNIX.load(Ordering::Relaxed);
         let applied = boot_catch_up_minutes(s, &CATCH_UP_DONE, saved, now_unix, uptime_s);
@@ -387,6 +404,7 @@ pub fn random_default_name(seed: u32) -> &'static str {
 pub fn cycle() -> Option<PetStats> {
     let state = unsafe { (*GAME.get()).as_mut()? };
     let tick = now_tick();
+    state.sync_clock(tick, local_minute());
     let stats = state.stats(tick);
     check_severity_transition(state);
     check_diabetes_onset(state);
@@ -783,7 +801,9 @@ pub fn rehab() -> bool {
 /// needed.
 fn with_debug<T>(f: impl FnOnce(&mut GameState) -> T) -> Option<T> {
     let state = unsafe { (*GAME.get()).as_mut()? };
-    state.update(now_tick());
+    let now = now_tick();
+    state.sync_clock(now, local_minute());
+    state.update(now);
     Some(f(state))
 }
 
@@ -1018,6 +1038,7 @@ fn with_game(f: impl FnOnce(&mut GameState)) {
 /// the last frame is played first, so a cooldown or dose the event sets is
 /// not eaten by that gap.
 fn event_at(s: &mut GameState, now: u32, f: impl FnOnce(&mut GameState)) {
+    s.sync_clock(now, local_minute());
     s.update(now);
     f(s);
 }

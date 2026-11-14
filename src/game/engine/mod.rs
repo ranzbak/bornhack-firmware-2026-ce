@@ -291,6 +291,10 @@ pub struct GameState {
     /// The demo pet's dice. Transient: `new_egg` seeds it from `seed`,
     /// `from_bytes` derives it from the age and generation; never 0.
     pub(crate) demo_rng: u32,
+    /// Local minute of the day (0..1440) at `last_update_tick`; `None` while
+    /// the wall clock is unknown (the pet keeps its own rhythm). Transient:
+    /// `lifecycle` hands it in through `sync_clock` before each update.
+    pub(crate) day_min: Option<u16>,
 
     // Diabetes — permanent once triggered by sustained overweight.
     pub diabetic: bool,
@@ -460,6 +464,7 @@ impl GameState {
             saved_unix: 0,
             demo: demo::Demo::default(),
             demo_rng: demo::seed_rng(seed, 0),
+            day_min: None,
 
             diabetic: false,
             diabetes_min: 0,
@@ -585,6 +590,8 @@ impl GameState {
         // Minutes still to step singly after a runaway target was seen.
         let mut steep = 0u32;
         while minutes > 0 && self.phase != Phase::Gone {
+            // The demo pet's bookkeeping at the segment boundary.
+            demo::settle(self);
             let dt = self.segment(minutes, &mut steep);
             #[cfg(feature = "simulator")]
             ADVANCE_CALLS.with(|c| c.set(c.get() + 1));
@@ -1024,9 +1031,25 @@ type Visible = (
     Phase,
     Option<Action>,
     u8,
+    u8,
 );
 
 impl GameState {
+    /// Tell the engine the local time `local_min` (0..1440) at `now_tick`.
+    /// Stores the minute at `last_update_tick`, where the next update starts.
+    /// `None` (wall clock not set) puts the pet on its own rhythm.
+    pub fn sync_clock(&mut self, now_tick: u32, local_min: Option<u16>) {
+        let day = demo::MINUTES_PER_DAY as u32;
+        let ago = now_tick.saturating_sub(self.last_update_tick) / TICKS_PER_MINUTE % day;
+        self.day_min = local_min.map(|m| ((m as u32 % day + day - ago) % day) as u16);
+    }
+
+    /// Host test hook: fix the demo pet's dice (never 0).
+    #[cfg(feature = "simulator")]
+    pub fn set_demo_rng(&mut self, rng: u32) {
+        self.demo_rng = rng.max(1);
+    }
+
     /// Why `a` (with the chosen `drink`) would be turned away right now, or
     /// `None` when its starter accepts it (affordability aside). The menu and
     /// the starters share this, so the UI never re-derives a rule.
@@ -1060,15 +1083,19 @@ impl GameState {
         if self.is_sleeping {
             return Some(doses::Reason::Refused(doses::Refusal::Asleep));
         }
-        let cooldown = match game {
-            Some(MiniGame::TicTacToe) => self.cooldown_tictactoe,
-            Some(MiniGame::LightsOut) => self.cooldown_lightsout,
-            Some(MiniGame::BlackHole) => self.cooldown_blackhole,
-            Some(MiniGame::Nim) => self.cooldown_nim,
-            Some(MiniGame::BornJeweled) => self.cooldown_bornjeweled,
-            None => self.cooldown_battle,
-        };
+        let cooldown = game.map_or(self.cooldown_battle, |g| self.game_cooldown(g));
         (cooldown > 0).then(|| doses::Reason::Wait(cooldown as u32 * 10))
+    }
+
+    /// Ticks left of a mini-game's cooldown.
+    pub(crate) fn game_cooldown(&self, game: MiniGame) -> u16 {
+        match game {
+            MiniGame::TicTacToe => self.cooldown_tictactoe,
+            MiniGame::LightsOut => self.cooldown_lightsout,
+            MiniGame::BlackHole => self.cooldown_blackhole,
+            MiniGame::Nim => self.cooldown_nim,
+            MiniGame::BornJeweled => self.cooldown_bornjeweled,
+        }
     }
 
     /// Why the pet would turn `r` away now, or `None` when it would take it.
@@ -1217,6 +1244,7 @@ impl GameState {
             self.phase,
             self.active_action,
             self.onset_bits(),
+            demo::wake_view(self),
         )
     }
 
@@ -1251,12 +1279,24 @@ impl GameState {
             let end = self.last_update_tick + (self.action_ticks_remaining as u32).max(1);
             return end.min(cap);
         }
-        let start = self.visible();
         let mut c = self.clone();
+        // The bookkeeping `update` does at a boundary comes first, so the
+        // look-ahead arms what `update` will arm. A pet with a choice waiting
+        // acts at the next tick.
+        demo::settle(&mut c);
+        if demo::decide(&c).is_some() {
+            return (self.last_update_tick + 1).min(cap);
+        }
+        let start = c.visible();
         // Look as far ahead as the cap allows, and no further.
         let horizon = MAX_SLEEP_TICKS().div_ceil(TICKS_PER_MINUTE).max(1);
         let (mut used, mut steep) = (0u32, 0u32);
         while used < horizon {
+            demo::settle(&mut c);
+            if used > 0 && c.visible() != start {
+                // The boundary's own bookkeeping changed the view.
+                break;
+            }
             let dt = c.segment(horizon - used, &mut steep);
             let before = c.clone();
             advance::advance(&mut c, dt);

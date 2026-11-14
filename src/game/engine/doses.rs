@@ -170,10 +170,10 @@ pub fn fmt_wait(secs: u32) -> heapless::String<8> {
 
 /// Water is refused above this hydration and never takes it past `WATER_CAP_PCT`
 /// (fixed safety edges of the hydration need, see `needs::build_edges`).
-const WATER_REFUSE_PCT: i32 = 85;
+pub(crate) const WATER_REFUSE_PCT: i32 = 85;
 const WATER_CAP_PCT: i32 = 90;
 /// Wash is refused below this dirt level (fixed safety edge of the dirt need).
-const WASH_REFUSE_PCT: i32 = 25;
+pub(crate) const WASH_REFUSE_PCT: i32 = 25;
 
 /// A drink gives less than this share (percent) of its mood and energy to a
 /// pet this drunk: it is barely felt.
@@ -411,6 +411,7 @@ pub fn fall_asleep(s: &mut GameState) -> Result<(), Refusal> {
     }
     s.night = (s.energy as i32) < lvl(t::DOSE_NIGHT_ENERGY_PCT());
     s.is_sleeping = true;
+    s.demo.clock_armed = false;
     s.sleep_min = 0;
     s.good_sleep_min = 0;
     s.bed_why = super::regime::unsettled_by(s);

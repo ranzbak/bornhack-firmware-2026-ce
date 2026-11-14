@@ -72,6 +72,8 @@ pub fn advance(s: &mut GameState, dt: u32) {
         }
     }
 
+    super::demo::tick(s, dt);
+
     // Mini-game and Battle cooldowns (ticks) run down with time; no regime
     // term reads them, so they never bound a segment (R20).
     let spent = (dt as u64 * super::TICKS_PER_MINUTE as u64).min(u16::MAX as u64) as u16;
@@ -199,6 +201,7 @@ pub fn advance(s: &mut GameState, dt: u32) {
             }
             s.night = true;
             s.is_sleeping = true;
+            s.demo.clock_armed = false;
             s.sleep_min = 0;
             s.good_sleep_min = 0;
             s.bed_why = unsettled_by(s);
@@ -262,6 +265,7 @@ pub fn wake(s: &mut GameState, by_player: bool) {
         return;
     }
     s.is_sleeping = false;
+    s.demo.clock_armed = false;
     if by_player && (s.energy as i32) < lvl(t::GRUMPY_ENERGY_PCT()) {
         s.mood = bump(s.mood, -(lvl(t::GRUMPY_PCT()) as i64));
         s.causes.push(Cause::Grumpy);
