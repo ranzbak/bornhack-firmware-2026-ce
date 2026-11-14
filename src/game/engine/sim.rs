@@ -97,7 +97,8 @@ pub struct Outcome {
     /// count): one per engine wake, plus the frames of every action, paced
     /// at the fastest the waiter allows (`MIN_FRAME_SECS`). An upper bound:
     /// the real count also stops at the sprite's frame count, which the
-    /// simulator does not load. Idle frames are not counted.
+    /// simulator does not load. Idle frames are not counted. The Oracle has no
+    /// wakes, so its figure is the action frames alone: not comparable.
     pub refreshes_per_day: f32,
 }
 
@@ -222,16 +223,41 @@ fn band_minutes(m0: u16, m1: u16, dt: u32) -> [f64; 5] {
     out
 }
 
-// Like `ADVANCE_CALLS`, this records every advanced minute, previews on clones
-// included. Only `run_full` resets and reads it, and nothing inside a run
-// calls a preview.
+// Unlike `ADVANCE_CALLS`, this records only the pet's own life: clones made
+// for a preview or a look-ahead run muted (`mute`). Only `run_with` resets
+// and reads it.
 thread_local! {
     static PROBE: Cell<Probe> = const { Cell::new(PROBE_NEW) };
     static SELF_CARE: Cell<u32> = const { Cell::new(0) };
+    /// Nonzero while a throwaway clone runs (a preview, the wake look-ahead,
+    /// a trial advance): what it does is not the pet's life, so nothing is
+    /// counted. `ADVANCE_CALLS` still counts it; that is the wake's cost.
+    static MUTED: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Keeps the counters silent until dropped. Taken where a clone is made.
+pub(super) struct Mute;
+
+pub(super) fn mute() -> Mute {
+    MUTED.with(|m| m.set(m.get() + 1));
+    Mute
+}
+
+impl Drop for Mute {
+    fn drop(&mut self) {
+        MUTED.with(|m| m.set(m.get() - 1));
+    }
+}
+
+fn muted() -> bool {
+    MUTED.with(|m| m.get() > 0)
 }
 
 /// Called by `demo::act`: one self-care act happened.
 pub(super) fn note_self_care() {
+    if muted() {
+        return;
+    }
     SELF_CARE.with(|c| c.set(c.get() + 1));
 }
 
@@ -242,6 +268,9 @@ pub fn self_care_acts() -> u32 {
 
 /// Called by `CauseQueue::push`: the engine queued one cause.
 pub(super) fn note_cause() {
+    if muted() {
+        return;
+    }
     PROBE.with(|p| {
         let mut v = p.get();
         v.causes += 1;
@@ -252,6 +281,9 @@ pub(super) fn note_cause() {
 /// Called when a running action spends `ticks` (the player's, or the pet's
 /// own animated one). Instant care spends none.
 pub(super) fn note_action_ticks(ticks: u32) {
+    if muted() {
+        return;
+    }
     PROBE.with(|p| {
         let mut v = p.get();
         v.action_ticks += ticks as u64;
@@ -264,6 +296,9 @@ pub(super) fn note_action_ticks(ticks: u32) {
 /// Sleep and the window shares go by the state at the segment's start (the
 /// solver ends a segment where either changes).
 pub(super) fn note_segment(before: Snap, after: Snap, dt: u32) {
+    if muted() {
+        return;
+    }
     PROBE.with(|p| {
         let mut v = p.get();
         v.mood_sum2 += (before.mood as i64 + after.mood as i64) * dt as i64;
@@ -384,9 +419,18 @@ fn perform(s: &mut GameState, a: Act) -> bool {
     }
 }
 
+/// `update` to `to`, after telling the engine the wall clock the way the
+/// badge does before each update (tick 0 is 00:00 of day 0).
+fn step(s: &mut GameState, to: u32, clock: bool) {
+    if clock {
+        s.sync_clock(to, Some(((to / TPM) % 1440) as u16));
+    }
+    s.update(to);
+}
+
 /// Play every step of a plan in order. A timed action runs to its end (the
 /// action ticks age no need) before the next step; a refused step is skipped.
-fn play_plan(s: &mut GameState, plan: &Plan, injuries: &mut u16) {
+fn play_plan(s: &mut GameState, plan: &Plan, injuries: &mut u16, clock: bool) {
     for &a in plan.iter() {
         if s.phase == Phase::Gone {
             return;
@@ -396,7 +440,11 @@ fn play_plan(s: &mut GameState, plan: &Plan, injuries: &mut u16) {
         }
         if s.active_action.is_some() {
             let was_injured = s.injured_min > 0;
-            s.update(s.last_update_tick + s.action_ticks_remaining as u32);
+            step(
+                s,
+                s.last_update_tick + s.action_ticks_remaining as u32,
+                clock,
+            );
             if !was_injured && s.injured_min > 0 {
                 *injuries += 1;
             }
@@ -423,7 +471,9 @@ pub fn run_with(routine: Routine, days: u32, driver: Driver, seed: u64, setup: S
     if setup.clock {
         s.sync_clock(s.last_update_tick, Some(START_MINUTE as u16));
     }
-    s.set_demo_care(setup.animated);
+    if setup.animated {
+        s.set_demo_care(true);
+    }
     if setup.demo {
         s.set_demo(true).expect("a fresh pet takes demo mode");
     }
@@ -437,16 +487,16 @@ pub fn run_with(routine: Routine, days: u32, driver: Driver, seed: u64, setup: S
         match driver {
             Driver::Oracle => {
                 for m in first..1440 {
-                    s.update(d * TICKS_PER_DAY + m * TPM);
+                    step(&mut s, d * TICKS_PER_DAY + m * TPM, setup.clock);
                     if s.phase == Phase::Gone {
                         break 'days;
                     }
                     if probes.fires(routine, d, m) {
                         let plan = routine(d, m, &s);
-                        play_plan(&mut s, &plan, &mut injuries);
+                        play_plan(&mut s, &plan, &mut injuries, setup.clock);
                     }
                 }
-                s.update(day_end);
+                step(&mut s, day_end, setup.clock);
             }
             Driver::Delta => {
                 let mut m = first;
@@ -470,21 +520,16 @@ pub fn run_with(routine: Routine, days: u32, driver: Driver, seed: u64, setup: S
                         if wake < at {
                             wakes += 1;
                         }
-                        s.update(wake.min(at));
+                        step(&mut s, wake.min(at), setup.clock);
                     }
                     if m >= 1440 || s.phase == Phase::Gone {
                         break;
                     }
                     let plan = routine(d, m, &s);
-                    play_plan(&mut s, &plan, &mut injuries);
+                    play_plan(&mut s, &plan, &mut injuries, setup.clock);
                     m += 1;
                 }
             }
-        }
-        if setup.clock {
-            // The badge re-reads its wall clock at its wakes; the run does it
-            // once a day, at the same tick for both drivers.
-            s.sync_clock(day_end, Some(0));
         }
         if s.phase == Phase::Gone {
             break 'days;

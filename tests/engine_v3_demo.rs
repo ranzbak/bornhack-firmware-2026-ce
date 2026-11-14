@@ -2392,17 +2392,21 @@ mod balance {
         assert!(a.abs_diff(b) <= tol, "{what}: oracle {a} vs delta {b}");
     }
 
-    fn near_f(a: f32, b: f32, tol: f32, what: &str) {
-        assert!((a - b).abs() <= tol, "{what}: oracle {a} vs delta {b}");
-    }
-
-    /// Delta and Oracle agree as in `oracle::delta_matches_oracle_all_routines`:
-    /// the discrete facts equal, the integrated figures within a point or two.
-    /// `Outcome` has f32 fields, so there is no `PartialEq` to lean on.
-    fn same(o: &Outcome, d: &Outcome, what: &str) {
+    /// The two drivers agree by the rule of `oracle::delta_matches_oracle_all_routines`
+    /// (alive equal; then mood within 1, end health and fitness within 2, injuries
+    /// equal), plus the figures this plan adds: the discrete facts equal, the
+    /// integrated figures within the same 1 or 2 points, the event counts (self-care,
+    /// causes) within one event over the run. `Outcome` has f32 fields, so there is no
+    /// `PartialEq` to lean on.
+    fn same(o: &Outcome, d: &Outcome, days: u32, what: &str) {
         assert_eq!(o.alive, d.alive, "{what}: alive");
+        if !(o.alive && d.alive) {
+            return;
+        }
+        assert_eq!(o.phase, d.phase, "{what}: phase");
         assert_eq!(o.ever_leaving, d.ever_leaving, "{what}: leaving");
         assert_eq!(o.diabetic, d.diabetic, "{what}: diabetic");
+        assert_eq!(o.injuries, d.injuries, "{what}: injuries");
         near(o.avg_mood_pct, d.avg_mood_pct, 1, &format!("{what}: mood"));
         near(
             o.end_health_pct,
@@ -2455,27 +2459,21 @@ mod balance {
         near(
             o.night_asleep_pct,
             d.night_asleep_pct,
-            3,
+            2,
             &format!("{what}: night asleep"),
         );
         near(
             o.day_asleep_pct,
             d.day_asleep_pct,
-            3,
+            2,
             &format!("{what}: day asleep"),
         );
-        near_f(
-            o.self_care_per_day,
-            d.self_care_per_day,
-            1.0,
-            &format!("{what}: self-care"),
-        );
-        near_f(
-            o.causes_per_day,
-            d.causes_per_day,
-            1.0,
-            &format!("{what}: causes"),
-        );
+        let events = |a: f32, b: f32, name: &str| {
+            let gap = (a - b).abs() * o.days.max(days as f32);
+            assert!(gap <= 1.01, "{what}: {name} oracle {a} vs delta {b}");
+        };
+        events(o.self_care_per_day, d.self_care_per_day, "self-care");
+        events(o.causes_per_day, d.causes_per_day, "causes");
     }
 
     #[test]
@@ -2491,10 +2489,26 @@ mod balance {
                     same(
                         &o,
                         &d,
+                        10,
                         &format!("{name} animated {} seed {seed}", setup.animated),
                     );
                 }
             }
+        }
+    }
+
+    /// Previews and look-aheads run on clones; their causes are not the pet's.
+    /// Nobody with instant care is the case where the drivers' pets stay the
+    /// same pet (the others diverge, see the Task 8 fix report), so any gap
+    /// here is a counting gap.
+    #[test]
+    fn causes_count_only_the_pets_own_life() {
+        for seed in [1, 2, 3] {
+            let o = run(&sim::absent, 10, Driver::Oracle, seed, DEMO);
+            let d = run(&sim::absent, 10, Driver::Delta, seed, DEMO);
+            assert!(o.causes_per_day > 0.0, "seed {seed}: no causes to compare");
+            assert_eq!(o.causes_per_day, d.causes_per_day, "seed {seed}");
+            assert_eq!(o.self_care_per_day, d.self_care_per_day, "seed {seed}");
         }
     }
 

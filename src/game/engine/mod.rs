@@ -669,7 +669,11 @@ impl GameState {
         }
         while dt > 1 {
             let mut trial = self.clone();
+            #[cfg(feature = "simulator")]
+            let mute = sim::mute();
             advance::advance(&mut trial, dt);
+            #[cfg(feature = "simulator")]
+            drop(mute);
             #[cfg(feature = "simulator")]
             ADVANCE_CALLS.with(|c| c.set(c.get() + 1));
             let (m1, t1) = (trial.mood as i32, regime::mood_target(&trial));
@@ -980,6 +984,8 @@ impl GameState {
         food: Option<FoodKind>,
         drink: Option<DrinkKind>,
     ) -> Option<causes::Cause> {
+        #[cfg(feature = "simulator")]
+        let _mute = sim::mute();
         let mut c = self.clone();
         c.causes = causes::CauseQueue::default();
         if !c.start_choice(a, food, drink) {
@@ -1006,6 +1012,8 @@ impl GameState {
         if self.sleep_refusal().is_some() {
             return None;
         }
+        #[cfg(feature = "simulator")]
+        let _mute = sim::mute();
         let mut c = self.clone();
         c.causes = causes::CauseQueue::default();
         // The forecast covers the night only: the demo policy does not act
@@ -1047,6 +1055,8 @@ impl GameState {
     /// First warning cause that waking the pet now would produce; `None` when
     /// it is awake or nothing goes wrong.
     pub fn preview_wake(&self) -> Option<causes::Cause> {
+        #[cfg(feature = "simulator")]
+        let _mute = sim::mute();
         let mut c = self.clone();
         c.causes = causes::CauseQueue::default();
         doses::wake_up(&mut c).ok()?;
@@ -1468,6 +1478,8 @@ impl GameState {
         if self.active_action.is_some() {
             return self.action_end_tick().max(self.last_update_tick + 1).min(cap);
         }
+        #[cfg(feature = "simulator")]
+        let _mute = sim::mute();
         let mut c = self.clone();
         // The bookkeeping `update` does at a boundary comes first, so the
         // look-ahead arms what `update` will arm. A pet with a choice waiting
