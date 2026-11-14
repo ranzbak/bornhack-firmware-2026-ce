@@ -89,7 +89,7 @@ The diabetes and dependence alarms (@ch-conditions) sound on every boot for
 as long as the pet has the condition. *A hibernating pet is the exception.*
 While it is frozen, neither alarm fires. If the alarm has not sounded yet
 this boot, it sounds at Defrost. The mute switch still silences only the buzz
-(@ch-reading). The alert on the screen always shows.
+(@ch-reading). When it fires, the alert on the screen shows. A frozen pet gets neither buzz nor alert.
 
 #pic-row((("hibernating", [Frozen.]), ("sick", [Alarm on boot.]), ("happy", [Thawed.])))
 

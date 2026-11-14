@@ -39,14 +39,14 @@ mesh radio running.
 *The list.* The #w("Friends") row of the Stats menu opens it. It keeps the
 last #v("FRIENDS_MAX") friends, the one seen most recently on top. When it is
 full, the oldest drops off. The list is empty at first, and says
-#scr("No friends met yet"). Up and Down move the cursor. Fire opens the
-details: the friend's name and kind, #scr("Met <d>d <h>h ago") and
-#scr("Last seen <d>d <h>h ago"), four bars (#scr("Atk"), #scr("Def"), #scr("Spd")
-and #scr("HP")) and the record between you two, as #scr("Battles: <w>W-<l>L").
+#w("No friends met yet"). Up and Down move the cursor. Fire opens the
+details: the friend's name and kind, #w("Met <d>d <h>h ago") and
+#w("Last seen <d>d <h>h ago"), four bars (#w("Atk"), #w("Def"), #w("Spd")
+and #w("HP")) and the record between you two, as #w("Battles: <w>W-<l>L").
 Any button goes back.
 
-#tip[The "ago" times do not count the time the badge was off. A friend can
-look younger than they are.]
+The "ago" times do not count the time the badge was off, so a friend can
+look younger than they are.
 
 == Battles
 
@@ -54,7 +54,7 @@ look younger than they are.]
 
 *Where.* #w("Battle") is the first row of the Play menu, in both money modes.
 It opens a list of your friends. The title bar shows your pet's own record,
-#scr("Battle <w>W-<l>L"): wins, then losses. The record belongs to this pet.
+#w("Battle <w>W-<l>L"): wins, then losses. The record belongs to this pet.
 A new egg starts it at zero.
 
 *How a fight works.* Press Fire on a friend. The fight is *instant*. Your
@@ -67,8 +67,8 @@ dependent, knocks a flat amount off attack, defense and speed. The faster
 pet strikes first. Damage has a little luck in it. After a fixed number of
 rounds, whoever has more HP left wins.
 
-*The result.* A card with two HP bars and a red banner,
-#scr("YOU WON!") or #scr("YOU LOST"). In money mode a win also shows
+*The result.* A card with two HP bars and a banner,
+#w("YOU WON!") or #w("YOU LOST"). In money mode a win also shows
 #v("BATTLE_HAX_REWARD") and pays it. Just before the card, a short
 full-screen picture shows both pets standing, and then the winner and the
 loser. Any button closes the card.
@@ -84,18 +84,16 @@ result does not travel across repeaters.
 
 #tbl((auto, 1fr),
   table.header([*The picker says*], [*Because*]),
-  [#scr("No friends to battle yet")], [The list is empty. Go and meet someone.],
-  [#scr("Can't battle now")], [The pet is busy or asleep. Wait.],
-  [#scr("On cooldown <n>s")], [The Battle rest has not run out. The count is in seconds.],
+  [#w("No friends") and #w("to battle yet")], [The list is empty. Go and meet someone.],
+  [#w("Friend not ready")], [That friend has not sent their fighting numbers yet. Try again later.],
+  [#w("Can't battle now")], [The pet is busy or asleep. Wait.],
+  [#w("On cooldown <n>s")], [The Battle rest has not run out. The count is in seconds.],
 )
 
 The Battle row itself is grey, with its own reason, when the pet is
 #w("asleep"), #w("busy"), #w("hibernating"), #w("still an egg") or
 #w("pet is gone"). It says
 #w("wait <time>") while the rest runs. An injured pet may still fight.
-
-#warn[Two toasts, #w("won a battle!") and #w("lost a battle"), exist in the
-game's list. Nothing raises them today. The result card does the job.]
 
 == Stations: the magic places
 
@@ -109,13 +107,12 @@ The badge ignores the tap unless it has a pet that has not gone. An egg
 counts. A frozen pet counts too. The phrase is matched whatever its
 capitals. Anything else is ignored without a word.
 
-#pic-row((("feeding", [Food.]), ("healing", [Medic.]), ("sleeping", [Rest.])))
+#station-row()
 
 #tbl((auto, 1fr, auto),
   table.header([*Phrase*], [*What the pet gets*], [*Toast*]),
   [#raw("more food")],
-  [Fullness and water lifted to #v("STATION_FOOD_FLOOR_PCT"), never lowered.
-   It cannot stuff or flood the pet.],
+  [Fullness and water lifted to #v("STATION_FOOD_FLOOR_PCT"), never lowered.],
   [#w("Food bonus!")],
   [#raw("more drugs")],
   [Health up to the pet's own ceiling. Booze down to at most

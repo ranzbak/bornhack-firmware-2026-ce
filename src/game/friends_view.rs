@@ -38,6 +38,32 @@ const STATE_DETAIL: u8 = 1;
 /// few px of margin on the 152px-wide screen.
 const CHARS_PER_LINE: usize = 19;
 
+const NO_FRIENDS: &str = "No friends met yet";
+const DETAIL_TITLE: &str = "Friend Details";
+const DETAIL_HINT: &str = "Fire for details";
+const NO_SELECTION: &str = "No friend selected";
+const BAR_LABELS: [&str; 4] = ["Atk", "Def", "Spd", "HP"];
+
+/// Fixed texts of the Friends screens (host-only, for the guide's word list).
+#[cfg(any(test, feature = "simulator"))]
+pub fn words() -> [&'static str; 13] {
+    [
+        NO_FRIENDS,
+        DETAIL_TITLE,
+        DETAIL_HINT,
+        BAR_LABELS[0],
+        BAR_LABELS[1],
+        BAR_LABELS[2],
+        BAR_LABELS[3],
+        "Met <d>d <h>h ago",
+        "Last seen <d>d <h>h ago",
+        "Battles: <w>W-<l>L",
+        "Back",
+        NO_SELECTION,
+        "<n>/<m>",
+    ]
+}
+
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static STATE: AtomicU8 = AtomicU8::new(STATE_LIST);
 static CURSOR: AtomicU8 = AtomicU8::new(0);
@@ -123,7 +149,7 @@ where
 
     let count = super::friends::count();
     if count == 0 {
-        ui::draw_centered_message(display, "No friends met yet", Point::new(76, 85))?;
+        ui::draw_centered_message(display, NO_FRIENDS, Point::new(76, 85))?;
         return Ok(());
     }
 
@@ -171,7 +197,7 @@ where
 
     let left_hint = crate::ui::BOTTOM_LEFT;
     Text::with_text_style(
-        "Fire for details",
+        DETAIL_HINT,
         Point::new(4, 150),
         TEXT_BLACK,
         left_hint,
@@ -185,11 +211,11 @@ fn draw_detail<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    ui::draw_title_bar(display, "Friend Details", Point::zero(), 152)?;
+    ui::draw_title_bar(display, DETAIL_TITLE, Point::zero(), 152)?;
 
     let idx = CURSOR.load(Ordering::Relaxed) as usize;
     let Some(friend) = super::friends::get(idx) else {
-        ui::draw_centered_message(display, "No friend selected", Point::new(76, 85))?;
+        ui::draw_centered_message(display, NO_SELECTION, Point::new(76, 85))?;
         return Ok(());
     };
 
@@ -228,11 +254,11 @@ where
     const BAR_H: u32 = 12;
     const BAR_X: i32 = 36;
     let bars: [(&str, u8); 4] = [
-        ("Atk", friend.attack.min(100)),
-        ("Def", friend.defense.min(100)),
-        ("Spd", friend.speed.min(100)),
+        (BAR_LABELS[0], friend.attack.min(100)),
+        (BAR_LABELS[1], friend.defense.min(100)),
+        (BAR_LABELS[2], friend.speed.min(100)),
         (
-            "HP",
+            BAR_LABELS[3],
             (((friend.max_hp.saturating_sub(20) as u32) * 100) / 130).min(100) as u8,
         ),
     ];

@@ -18,19 +18,19 @@ are not forgotten. They go to the Unicorn Realm.
 
 Open the Main screen, then #w("Bornagotchi"), and pick #w("Unicorn Realm"),
 the last row. Up and Down scroll the list. Any other button closes it. A
-badge with no past pets says #scr("No past pets yet").
+badge with no past pets says #w("No past pets yet").
 
 The Realm keeps the last #v("REALM_MAX_PETS") pets, the newest first. When it
 is full, the oldest is dropped to make room. It lives in its own save, apart
 from the pet, so nothing a pet does can change it.
 
 *Each pet gets two lines.* The first line is the name, the kind and the age,
-like #scr("<name> (<kind>) - <d>d <h>h"). A pet that never got a name shows
-its kind and generation instead, like #scr("<kind> Gen <n> - <d>d <h>h"). The
+like #w("<name> (<kind>) - <d>d <h>h"). A pet that never got a name shows
+its kind and generation instead, like #w("<kind> Gen <n> - <d>d <h>h"). The
 age does not count time spent frozen (@ch-offtime). The second line holds the pet's three traits:
-#scr("V:<n>% C:<n>% R:<n>%"), for vitality, curiosity and resilience. They are
+#w("V:<n>% C:<n>% R:<n>%"), for vitality, curiosity and resilience. They are
 the same three that #w("Rolled stats") shows (@ch-care). Four pets fit on
-a screen. When there are more, a count like #scr("<n>/<m>") sits in the
+a screen. When there are more, a count like #w("<n>/<m>") sits in the
 corner.
 
 #tip[A name goes in the book when the pet leaves. Choose it with care. It
@@ -42,9 +42,10 @@ cannot be changed there.]
   [
     - *It left.* A pet that goes Gone (@ch-mood) is written to the book the
       next time the badge saves. You do not have to do anything.
-    - *You reset it.* #scr("Reset Pet") in the #w("Bornagotchi") menu asks
-      #scr("Reset pet?"). Say yes and the pet that is alive is written to
-      the book, then a new egg is chosen. Use it only when you mean it.
+    - *You reset it.* #w("Reset Pet") in the #w("Bornagotchi") menu asks
+      #w("Reset pet?"). Say yes and the kind picker opens. When you confirm
+      the new egg there, the pet that is alive is written to the book.
+      Back out of the picker and the pet stays. Use it only when you mean it.
     - *An egg is never written.* A pet that never hatched did not live, so it
       leaves no entry.
   ],

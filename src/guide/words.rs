@@ -21,9 +21,9 @@ use crate::game::engine::hint::{
 use crate::game::engine::status::{Condition, StatusWord, Word};
 use crate::game::engine::{GameState, PetKind, Phase};
 use crate::game::pet_registry;
-use crate::game::{diary, diary_view, lifecycle, modal, pet_select, screen_words, stats_pages};
+use crate::game::{battle_view, friends_view, realm_view, diary, diary_view, lifecycle, modal, pet_select, screen_words, stats_pages};
 
-pub const GROUPS: [&str; 15] = [
+pub const GROUPS: [&str; 16] = [
     "status",
     "conditions",
     "causes",
@@ -39,6 +39,7 @@ pub const GROUPS: [&str; 15] = [
     "screen",
     "pet-select",
     "naming",
+    "social",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -212,6 +213,13 @@ fn build() -> Vec<Entry> {
 
     for t in crate::text_entry::words() {
         add("naming", t);
+    }
+    for t in friends_view::words()
+        .into_iter()
+        .chain(battle_view::words())
+        .chain(realm_view::words())
+    {
+        add("social", t);
     }
     for t in crate::menu::main_menu_words() {
         add("menu", t);

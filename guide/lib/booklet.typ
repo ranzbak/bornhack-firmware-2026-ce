@@ -323,6 +323,7 @@
   set text(font: body-font, size: 10.5pt, fill: ink, lang: "en")
   set par(justify: true, leading: 0.65em)
   set heading(supplement: "Chapter")
+  show heading: set text(hyphenate: false)
   show heading: it => if it.level == 1 {
     block(
       width: 100%,

@@ -1980,11 +1980,15 @@ static SETTINGS_ITEMS: [MenuItem; SETTINGS_ITEMS_LEN] = [
 const LABEL_BORNAGOTCHI: &str = "Bornagotchi";
 const LABEL_UNICORN_REALM: &str = "Unicorn Realm";
 const LABEL_MODE: &str = "Mode:";
+const LABEL_RESET_PET: &str = "Reset Pet";
+const PROMPT_RESET_PET: &str = "Reset pet?";
 
 /// The fixed labels (host-only, for the guide's word list).
 #[cfg(any(test, feature = "simulator"))]
-pub fn main_menu_words() -> [&'static str; 5] {
+pub fn main_menu_words() -> [&'static str; 7] {
     [
+        LABEL_RESET_PET,
+        PROMPT_RESET_PET,
         LABEL_BORNAGOTCHI,
         LABEL_UNICORN_REALM,
         LABEL_MODE,
@@ -2019,9 +2023,9 @@ static BORNAGOTCHI_ITEMS: [MenuItem; 7] = [
         kind: MenuItemKind::Separator,
     },
     MenuItem {
-        label: || "Reset Pet",
+        label: || LABEL_RESET_PET,
         kind: MenuItemKind::Confirm {
-            prompt: "Reset pet?",
+            prompt: PROMPT_RESET_PET,
             action: || {
                 #[cfg(feature = "game")]
                 {

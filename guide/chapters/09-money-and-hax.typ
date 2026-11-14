@@ -40,7 +40,7 @@ action. A refused row costs nothing. These are the prices in money mode.
 Without money, every row is free.
 
 #block[
-#set text(size: 8pt)
+#set text(size: 8pt, hyphenate: false)
 #grid(columns: (1fr, 1fr), column-gutter: 4mm, align: top,
   tbl(price-cols,
     table.header([*Row*], [*With money*], [*Without*]),

@@ -21,6 +21,41 @@ use crate::menu::ButtonId;
 use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_BLACK, TEXT_BOLD_WHITE};
 use crate::{BLACK, RED, TriColor, WHITE};
 
+const BANNER_WON: &str = "YOU WON!";
+const BANNER_LOST: &str = "YOU LOST";
+const NO_FRIENDS_1: &str = "No friends";
+const NO_FRIENDS_2: &str = "to battle yet";
+const MSG_BUSY_TEXT: &str = "Can't battle now";
+const MSG_NOT_READY_TEXT: &str = "Friend not ready";
+const PICKER_HINT: &str = "Fire to challenge";
+const RESULT_TITLE: &str = "Battle Result";
+const NO_RESULT: &str = "No result yet";
+const CLOSE_HINT: &str = "Any button to close";
+
+/// Fixed texts of the Battle screens (host-only, for the guide's word list).
+#[cfg(any(test, feature = "simulator"))]
+pub fn words() -> [&'static str; 17] {
+    [
+        BANNER_WON,
+        BANNER_LOST,
+        NO_FRIENDS_1,
+        NO_FRIENDS_2,
+        MSG_BUSY_TEXT,
+        MSG_NOT_READY_TEXT,
+        PICKER_HINT,
+        RESULT_TITLE,
+        NO_RESULT,
+        CLOSE_HINT,
+        "Battle <w>W-<l>L",
+        "On cooldown <n>s",
+        "+<n> HAX",
+        "You",
+        "Friend",
+        "HP",
+        "<n>/<m>",
+    ]
+}
+
 const STATE_PICKING: u8 = 0;
 const STATE_RESULT: u8 = 1;
 
@@ -62,7 +97,7 @@ pub fn is_active() -> bool {
 }
 
 /// The result screen (HP bars + WON/LOST + reward) needs a full tri-color
-/// refresh — the red "YOU LOST" banner under-drives on the fast delta LUT,
+/// refresh — the red BANNER_LOST banner under-drives on the fast delta LUT,
 /// and the whole-screen picker→result change ghosts otherwise.
 pub fn wants_full_refresh() -> bool {
     ACTIVE.load(Ordering::Relaxed) && STATE.load(Ordering::Relaxed) == STATE_RESULT
@@ -126,7 +161,7 @@ fn draw_anim_banner<D>(display: &mut D, viewer_won: bool) -> Result<(), D::Error
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let text = if viewer_won { "YOU WON!" } else { "YOU LOST" };
+    let text = if viewer_won { BANNER_WON } else { BANNER_LOST };
     let ts = crate::ui::CENTERED;
     // White strip behind the banner so it reads over either pet.
     Rectangle::new(Point::new(0, 122), Size::new(152, 22))
@@ -416,8 +451,8 @@ where
     if count == 0 {
         // Two lines — the single string is wider than the 152px panel and
         // got clipped to "o friends to battle ye".
-        ui::draw_centered_message(display, "No friends", Point::new(76, 78))?;
-        ui::draw_centered_message(display, "to battle yet", Point::new(76, 92))?;
+        ui::draw_centered_message(display, NO_FRIENDS_1, Point::new(76, 78))?;
+        ui::draw_centered_message(display, NO_FRIENDS_2, Point::new(76, 92))?;
         return Ok(());
     }
 
@@ -462,15 +497,15 @@ where
             let _ = core::fmt::Write::write_fmt(&mut m, format_args!("On cooldown {}s", secs));
             ui::draw_centered_message(display, m.as_str(), Point::new(76, 132))?;
         }
-        MSG_BUSY => ui::draw_centered_message(display, "Can't battle now", Point::new(76, 132))?,
+        MSG_BUSY => ui::draw_centered_message(display, MSG_BUSY_TEXT, Point::new(76, 132))?,
         MSG_NOT_READY => {
-            ui::draw_centered_message(display, "Friend not ready", Point::new(76, 132))?
+            ui::draw_centered_message(display, MSG_NOT_READY_TEXT, Point::new(76, 132))?
         }
         _ => {}
     }
 
     let hint = crate::ui::CENTERED_BOTTOM;
-    Text::with_text_style("Fire to challenge", Point::new(76, 150), TEXT_BLACK, hint)
+    Text::with_text_style(PICKER_HINT, Point::new(76, 150), TEXT_BLACK, hint)
         .draw(display)?;
 
     Ok(())
@@ -480,11 +515,11 @@ fn draw_result<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = TriColor>,
 {
-    ui::draw_title_bar(display, "Battle Result", Point::zero(), 152)?;
+    ui::draw_title_bar(display, RESULT_TITLE, Point::zero(), 152)?;
 
     let result = unsafe { &*RESULT.get() };
     let Some(result) = result else {
-        ui::draw_centered_message(display, "No result yet", Point::new(76, 85))?;
+        ui::draw_centered_message(display, NO_RESULT, Point::new(76, 85))?;
         return Ok(());
     };
 
@@ -533,9 +568,9 @@ where
     )?;
 
     let banner = if result.outcome.challenger_won {
-        "YOU WON!"
+        BANNER_WON
     } else {
-        "YOU LOST"
+        BANNER_LOST
     };
     let centered = crate::ui::CENTERED;
     let banner_color = if result.outcome.challenger_won {
@@ -562,7 +597,7 @@ where
     }
 
     let hint = crate::ui::CENTERED_BOTTOM;
-    Text::with_text_style("Any button to close", Point::new(76, 148), TEXT_BLACK, hint)
+    Text::with_text_style(CLOSE_HINT, Point::new(76, 148), TEXT_BLACK, hint)
         .draw(display)?;
 
     Ok(())

@@ -12,6 +12,20 @@ use embedded_graphics::text::{Text};
 use crate::ui::{self, TEXT_BLACK, TEXT_BOLD_BLACK};
 use crate::{BLACK, TriColor};
 
+const NO_PETS: &str = "No past pets yet";
+
+/// Fixed texts of the Realm screen (host-only, for the guide's word list).
+#[cfg(any(test, feature = "simulator"))]
+pub fn words() -> [&'static str; 5] {
+    [
+        NO_PETS,
+        "<name> (<kind>) - <d>d <h>h",
+        "<kind> Gen <n> - <d>d <h>h",
+        "V:<n>% C:<n>% R:<n>%",
+        "<n>/<m>",
+    ]
+}
+
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static SCROLL: AtomicU8 = AtomicU8::new(0);
 
@@ -54,7 +68,7 @@ where
     ui::draw_title_bar(display, "Unicorn Realm", Point::zero(), 152)?;
 
     if count == 0 {
-        ui::draw_centered_message(display, "No past pets yet", Point::new(76, 85))?;
+        ui::draw_centered_message(display, NO_PETS, Point::new(76, 85))?;
         return Ok(());
     }
 

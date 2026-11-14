@@ -6,17 +6,6 @@
 #import "needs.typ": *
 #import "care.typ": *
 
-// Text the badge draws on the friends, battle and Realm screens. These lines
-// are not in the word list (the collector reads the menus, toasts, reasons
-// and alerts), so they get the chip without an index mark.
-#let scr(t) = box(
-  fill: white,
-  stroke: 0.5pt + ink,
-  inset: (x: 2pt, y: 0pt),
-  outset: (y: 2pt),
-  text(font: screen-font, size: 0.9em, t),
-)
-
 // A price table row: the item as shown, its price in money mode, and what it
 // costs without money. Every price comes from the numbers dump.
 #let prow(label, item) = (label, price(item), [free])
@@ -70,14 +59,14 @@
     column-gutter: 4mm,
     stack(
       spacing: 3pt,
-      sprite-fit("hero", "happy", w: 70pt, h: 70pt),
+      sprite-fit("hero", "happy", w: 46pt, h: 46pt),
       _hp(70),
       text(size: 8pt)[You],
     ),
     text(font: head-font, size: 9pt)[VS],
     stack(
       spacing: 3pt,
-      sprite-fit(roster.pets.at(1).prefix, "idle", w: 70pt, h: 70pt),
+      sprite-fit(roster.pets.at(1).prefix, "idle", w: 46pt, h: 46pt),
       _hp(35),
       text(size: 8pt)[Friend],
     ),
@@ -106,3 +95,14 @@
 
 // The price table columns: the row, the price with money, the price without.
 #let price-cols = (1fr, auto, auto)
+
+// The three station kinds, small.
+#let station-row() = grid(
+  columns: (1fr, 1fr, 1fr),
+  align: bottom + center,
+  ..(("feeding", [Food.]), ("healing", [Medic.]), ("sleeping", [Rest.])).map(i => stack(
+    spacing: gap-s,
+    sprite-fit("hero", i.at(0), w: 36pt, h: 36pt),
+    text(size: 8pt, i.at(1)),
+  )),
+)
