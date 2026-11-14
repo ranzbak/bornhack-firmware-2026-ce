@@ -989,11 +989,18 @@ pub fn award_inspiration(game: super::engine::MiniGame, grade: u8) {
         s.award_inspiration(game, grade);
         // Celebratory jingle on a mini-game win — the main
         // active-engagement reward previously had no audio, only a toast.
+        // Demo mode is silent, so the same gate as every other buzz.
         #[cfg(feature = "embassy-core")]
-        if !crate::GAME_MUTE.load(Ordering::Relaxed) {
+        if win_jingle_due(crate::GAME_MUTE.load(Ordering::Relaxed), s.demo.on) {
             crate::fw::buzzer::play(crate::MINIGAME_WIN_INDEX);
         }
     });
+}
+
+/// Whether the mini-game win jingle plays: the one buzz rule, always "rising".
+#[cfg_attr(not(any(test, feature = "embassy-core")), allow(dead_code))]
+fn win_jingle_due(muted: bool, demo: bool) -> bool {
+    alert_due(muted, demo, true)
 }
 
 /// Start a new generation (after pet has left or manual reset).
@@ -1404,6 +1411,15 @@ mod tests {
         assert!(alert_due(false, false, true));
         assert!(!alert_due(true, false, true), "muted");
         assert!(!alert_due(false, false, false), "not rising");
+    }
+
+    #[test]
+    fn the_win_jingle_is_silent_in_demo() {
+        for muted in [false, true] {
+            assert!(!super::win_jingle_due(muted, true), "demo, muted {muted}");
+        }
+        assert!(super::win_jingle_due(false, false));
+        assert!(!super::win_jingle_due(true, false), "muted");
     }
 
     /// A pet in the cause toast tests: installed, with one cause queued.
