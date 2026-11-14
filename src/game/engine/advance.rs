@@ -93,7 +93,11 @@ pub fn advance(s: &mut GameState, dt: u32) {
         lvl(t::DIABETES_WEIGHT_LO_PCT()),
     );
     if booze > needs::booze_hi() {
-        s.dependence_min = s.dependence_min.saturating_add(dt * SLOW_SCALE);
+        // A demo pet never drifts toward dependence: nothing is left behind
+        // for when demo goes off.
+        if !s.demo.on {
+            s.dependence_min = s.dependence_min.saturating_add(dt * SLOW_SCALE);
+        }
     } else if booze < lvl(t::BOOZE_CLEAR_PCT()) {
         s.dependence_min = s.dependence_min.saturating_sub(dt);
     }

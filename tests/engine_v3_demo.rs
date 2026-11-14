@@ -288,12 +288,13 @@ mod tunables {
 
 mod floors {
     use bornhack_aegg::game::engine::advance::advance;
+    use bornhack_aegg::game::engine::demo::MINUTES_PER_DAY;
     use bornhack_aegg::game::engine::needs::{MAX, P};
     use bornhack_aegg::game::engine::solver;
     use bornhack_aegg::game::engine::thresholds as t;
     use bornhack_aegg::game::engine::{GameState, PetKind, Phase, TICKS_PER_MINUTE};
 
-    const DAY: u32 = 24 * 60;
+    const DAY: u32 = MINUTES_PER_DAY as u32;
 
     fn pct(p: i32) -> u16 {
         (p * P) as u16
@@ -386,6 +387,20 @@ mod floors {
         s.dependence_min = u32::MAX / 2;
         run(&mut s, 60);
         assert!(!s.dependent, "a counter past the line is not onset");
+
+        // Three days of drinking in demo leave the counter alone, so
+        // switching demo off does not make the pet dependent.
+        let mut s = calm(true);
+        s.dependence_min = 7;
+        for _ in 0..(3 * DAY / 30) {
+            s.booze = pct(80);
+            run(&mut s, 30);
+        }
+        assert_eq!(s.dependence_min, 7);
+        s.demo.on = false;
+        s.booze = pct(80);
+        run(&mut s, 30);
+        assert!(!s.dependent);
     }
 
     #[test]
@@ -406,20 +421,29 @@ mod floors {
 
     #[test]
     fn floors_are_segment_lines() {
+        // A few minutes above the floor, so the floor is the nearest event
+        // (the other needs bound this state at about 40 minutes).
         let mut s = calm(true);
-        s.fitness = pct(46);
+        s.booze = 0;
+        s.fitness = fit_floor() + 10;
         let len = solver::seg_len(&s, 100_000);
         let mut oracle = s.clone();
         let mut to_floor = 0;
-        while oracle.fitness > fit_floor() {
+        while oracle.fitness > fit_floor() && to_floor <= len + 1 {
             advance(&mut oracle, 1);
             to_floor += 1;
         }
+        assert_eq!(oracle.fitness, fit_floor(), "the oracle reaches the floor");
         assert!(to_floor > 2, "the fall is slow enough to test");
-        assert!(len <= to_floor - 1, "stops before the floor minute");
+        assert_eq!(len, to_floor - 1, "stops one minute before the floor");
         let mut seg = s.clone();
         advance(&mut seg, len);
         assert!(seg.fitness > fit_floor());
+        s.demo.on = false;
+        assert!(
+            solver::seg_len(&s, 100_000) > len,
+            "without demo there is no floor line"
+        );
     }
 
     #[test]
@@ -436,25 +460,57 @@ mod floors {
 
     #[test]
     fn pinned_on_the_floor_takes_long_segments() {
-        // Fitness is the only need pinned; the others move, and bound the
-        // segment at 40 minutes. Without the skip a pet resting on the floor
-        // gets 1-minute segments (the floor line is "already reached").
+        // Without the skip a pet resting on the floor gets 1-minute segments
+        // (the floor line is "already reached"); it is bounded by the other
+        // needs only, as with demo off (no 45 % line, the 43 % edge is far).
         let mut s = calm(true);
         s.booze = 0;
         s.fitness = fit_floor();
         let pinned = solver::seg_len(&s, 100_000);
-        assert!(pinned > 30, "pinned segment {pinned}");
-        s.fitness = fit_floor() + pct(1);
-        assert!(solver::seg_len(&s, 100_000) > 30);
+        s.demo.on = false;
+        assert_eq!(pinned, solver::seg_len(&s, 100_000));
+        assert!(pinned > 1);
+    }
+
+    #[test]
+    fn health_zero_demo_pet_comes_back() {
+        let mut start = calm(true);
+        start.health = 0;
+        start.phase = Phase::Leaving;
+        start.leaving_min = 100;
+        let mut whole = start.clone();
+        run(&mut whole, 60);
+        assert_eq!(whole.phase, Phase::Leaving);
+        assert_eq!(whole.leaving_min, 40, "counts down, not up");
+        let mut ones = start.clone();
+        for _ in 0..60 {
+            run(&mut ones, 1);
+        }
+        assert_eq!(whole.to_bytes(), ones.to_bytes());
+        run(&mut whole, 60);
+        assert_eq!(whole.phase, Phase::Active);
+        assert_eq!(whole.leaving_min, 0);
+        run(&mut whole, DAY);
+        assert_ne!(whole.phase, Phase::Gone);
     }
 
     #[test]
     fn floors_hold_across_splits() {
-        for start in [starving(true), calm(true), {
-            let mut s = calm(true);
-            s.fitness = pct(47);
-            s
-        }] {
+        for start in [
+            starving(true),
+            calm(true),
+            {
+                let mut s = calm(true);
+                s.fitness = fit_floor() + 20;
+                s
+            },
+            {
+                let mut s = calm(true);
+                s.fitness = pct(30);
+                s.health = pct(20);
+                s
+            },
+        ] {
             let mut whole = start.clone();
             run(&mut whole, 3 * DAY);
             let mut steps = start.clone();

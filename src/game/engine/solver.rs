@@ -207,7 +207,8 @@ fn timer_bound(s: &GameState) -> u32 {
         plain(m as i64);
     }
     if s.health != 0 || s.demo.on {
-        // Counting down (a demo pet never leaves, so health 0 counts down too); reaching 0 returns a Leaving pet to Active.
+        // Counting down (a demo pet never leaves, so health 0 counts down
+        // too); reaching 0 returns a Leaving pet to Active.
         plain(s.leaving_min as i64);
     } else {
         plain(scaled_left(t::LEAVING_MIN(), LEAVING_SCALE, s.leaving_min));

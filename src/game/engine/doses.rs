@@ -338,7 +338,11 @@ fn exercise(s: &mut GameState) {
     s.groggy_min = 0;
     if s.strain as i32 > needs::strain_inj() {
         s.injured_min = t::DOSE_INJURY_MIN();
+        let before = s.health;
         bump(&mut s.health, -lvl(t::DOSE_INJURY_HEALTH_PCT()));
+        if s.demo.on {
+            s.health = super::demo::floor(before, s.health, super::demo::health_floor());
+        }
         s.causes
             .push(Cause::TornMuscle(blame.unwrap_or(StrainWhy::Overdone)));
     } else {

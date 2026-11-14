@@ -114,7 +114,7 @@ pub fn health_floor() -> u16 {
 }
 
 /// Fitness after a fall from `before` to `after`: held at the demo floor
-/// while demo is on, as it is.
+/// while demo is on; unchanged while it is off.
 pub fn fit_after_fall(s: &GameState, before: u16, after: u16) -> u16 {
     if s.demo.on {
         floor(before, after, fit_floor())
