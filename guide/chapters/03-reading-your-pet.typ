@@ -310,10 +310,10 @@ adds four things to it.
       stays while the status line is the same as it was when the pet acted.
       When the status line changes, or when you do something yourself, the
       status line is back.
-    - *The call for help.* When health is at or under
+    - *The call for help.* When health is under
       #v("DEMO_HELP_HEALTH_PCT"), the whole line reads #w("could use a hand")
       in red. It beats the note and the status line. It goes when health is
-      back over the line.
+      back at that line or above.
     - *The hint.* An awake demo pet that has nothing worse to say, and is not
       fit, says #w("I feel stiff."). It asks for exercise, the one thing it
       never does by itself.
