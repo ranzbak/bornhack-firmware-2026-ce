@@ -90,8 +90,8 @@ One line per pet. The number is the pet's sprite slot, which picks the
 picture files (they are named after it). The name is what the screen shows,
 cut at #v("PETS_CFG_NAME_CAP") letters, plain ASCII only. A `#` starts a
 comment. Two slots are reserved for the badge and ignored, and so are
-numbers past the last slot. A slot listed twice renames the pet, it is not listed twice. A bad line is
-skipped.
+numbers past the last slot. A slot listed twice is not added twice: the later
+line renames the pet. A bad line is skipped.
 
 The shipped file already fills every slot the firmware has. So the useful
 edits are renaming a pet, reordering the list, or removing one. A pet's looks never
@@ -105,8 +105,9 @@ firmware's saves, and never touches its balance file:
 - the old balance file, `BORNPETS.CFG`, is never read, written or deleted. It
   stays on the drive and the old firmware keeps reading it;
 - the old pet save, kept under the key `state`, and the old name, under
-  `name`, are read, only when there is no new save yet, to carry the pet over, and never
-  written or deleted, so they stay as they were;
+  `name`, are read only to carry the pet over. That happens only when there is
+  no `state_v3` save or `name_v3` name yet. They are never written or deleted,
+  so they stay as they were;
 - the new firmware saves its own copy under `state_v3` and `name_v3`.
 
 The first time the new firmware starts on a badge with an old pet, it reads the old save
