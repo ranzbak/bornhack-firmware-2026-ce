@@ -34,6 +34,11 @@
   })
 }
 
-// Two flags and an eagle, as a row of margin art.
-#let us-row() = grid(columns: (1fr, 1fr, 1fr), align: horizon + center,
-  flag-pic(), eagle-pic(), flag-pic())
+// Chapter opener: a flag in each margin, the eagle between them.
+#let us-row() = grid(columns: (auto, 1fr, auto), align: horizon,
+  flag-pic(), align(center, eagle-pic()), flag-pic())
+
+// Chapter closer, not a repeat of the opener: the eagle in the left margin,
+// one flag in the right margin.
+#let us-row-end() = grid(columns: (1fr, 1fr), align: horizon,
+  align(left, eagle-pic()), align(right, flag-pic()))

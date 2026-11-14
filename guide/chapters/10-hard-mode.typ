@@ -74,7 +74,9 @@ the alarms (@ch-conditions). It is cheaper to avoid the trip.]
 #grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
   [
     In this mode the #w("Frikandel speciaal") is drawn as a #w("Hamburger").
-    It is the same food. The name on the menu is new, and nothing else is.
+    It is the same food. The new name shows in two places: in the #w("Feed")
+    list row, and in the title bar when that row is selected. Nothing else is
+    new.
     It keeps the Frikandel's price and the Frikandel's effects, so what
     @ch-care says about the Frikandel holds for the Hamburger too.
   ],
@@ -101,4 +103,4 @@ does not pay for rehab. It just looks proud, and that is all it does.]
 Plan to have a full purse before the first bad week.
 
 #block(height: 8mm)
-#us-row()
+#us-row-end()
