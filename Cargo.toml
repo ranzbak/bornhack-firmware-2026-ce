@@ -17,6 +17,8 @@ u8g2-fonts = { version = "0.8", default-features = false }
 
 # Simulator libraries go here
 embedded-graphics-simulator = { version = "0.8", optional = true }
+# Host-only: the guide's sprite export writes cropped PNGs with a clear ground.
+image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
 defmt = { version = "1.1.1", optional = true }
 
 # Embassy dependencies (only when embassy feature is enabled)
@@ -175,6 +177,7 @@ mesh = [
 usb-storage = ["embassy-usb"]
 simulator = [
     "embedded-graphics-simulator",
+    "image",
     "heapless",
     "game",
     "watch",

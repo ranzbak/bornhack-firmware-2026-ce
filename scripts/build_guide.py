@@ -8,6 +8,7 @@
 """
 import argparse
 import glob
+import json
 import os
 import re
 import shutil
@@ -196,7 +197,6 @@ def query(label, commit):
     out = subprocess.check_output(
         ["typst", "query", *typst_args(commit), "guide/main.typ", label,
          "--field", "value", "--one"], text=True, env=env)
-    import json
     return json.loads(out)
 
 
@@ -223,7 +223,6 @@ def pic_pages(commit):
     out = subprocess.check_output(
         ["typst", "query", *typst_args(commit), "guide/main.typ", "<pic>",
          "--field", "value"], text=True, env=env)
-    import json
     return set(json.loads(out))
 
 
@@ -232,12 +231,10 @@ def marked_words(commit):
     out = subprocess.check_output(
         ["typst", "query", *typst_args(commit), "guide/main.typ", "<gw>",
          "--field", "value"], text=True, env=env)
-    import json
     return set(json.loads(out))
 
 
 def check_words(commit):
-    import json
     words = json.load(open(WORDS_JSON))["words"]
     text = open(COVERED_GROUPS).read() if os.path.exists(COVERED_GROUPS) else None
     return check_marks(marked_words(commit), words, covered_groups(text, words))
@@ -247,14 +244,15 @@ def check(commit):
     errors = []
     for p in sorted(glob.glob("guide/chapters/*.typ")):
         errors += lint_digits(p, open(p).read())
-    errors += check_pages(query("<guide-end>", commit))
-    errors += check_pictures(pic_pages(commit), query("<guide-end>", commit) + 1)
+    end = query("<guide-end>", commit)
+    errors += check_pages(end)
+    errors += check_pictures(pic_pages(commit), end + 1)
     errors += check_colophon(query("<colophon-commit>", commit), commit)
     errors += check_words(commit)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         sys.exit(1)
-    print(f"guide: ok, {query('<guide-end>', commit)} pages, build {commit}")
+    print(f"guide: ok, {end} pages, build {commit}")
 
 
 def main():

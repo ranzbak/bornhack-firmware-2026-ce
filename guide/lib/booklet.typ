@@ -6,9 +6,9 @@
 #let screen-font = "DejaVu Sans Mono"
 
 // Chunky box used for sidebars and frames.
-#let chunky(body, fill: none) = block(
+#let chunky(body, fill: none, inset: 8pt) = block(
   width: 100%,
-  inset: 8pt,
+  inset: inset,
   stroke: 2.5pt + ink,
   radius: 0pt,
   fill: fill,
@@ -57,17 +57,45 @@
   }
 }
 
-// One frame of a pet animation. `pet` is a prefix as in roster.json ("00",
-// "05", ...) or "hero". `anim` is a name from roster.json's anims.
-#let sprite(pet, anim, frame: 0, width: auto) = {
+// One frame of a pet animation, at a whole-number scale. The PNGs are cropped
+// to the pet, one PNG pixel per badge pixel. `k` badge pixels become k
+// `sprite-px` units of paper, so every pixel is the same size. `pet` is a
+// prefix as in roster.json ("00", "05", ...) or "hero". No free mm or % sizes.
+#let sprite-px = 0.5 // pt of paper per badge pixel, per unit of k
+#let sprite-path(pet, anim, frame) = {
   let prefix = if pet == "hero" { roster.hero.prefix } else { pet }
-  pic()
-  image(
-    "/guide/build/sprites/" + prefix + "-" + anim + "-" + str(frame) + ".png",
-    width: width,
-    scaling: "pixelated",
-  )
+  "/guide/build/sprites/" + prefix + "-" + anim + "-" + str(frame) + ".png"
 }
+#let sprite(pet, anim, frame: 0, k: 2) = {
+  pic()
+  let path = sprite-path(pet, anim, frame)
+  context {
+    let n = measure(image(path))
+    image(path, width: n.width * k * sprite-px, scaling: "pixelated")
+  }
+}
+// The biggest whole-number scale that keeps the sprite inside `w` x `h`.
+#let sprite-fit(pet, anim, frame: 0, w: 60pt, h: 60pt) = {
+  let path = sprite-path(pet, anim, frame)
+  context {
+    let n = measure(image(path))
+    let k = calc.max(1, calc.floor(calc.min(w / (n.width * sprite-px), h / (n.height * sprite-px))))
+    sprite(pet, anim, frame: frame, k: k)
+  }
+}
+
+// Several animations of one pet at one common whole-number scale (the biggest
+// that keeps all of them inside `w` x `h`). Returns an array of sprites.
+#let sprite-set(pet, anims, w: 60pt, h: 60pt) = anims.map(a => {
+  let path = sprite-path(pet, a, 0)
+  context {
+    let ks = anims.map(b => {
+      let n = measure(image(sprite-path(pet, b, 0)))
+      calc.floor(calc.min(w / (n.width * sprite-px), h / (n.height * sprite-px)))
+    })
+    sprite(pet, a, k: calc.max(1, calc.min(..ks)))
+  }
+})
 
 // Pixel heart drawn from rectangles (no sprite needed).
 #let pixel-heart(size: 6pt, color: rgb("#c0392b")) = {
@@ -164,9 +192,9 @@
     fill: fill,
   ),
 )
-#let tip(body) = sidebar("TIP", sprite("hero", "happy", width: 14mm), rgb("#e4efc9"), body)
-#let joke(body) = sidebar("JOKE", sprite("hero", "playing", width: 14mm), rgb("#f6dd9a"), body)
-#let warn(body) = sidebar("WARNING", sprite("hero", "sick", width: 14mm), rgb("#f1b8a8"), body)
+#let tip(body) = sidebar("TIP", sprite-fit("hero", "happy", w: 40pt, h: 40pt), rgb("#e4efc9"), body)
+#let joke(body) = sidebar("JOKE", sprite-fit("hero", "idle", w: 40pt, h: 40pt), rgb("#f6dd9a"), body)
+#let warn(body) = sidebar("WARNING", sprite-fit("hero", "sick", w: 40pt, h: 40pt), rgb("#f1b8a8"), body)
 
 // A chapter. `name` is its label ("ch-care"), so `@ch-care` works. The
 // heading starts a new page and carries the chapter number in the pixel font
@@ -179,12 +207,11 @@
 // One roster pet: idle and happy faces, its name, the hero marked.
 #let pet-card(p) = {
   let is-hero = p.prefix == roster.hero.prefix
-  chunky(
+  block(breakable: false, chunky(
     align(center, {
       grid(columns: (1fr, 1fr), column-gutter: 2mm, align: bottom + center,
-        sprite(p.prefix, "idle", width: 62%),
-        sprite(p.prefix, "happy", width: 62%))
-      block(height: 2mm)
+        ..sprite-set(p.prefix, ("idle", "happy"), w: 66pt, h: 34pt))
+      block(height: 1mm)
       text(font: head-font, size: 6.5pt, p.name)
       if is-hero {
         parbreak()
@@ -192,16 +219,17 @@
       }
     }),
     fill: if is-hero { rgb("#f6dd9a") } else { white.transparentize(50%) },
-  )
+    inset: 4pt,
+  ))
 }
 
-#let roster-grid() = grid(columns: 2, column-gutter: 5mm, row-gutter: 3mm,
-  ..roster.pets.map(pet-card))
+#let roster-grid(extra) = block(above: 3mm, grid(columns: 2, column-gutter: 5mm, row-gutter: 2mm,
+  ..roster.pets.map(pet-card), extra))
 
 // An unnumbered chapter-style page (Contents, Meet the pets).
-#let chapter-plain(title) = {
+#let chapter-plain(title, outlined: true) = {
   pagebreak(weak: true)
-  heading(level: 1, title)
+  heading(level: 1, outlined: outlined, title)
 }
 
 // Show rule for the whole book.
@@ -235,7 +263,7 @@
           }
           text(font: head-font, size: 13pt, fill: ink, it.body)
         },
-        sprite("hero", "idle", width: 18mm)),
+        sprite-fit("hero", "idle", w: 60pt, h: 62pt)),
     )
   } else {
     block(above: 1.2em, below: 0.8em, text(font: head-font, size: 9pt, fill: ink, it.body))
@@ -245,7 +273,7 @@
 }
 
 // The cover. The start screen (start.png) is not pet art, so the cover shows
-// the roster's idle sprites instead.
+// the roster's idle sprites instead: the hero big, the others below.
 #let cover() = {
   set page(footer: none)
   pic()
@@ -257,11 +285,14 @@
         v(5mm)
         text(font: head-font, size: 9pt, "The official player's guide")
         v(8mm)
-        grid(columns: (22mm,) * 4, column-gutter: 4mm, row-gutter: 5mm, align: bottom + center,
-          ..roster.pets.map(p => sprite(p.prefix, "idle", width: 22mm)))
-        v(6mm)
-        pixel-heart(size: 8pt)
-        v(4mm)
+        sprite-fit("hero", "idle", w: 140pt, h: 125pt)
+        v(5mm)
+        grid(columns: (1fr,) * 3, column-gutter: 3mm, row-gutter: 4mm, align: bottom + center,
+          ..roster.pets.filter(p => p.prefix != roster.hero.prefix)
+            .map(p => sprite-fit(p.prefix, "idle", w: 95pt, h: 60pt)))
+        v(5mm)
+        pixel-heart(size: 6pt)
+        v(2mm)
       },
       fill: white.transparentize(60%),
     )
@@ -273,7 +304,7 @@
 // is a multiple of 4, then the back cover with the colophon.
 // `notes-art(i)` returns the picture for the i-th Notes page: a roster pet
 // (cycling), so the picture check passes.
-#let finish(notes-art: i => sprite(roster.pets.at(calc.rem(i, roster.pets.len())).prefix, "happy", width: 40mm)) = {
+#let finish(notes-art: i => sprite-fit(roster.pets.at(calc.rem(i, roster.pets.len())).prefix, "happy", w: 240pt, h: 200pt)) = {
   [#metadata(none) <content-end>]
   context {
     let last = query(<content-end>).first().location().page()

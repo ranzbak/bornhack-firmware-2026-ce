@@ -4,9 +4,9 @@
 
 #cover()
 
-#chapter-plain("Contents")
-#align(center, sprite("hero", "idle", width: 40mm))
-The chapters, the appendix and the index arrive in later tasks.
+#chapter-plain("Contents", outlined: false)
+#align(center, sprite("hero", "happy", k: 3))
+#outline(title: none, target: heading.where(level: 1))
 
 #include "chapters/00-meet-the-pets.typ"
 #include "chapters/01-legend.typ"

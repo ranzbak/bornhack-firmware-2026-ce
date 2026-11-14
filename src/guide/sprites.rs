@@ -1,6 +1,6 @@
 //! The pet sprites for the booklet (`guide sprites`): every frame of the
-//! animations the guide shows, for every pet in `PETS.CFG`, as a PNG on a
-//! white ground, plus `roster.json` listing what exists. Sponsor art (prefix
+//! animations the guide shows, for every pet in `PETS.CFG`, as a PNG cropped to
+//! the pet, one PNG pixel per badge pixel, with a clear ground, plus `roster.json` listing what exists. Sponsor art (prefix
 //! 03) and menu icons (prefix 04) are never in the roster, so never exported.
 
 extern crate alloc;
@@ -44,7 +44,9 @@ fn hex(prefix: u8) -> String {
     alloc::format!("{prefix:02X}")
 }
 
-/// Draw the PCX `name` on a white display of its own size and save it.
+/// Draw the PCX `name` and save it cropped to the pet: one PNG pixel per badge
+/// pixel (the booklet scales by whole numbers), white pixels connected to the
+/// edge made clear, white pixels inside the outline kept white.
 fn save_pcx(name: &[u8; 11], path: &Path) -> Result<(), String> {
     let (w, h) = pcx_size_sim(name).ok_or_else(|| {
         alloc::format!(
@@ -55,7 +57,58 @@ fn save_pcx(name: &[u8; 11], path: &Path) -> Result<(), String> {
     let mut display: SimulatorDisplay<Rgb888> = SimulatorDisplay::new(Size::new(w, h));
     display.clear(Rgb888::new(255, 255, 255)).unwrap();
     blit_pcx_sim(&mut TriColorDisplay(&mut display), name, 0, 0, false);
-    sim_support::save_png(&display, path)
+    let white = Rgb888::new(255, 255, 255);
+    let px = |x: u32, y: u32| display.get_pixel(Point::new(x as i32, y as i32));
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if px(x, y) != white {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+            }
+        }
+    }
+    if x0 > x1 {
+        return Err(alloc::format!("sprite {} is blank", path.display()));
+    }
+    let (cw, ch) = (x1 - x0 + 1, y1 - y0 + 1);
+    let mut clear = alloc::vec![false; (cw * ch) as usize];
+    let mut stack: Vec<(u32, u32)> = Vec::new();
+    for y in 0..ch {
+        for x in 0..cw {
+            if (x == 0 || y == 0 || x == cw - 1 || y == ch - 1) && px(x0 + x, y0 + y) == white {
+                stack.push((x, y));
+            }
+        }
+    }
+    while let Some((x, y)) = stack.pop() {
+        let i = (y * cw + x) as usize;
+        if clear[i] || px(x0 + x, y0 + y) != white {
+            continue;
+        }
+        clear[i] = true;
+        if x > 0 {
+            stack.push((x - 1, y));
+        }
+        if y > 0 {
+            stack.push((x, y - 1));
+        }
+        if x + 1 < cw {
+            stack.push((x + 1, y));
+        }
+        if y + 1 < ch {
+            stack.push((x, y + 1));
+        }
+    }
+    let img = image::RgbaImage::from_fn(cw, ch, |x, y| {
+        let c = px(x0 + x, y0 + y);
+        let a = if clear[(y * cw + x) as usize] { 0 } else { 255 };
+        image::Rgba([c.r(), c.g(), c.b(), a])
+    });
+    img.save(path)
+        .map_err(|e| alloc::format!("cannot write {}: {e}", path.display()))
 }
 
 /// Write every sprite PNG into `out_dir` and return the roster JSON.
