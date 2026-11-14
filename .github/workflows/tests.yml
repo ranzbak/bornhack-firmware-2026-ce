@@ -73,3 +73,27 @@ jobs:
       - run: rustup component add llvm-tools
       - run: cargo build --release --bin embassy --no-default-features --features embassy-1680-full --target thumbv7em-none-eabihf
       - run: python3 scripts/flash_size.py target/thumbv7em-none-eabihf/release/embassy --limit-kib 960
+
+  guide:
+    name: player's guide
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libclang-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: guide
+      - name: Install Typst
+        run: |
+          v=$(cat guide/typst-version)
+          curl -fsSL -o typst.tar.xz "https://github.com/typst/typst/releases/download/v$v/typst-x86_64-unknown-linux-musl.tar.xz"
+          echo "a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c  typst.tar.xz" | sha256sum -c -
+          mkdir -p "$HOME/typst-bin"
+          tar -xJf typst.tar.xz --strip-components=1 -C "$HOME/typst-bin"
+          echo "$HOME/typst-bin" >> "$GITHUB_PATH"
+      - run: python3 scripts/test_build_guide.py
+      - run: CARGO_BUILD_JOBS=4 make guide

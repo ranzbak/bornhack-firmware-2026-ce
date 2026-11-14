@@ -52,6 +52,21 @@ pub fn page() -> u8 {
     PAGE.load(Ordering::Relaxed)
 }
 
+/// Shown instead of the entries while the diary is empty.
+const NOTHING_YET: &str = "Nothing yet";
+
+/// Every word this screen draws (host-only, for the guide's word list).
+#[cfg(any(test, feature = "simulator"))]
+pub fn words() -> std::vec::Vec<std::string::String> {
+    use std::string::ToString;
+    std::vec![
+        title(0, 0).to_string(),
+        title(DIARY_LEN, 0).to_string(),
+        title(DIARY_LEN, 1).to_string(),
+        NOTHING_YET.to_string(),
+    ]
+}
+
 /// "Diary" alone while everything fits one page, else "Diary 1/2" (the page
 /// is never flipped to a second one then, see [`flip`]).
 fn title(entries: usize, page: u8) -> heapless::String<12> {
@@ -75,7 +90,7 @@ where
     let diary = super::lifecycle::diary();
     ui::draw_title_bar(display, title(diary.len(), page).as_str(), Point::zero(), 152)?;
     if diary.is_empty() {
-        return ui::draw_centered_message(display, "Nothing yet", Point::new(76, 76));
+        return ui::draw_centered_message(display, NOTHING_YET, Point::new(76, 76));
     }
 
     let now_min = super::lifecycle::pet_age_min();
@@ -175,7 +190,7 @@ mod tests {
         let before = crate::game::next_ui_deadline_tick();
         crate::game::lifecycle::cycle();
         assert_eq!(crate::game::lifecycle::diary().len(), 1);
-        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::None);
+        assert_eq!(crate::game::current_toast().unwrap_or(crate::game::Toast::None), crate::game::Toast::None);
         let now = crate::game::lifecycle::now_tick();
         assert!(crate::game::next_ui_deadline_tick() > now + 1);
         assert_eq!(crate::game::next_ui_deadline_tick(), before);

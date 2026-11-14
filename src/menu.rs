@@ -16,7 +16,7 @@ use crate::{BLACK, TriColor, WHITE};
 /// (under that cfg) after the store.
 macro_rules! bool_toggle {
     (
-        $label:ident, $action:ident, $atomic:path, $when_true:literal, $when_false:literal
+        $label:ident, $action:ident, $atomic:path, $when_true:expr, $when_false:expr
         $(, signal = $sig:path, cfg = $cfg:meta)?
     ) => {
         fn $label() -> &'static str {
@@ -1134,12 +1134,14 @@ fn label_telemetry_share() -> &'static str {
 
 // ── Ignore blink toggle ────────────────────────────────────────────────────
 
+const LABEL_MUTE_ON: &str = "Mute (On)";
+const LABEL_MUTE_OFF: &str = "Mute (Off)";
 bool_toggle!(
     label_game_mute,
     action_game_mute_toggle,
     crate::GAME_MUTE,
-    "Mute (On)",
-    "Mute (Off)"
+    LABEL_MUTE_ON,
+    LABEL_MUTE_OFF
 );
 
 fn label_game_enabled() -> &'static str {
@@ -1974,6 +1976,27 @@ static SETTINGS_ITEMS: [MenuItem; SETTINGS_ITEMS_LEN] = [
     },
 ];
 
+/// Main-menu rows the guide explains.
+const LABEL_BORNAGOTCHI: &str = "Bornagotchi";
+const LABEL_UNICORN_REALM: &str = "Unicorn Realm";
+const LABEL_MODE: &str = "Mode:";
+const LABEL_RESET_PET: &str = "Reset Pet";
+const PROMPT_RESET_PET: &str = "Reset pet?";
+
+/// The fixed labels (host-only, for the guide's word list).
+#[cfg(any(test, feature = "simulator"))]
+pub fn main_menu_words() -> [&'static str; 7] {
+    [
+        LABEL_RESET_PET,
+        PROMPT_RESET_PET,
+        LABEL_BORNAGOTCHI,
+        LABEL_UNICORN_REALM,
+        LABEL_MODE,
+        LABEL_MUTE_ON,
+        LABEL_MUTE_OFF,
+    ]
+}
+
 static BORNAGOTCHI_ITEMS: [MenuItem; 9] = [
     MenuItem {
         label: || "< Back",
@@ -2008,9 +2031,9 @@ static BORNAGOTCHI_ITEMS: [MenuItem; 9] = [
         kind: MenuItemKind::Separator,
     },
     MenuItem {
-        label: || "Reset Pet",
+        label: || LABEL_RESET_PET,
         kind: MenuItemKind::Confirm {
-            prompt: "Reset pet?",
+            prompt: PROMPT_RESET_PET,
             action: || {
                 #[cfg(feature = "game")]
                 {
@@ -2024,7 +2047,7 @@ static BORNAGOTCHI_ITEMS: [MenuItem; 9] = [
         },
     },
     MenuItem {
-        label: || "Unicorn Realm",
+        label: || LABEL_UNICORN_REALM,
         kind: MenuItemKind::Action(|| {
             #[cfg(feature = "game")]
             crate::game::realm_view::open();
@@ -2076,7 +2099,7 @@ fn fmt_game_mode(buf: &mut heapless::String<24>) {
         let mode = crate::game::settings::pending_mode();
         let needs_reboot = crate::game::settings::pending_differs_from_active();
         let suffix = if needs_reboot { "*" } else { "" };
-        let _ = write!(buf, "Mode: {}{}", mode.label(), suffix);
+        let _ = write!(buf, "{} {}{}", LABEL_MODE, mode.label(), suffix);
     }
     #[cfg(not(feature = "game"))]
     {
@@ -2292,7 +2315,7 @@ fn apply_lora_preset(idx: usize) {
 
 static MAIN_ITEMS: [MenuItem; 4] = [
     MenuItem {
-        label: || "Bornagotchi",
+        label: || LABEL_BORNAGOTCHI,
         kind: MenuItemKind::Submenu(&BORNAGOTCHI_ITEMS),
     },
     MenuItem {

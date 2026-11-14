@@ -2,6 +2,27 @@
 //! the xorshift32 step, battery level and wall-clock seconds.  Keeps the
 //! `cfg(embassy-core)` / `cfg(simulator)` split in one place.
 
+/// The simulator's fake clock; `u64::MAX` means "use the real one".
+#[cfg(feature = "simulator")]
+static FAKE_UPTIME_MS: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(u64::MAX);
+
+/// Make [`uptime_ms`] return `ms` from now on (`u64::MAX` goes back to the
+/// real clock). Host-only: the guide's headless shots drive time by hand.
+#[cfg(feature = "simulator")]
+pub fn set_fake_uptime_ms(ms: u64) {
+    FAKE_UPTIME_MS.store(ms, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// The fake clock's value, or `None` while the real clock is in use.
+#[cfg(feature = "simulator")]
+pub fn fake_uptime_ms() -> Option<u64> {
+    match FAKE_UPTIME_MS.load(core::sync::atomic::Ordering::Relaxed) {
+        u64::MAX => None,
+        ms => Some(ms),
+    }
+}
+
 /// Milliseconds of uptime: embassy clock on firmware, process uptime on the
 /// simulator.
 pub fn uptime_ms() -> u64 {
@@ -13,6 +34,10 @@ pub fn uptime_ms() -> u64 {
     {
         use std::sync::OnceLock;
         use std::time::Instant;
+        #[cfg(feature = "simulator")]
+        if let Some(ms) = fake_uptime_ms() {
+            return ms;
+        }
         static START: OnceLock<Instant> = OnceLock::new();
         let start = START.get_or_init(Instant::now);
         start.elapsed().as_millis() as u64

@@ -560,6 +560,31 @@ pub enum Note {
 }
 
 impl Note {
+    /// Every note once (host-only, for the guide's word list).
+    #[cfg(any(test, feature = "simulator"))]
+    pub const ALL: [Note; 20] = [
+        Note::Ate(FoodKind::Apple),
+        Note::Ate(FoodKind::Salad),
+        Note::Ate(FoodKind::Pizza),
+        Note::Ate(FoodKind::Frikandel),
+        Note::Ate(FoodKind::Cake),
+        Note::Drank(DrinkKind::Water),
+        Note::Drank(DrinkKind::Cola),
+        Note::Drank(DrinkKind::Beer),
+        Note::Drank(DrinkKind::Wine),
+        Note::Drank(DrinkKind::Whiskey),
+        Note::OneTooMany,
+        Note::Napping,
+        Note::OffToBed,
+        Note::UpAndAbout,
+        Note::Washing,
+        Note::Played,
+        Note::Rested,
+        Note::Medicine,
+        Note::Insulin,
+        Note::Rehab,
+    ];
+
     /// The words (at most 21 columns).
     pub fn text(self) -> &'static str {
         match self {

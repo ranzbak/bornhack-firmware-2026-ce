@@ -43,6 +43,30 @@ pub enum StatusWord {
     Poorly,
 }
 
+impl StatusWord {
+    /// Every word, for the guide's word list (host-only).
+    #[cfg(any(test, feature = "simulator"))]
+    pub const ALL: [StatusWord; 17] = [
+        StatusWord::Content,
+        StatusWord::Hungry,
+        StatusWord::Stuffed,
+        StatusWord::Thirsty,
+        StatusWord::Waterlogged,
+        StatusWord::Tired,
+        StatusWord::Bored,
+        StatusWord::Wired,
+        StatusWord::Sloppy,
+        StatusWord::Grubby,
+        StatusWord::Overweight,
+        StatusWord::Underweight,
+        StatusWord::Unfit,
+        StatusWord::HungOver,
+        StatusWord::Injured,
+        StatusWord::Groggy,
+        StatusWord::Poorly,
+    ];
+}
+
 /// The words in [`regime::penalty_terms`] order.
 const WORDS: [StatusWord; PENALTY_TERMS] = [
     StatusWord::Hungry,

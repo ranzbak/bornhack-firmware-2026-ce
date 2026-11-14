@@ -45,6 +45,21 @@ const MONEY_OPTION_COUNT: u8 = MONEY_LABELS.len() as u8;
 /// knows what to put back on the USB partition.
 const NO_PETS_LINES: [&str; 2] = ["No pets installed", "Check PETS.CFG"];
 
+/// The screen's two titles and the hint at the bottom.
+const PROMPT_MONEY: &str = "Play with money?";
+const PROMPT_PET: &str = "Choose your Pet";
+const PROMPT_CONFIRM: &str = "Fire to confirm";
+
+/// Every fixed word this screen draws (host-only, for the guide's word list).
+#[cfg(any(test, feature = "simulator"))]
+pub fn words() -> std::vec::Vec<&'static str> {
+    let mut out: std::vec::Vec<&'static str> = std::vec::Vec::new();
+    out.extend(MONEY_LABELS);
+    out.extend(NO_PETS_LINES);
+    out.extend([PROMPT_MONEY, PROMPT_PET, PROMPT_CONFIRM]);
+    out
+}
+
 /// What to do after selection: 0 = new game, 1 = new generation.
 static MODE: AtomicU8 = AtomicU8::new(0);
 
@@ -91,6 +106,24 @@ fn row_layout(count: usize) -> (i32, i32) {
 
 pub fn is_active() -> bool {
     ACTIVE.load(Ordering::Relaxed)
+}
+
+/// The two phases of the screen (host-only, for the guide's shot checks).
+#[cfg(any(test, feature = "simulator"))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Phase {
+    Pet,
+    Money,
+}
+
+/// Which phase is showing. Host-only, for the guide's shot checks.
+#[cfg(any(test, feature = "simulator"))]
+pub fn phase() -> Phase {
+    if PHASE.load(Ordering::Relaxed) == PHASE_MONEY {
+        Phase::Money
+    } else {
+        Phase::Pet
+    }
 }
 
 /// Open the pet selection screen for a brand new game.
@@ -200,9 +233,9 @@ where
     crate::ui::clear_screen(display)?;
 
     let title = if PHASE.load(Ordering::Relaxed) == PHASE_MONEY {
-        "Play with money?"
+        PROMPT_MONEY
     } else {
-        "Choose your Pet"
+        PROMPT_PET
     };
     ui::draw_title_bar(display, title, Point::zero(), 152)?;
 
@@ -266,7 +299,7 @@ where
     if !(PHASE.load(Ordering::Relaxed) == PHASE_PET && PetKind::roster().is_empty()) {
         let hint_style = crate::ui::CENTERED_BOTTOM;
         Text::with_text_style(
-            "Fire to confirm",
+            PROMPT_CONFIRM,
             Point::new(76, 148),
             TEXT_BLACK,
             hint_style,

@@ -170,10 +170,10 @@ pub fn fmt_wait(secs: u32) -> heapless::String<8> {
 
 /// Water is refused above this hydration and never takes it past `WATER_CAP_PCT`
 /// (fixed safety edges of the hydration need, see `needs::build_edges`).
-pub(crate) const WATER_REFUSE_PCT: i32 = 85;
-const WATER_CAP_PCT: i32 = 90;
+pub const WATER_REFUSE_PCT: i32 = 85;
+pub const WATER_CAP_PCT: i32 = 90;
 /// Wash is refused below this dirt level (fixed safety edge of the dirt need).
-pub(crate) const WASH_REFUSE_PCT: i32 = 25;
+pub const WASH_REFUSE_PCT: i32 = 25;
 
 /// A drink gives less than this share (percent) of its mood and energy to a
 /// pet this drunk: it is barely felt.

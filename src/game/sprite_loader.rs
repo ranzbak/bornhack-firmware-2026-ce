@@ -466,6 +466,16 @@ fn fat_name_to_dotted(name: &[u8; 11]) -> std::string::String {
     out
 }
 
+/// Width and height of `assets/to-badge/<name>.PCX`, or `None` when the file
+/// is missing or malformed (host-only, for the guide's sprite export).
+#[cfg(feature = "simulator")]
+pub fn pcx_size_sim(name: &[u8; 11]) -> Option<(u32, u32)> {
+    let path = std::format!("{}{}", SIM_ASSET_DIR, fat_name_to_dotted(name));
+    let bytes = std::fs::read(path).ok()?;
+    let info = parse_pcx_header(bytes.get(..PCX_HEADER_SIZE)?)?;
+    Some((info.width as u32, info.height as u32))
+}
+
 /// Blit a PCX file from `assets/to-badge/<name>.PCX` onto a `DrawTarget`.
 /// Silently does nothing if the file is missing or malformed — same
 /// "best effort" stance as the embedded blitter.

@@ -225,7 +225,13 @@ const TOAST_MIN_VISIBLE_MS: u32 = 2000;
 /// just occupying the whole screen instead of one line.
 static DIABETES_ALERT: TimedFlag = TimedFlag::new();
 /// Minimum wall-clock visibility for the diabetes alert screen.
-const DIABETES_ALERT_MIN_VISIBLE_MS: u32 = 3000;
+pub const DIABETES_ALERT_MIN_VISIBLE_MS: u32 = 3000;
+
+/// Whether the diabetes alert is up (host-only, for the guide's shot check).
+#[cfg(any(test, feature = "simulator"))]
+pub fn diabetes_alert_active() -> bool {
+    DIABETES_ALERT.is_active()
+}
 
 /// Show the full-screen "now diabetic" alert, taking over the whole
 /// display (icons, pet, everything) for at least
@@ -394,6 +400,50 @@ where
     Ok(())
 }
 
+/// The diabetes alert: two bold lines and a red hint.
+const ALERT_DIABETES: [&str; 2] = ["TYPE 2", "DIABETES"];
+const ALERT_DIABETES_HINT: &str = "Give medication soon";
+/// The dependence alert.
+const ALERT_ALCOHOL: [&str; 2] = ["ALCOHOL", "DEPENDENCE"];
+const ALERT_ALCOHOL_HINT: &str = "Give rehab soon";
+/// The gone screen: the farewell (when there is no farewell animation) and
+/// the two prompt lines.
+const GONE_LEFT: &str = "Your pet has left";
+const GONE_PROMPT: [&str; 2] = ["Press Fire", "for a new egg"];
+/// The pet area when the sprite files are missing.
+const NO_SPRITES: &str = "No sprites on flash";
+
+/// Every fixed word of the game screen: the toasts (group "toasts", the debug
+/// cheat toast "debug"), the alerts, the gone screen and the missing-sprites
+/// notice (group "screen"). Host-only, for the guide's word list.
+#[cfg(any(test, feature = "simulator"))]
+pub fn screen_words() -> std::vec::Vec<(&'static str, &'static str)> {
+    let mut out: std::vec::Vec<(&'static str, &'static str)> = std::vec::Vec::new();
+    for v in 0..=255u8 {
+        let toast = Toast::from_u8(v);
+        let text = toast.message();
+        if !text.is_empty() {
+            out.push((if toast == Toast::DebugCheat { "debug" } else { "toasts" }, text));
+        }
+    }
+    for line in ALERT_DIABETES.into_iter().chain(ALERT_ALCOHOL) {
+        out.push(("screen", line));
+    }
+    for text in [ALERT_DIABETES_HINT, ALERT_ALCOHOL_HINT, GONE_LEFT, NO_SPRITES] {
+        out.push(("screen", text));
+    }
+    for line in GONE_PROMPT {
+        out.push(("screen", line));
+    }
+    out.push(("screen", NAME_PROMPT));
+    // Demo mode: the help line and the pet's notes take the status line's place.
+    out.push(("status", HELP_TEXT));
+    for note in engine::demo::Note::ALL {
+        out.push(("status", note.text()));
+    }
+    out
+}
+
 /// Full-screen one-shot condition alert: two bold black lines and a red hint,
 /// cleared once `ALERT_MIN_VISIBLE_MS` has elapsed.
 fn draw_alert<D>(
@@ -484,14 +534,13 @@ pub fn show_cause(c: engine::causes::Cause) {
     raise_toast(Toast::Cause);
 }
 
-/// The toast that is up now.
-#[cfg(test)]
-pub(crate) fn current_toast_for_test() -> Toast {
-    if TOAST.is_active() {
-        Toast::from_u8(TOAST_MSG.load(Ordering::Relaxed))
-    } else {
-        Toast::None
-    }
+/// The toast that is up now, if any (host-only, for the guide's shot checks).
+#[cfg(any(test, feature = "simulator"))]
+pub fn current_toast() -> Option<Toast> {
+    TOAST
+        .is_active()
+        .then(|| Toast::from_u8(TOAST_MSG.load(Ordering::Relaxed)))
+        .filter(|t| *t != Toast::None)
 }
 
 /// The cause the last `show_cause` stored.
@@ -819,8 +868,8 @@ where
     if DIABETES_ALERT.is_active() {
         return draw_alert(
             display,
-            ["TYPE 2", "DIABETES"],
-            "Give medication soon",
+            ALERT_DIABETES,
+            ALERT_DIABETES_HINT,
         );
     }
 
@@ -829,8 +878,8 @@ where
     if ALCOHOLISM_ALERT.is_active() {
         return draw_alert(
             display,
-            ["ALCOHOL", "DEPENDENCE"],
-            "Give rehab soon",
+            ALERT_ALCOHOL,
+            ALERT_ALCOHOL_HINT,
         );
     }
 
@@ -962,11 +1011,11 @@ where
         }
         // Farewell animation blitted by embassy.rs if available.
         if sprite_loader::frame_count() == 0 {
-            Text::with_text_style("Your pet has left", Point::new(76, 50), font_red, centered)
+            Text::with_text_style(GONE_LEFT, Point::new(76, 50), font_red, centered)
                 .draw(display)?;
         }
-        Text::with_text_style("Press Fire", Point::new(76, 90), font_red, centered).draw(display)?;
-        Text::with_text_style("for a new egg", Point::new(76, 106), font_red, centered)
+        Text::with_text_style(GONE_PROMPT[0], Point::new(76, 90), font_red, centered).draw(display)?;
+        Text::with_text_style(GONE_PROMPT[1], Point::new(76, 106), font_red, centered)
             .draw(display)?;
         return Ok(());
     }
@@ -1001,7 +1050,7 @@ where
     // Pet area: sprite blitted by embassy.rs, or fallback.
     if sprite_loader::frame_count() == 0 {
         Text::with_text_style(
-            "No sprites on flash",
+            NO_SPRITES,
             Point::new(76, (SEP_TOP + SEP_BOT) / 2),
             font,
             centered,
@@ -1055,11 +1104,7 @@ where
         lifecycle::cycle();
 
         // After hatching completes, prompt the player to name their pet.
-        if lifecycle::take_naming_pending() {
-            let seed = lifecycle::now_tick();
-            let default = lifecycle::random_default_name(seed);
-            crate::text_entry::begin(default.as_bytes(), 12, on_pet_named, "Name your Pet", true);
-        }
+        prompt_for_name();
     }
 
     // Blit sprite from flash.
@@ -1149,8 +1194,31 @@ where
     }
 }
 
+/// Title of the naming prompt.
+pub const NAME_PROMPT: &str = "Name your Pet";
+
+/// Longest name the prompt accepts.
+const NAME_PROMPT_MAX: u8 = 12;
+
+/// Once the egg has hatched, open the naming prompt with a default name
+/// filled in. True when it opened. The firmware's render loop and the guide's
+/// `naming` shot both call this.
+pub fn prompt_for_name() -> bool {
+    if !lifecycle::take_naming_pending() {
+        return false;
+    }
+    let default = lifecycle::random_default_name(lifecycle::now_tick());
+    crate::text_entry::begin(
+        default.as_bytes(),
+        NAME_PROMPT_MAX,
+        on_pet_named,
+        NAME_PROMPT,
+        true,
+    );
+    true
+}
+
 /// Text entry callback: player has submitted a pet name.
-#[cfg(feature = "embassy-core")]
 fn on_pet_named(name: &[u8]) {
     lifecycle::set_pet_name(name);
 }
@@ -1282,7 +1350,7 @@ mod tests {
         });
         crate::game::lifecycle::cycle();
         assert_eq!(crate::game::lifecycle::diary().len(), 1);
-        assert_eq!(super::current_toast_for_test(), super::Toast::None);
+        assert_eq!(super::current_toast().unwrap_or(super::Toast::None), super::Toast::None);
     }
 
     #[test]

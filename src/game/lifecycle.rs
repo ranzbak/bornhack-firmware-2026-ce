@@ -210,7 +210,7 @@ pub fn can_use_station() -> bool {
 }
 
 /// Longest boot catch-up, in minutes (12 h).
-const CATCH_UP_MAX_MIN: u32 = 720;
+pub const CATCH_UP_MAX_MIN: u32 = 720;
 
 /// Minutes the pet catches up on boot: the wall-clock gap since the save,
 /// capped at 12 h. 0 when either time is unknown (0) or the clock ran back.
@@ -500,18 +500,41 @@ pub fn toggle_demo() -> Result<bool, super::engine::doses::Reason> {
     Ok(on)
 }
 
+/// The demo rows' labels in the game settings menu.
+const DEMO_LABEL_ON: &str = "Demo mode: on";
+const DEMO_LABEL_OFF: &str = "Demo mode: off";
+const DEMO_LABEL_FIX_ME_FIRST: &str = "Demo: fix me first";
+const DEMO_LABEL_FROZEN: &str = "Demo: frozen";
+const DEMO_LABEL_NO_PET: &str = "Demo: no pet";
+const DEMO_CARE_ANIMATED: &str = "Demo care: animated";
+const DEMO_CARE_INSTANT: &str = "Demo care: instant";
+
+/// Every demo row label (host-only, for the guide's word list).
+#[cfg(any(test, feature = "simulator"))]
+pub fn demo_menu_words() -> [&'static str; 7] {
+    [
+        DEMO_LABEL_ON,
+        DEMO_LABEL_OFF,
+        DEMO_LABEL_FIX_ME_FIRST,
+        DEMO_LABEL_FROZEN,
+        DEMO_LABEL_NO_PET,
+        DEMO_CARE_ANIMATED,
+        DEMO_CARE_INSTANT,
+    ]
+}
+
 /// The demo row of the game settings menu. The refusal is the engine's, so
 /// the label says why the press would do nothing.
 pub fn demo_menu_label() -> &'static str {
     use super::engine::doses::{Reason, Refusal};
     let state = unsafe { (*GAME.get()).as_ref() };
     match state.map(|s| (s.is_demo(), s.demo_refusal())) {
-        None => "Demo: no pet",
-        Some((true, _)) => "Demo mode: on",
-        Some((false, None)) => "Demo mode: off",
-        Some((false, Some(Reason::Refused(Refusal::FixMeFirst)))) => "Demo: fix me first",
-        Some((false, Some(Reason::Hibernating))) => "Demo: frozen",
-        Some((false, Some(_))) => "Demo: no pet",
+        None => DEMO_LABEL_NO_PET,
+        Some((true, _)) => DEMO_LABEL_ON,
+        Some((false, None)) => DEMO_LABEL_OFF,
+        Some((false, Some(Reason::Refused(Refusal::FixMeFirst)))) => DEMO_LABEL_FIX_ME_FIRST,
+        Some((false, Some(Reason::Hibernating))) => DEMO_LABEL_FROZEN,
+        Some((false, Some(_))) => DEMO_LABEL_NO_PET,
     }
 }
 
@@ -530,9 +553,9 @@ pub fn toggle_demo_care() -> bool {
 pub fn demo_care_label() -> &'static str {
     let state = unsafe { (*GAME.get()).as_ref() };
     if state.is_some_and(|s| s.demo.animated) {
-        "Demo care: animated"
+        DEMO_CARE_ANIMATED
     } else {
-        "Demo care: instant"
+        DEMO_CARE_INSTANT
     }
 }
 
@@ -1374,7 +1397,7 @@ mod tests {
         install_with_cause(true, 0);
         super::cycle();
         assert_eq!(super::diary().len(), 1, "the diary has it");
-        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::None);
+        assert_eq!(crate::game::current_toast().unwrap_or(crate::game::Toast::None), crate::game::Toast::None);
         super::set_state_for_test(None);
     }
 
@@ -1384,7 +1407,7 @@ mod tests {
         install_with_cause(true, 30);
         super::cycle();
         assert_eq!(super::diary().len(), 1);
-        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::Cause);
+        assert_eq!(crate::game::current_toast().unwrap_or(crate::game::Toast::None), crate::game::Toast::Cause);
         super::set_state_for_test(None);
     }
 
@@ -1393,7 +1416,7 @@ mod tests {
         let _guard = crate::game::lock_test_state();
         install_with_cause(false, 0);
         super::cycle();
-        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::Cause);
+        assert_eq!(crate::game::current_toast().unwrap_or(crate::game::Toast::None), crate::game::Toast::Cause);
         super::set_state_for_test(None);
     }
 
