@@ -204,12 +204,18 @@ def compile_pdf(commit):
                    check=True, env=env)
 
 
-def query(label, commit):
+def evaluate(expr, commit):
+    """Run a Typst expression in the context of the compiled guide (the
+    replacement for the deprecated `typst query`) and return its JSON."""
     env = dict(os.environ, SOURCE_DATE_EPOCH=git("log", "-1", "--format=%ct"))
     out = subprocess.check_output(
-        ["typst", "query", *typst_args(commit), "guide/main.typ", label,
-         "--field", "value", "--one"], text=True, env=env)
+        ["typst", "eval", *typst_args(commit), "--in", "guide/main.typ", expr],
+        text=True, env=env)
     return json.loads(out)
+
+
+def query(label, commit):
+    return evaluate(f"query({label}).first().value", commit)
 
 
 def check_marks(marked, words):
@@ -223,19 +229,11 @@ def check_marks(marked, words):
 
 
 def pic_pages(commit):
-    env = dict(os.environ, SOURCE_DATE_EPOCH=git("log", "-1", "--format=%ct"))
-    out = subprocess.check_output(
-        ["typst", "query", *typst_args(commit), "guide/main.typ", "<pic>",
-         "--field", "value"], text=True, env=env)
-    return set(json.loads(out))
+    return set(evaluate("query(<pic>).map(it => it.value)", commit))
 
 
 def marked_words(commit):
-    env = dict(os.environ, SOURCE_DATE_EPOCH=git("log", "-1", "--format=%ct"))
-    out = subprocess.check_output(
-        ["typst", "query", *typst_args(commit), "guide/main.typ", "<gw>",
-         "--field", "value"], text=True, env=env)
-    return set(json.loads(out))
+    return set(evaluate("query(<gw>).map(it => it.value)", commit))
 
 
 def check_words(commit):
