@@ -8,6 +8,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::game::engine::doses::{Reason, Refusal};
 use crate::game::engine::sim;
@@ -158,6 +159,15 @@ fn naming_prompt_is_up() -> bool {
     let default = lifecycle::random_default_name(lifecycle::now_tick());
     text_entry::active_entry()
         .is_some_and(|(title, text)| title == NAME_PROMPT && text == default.as_bytes())
+}
+
+/// Rows of the open menu that carry the risk mark, counted by a step so the
+/// expectation only reads.
+static RISK_ROWS: AtomicUsize = AtomicUsize::new(0);
+
+fn count_risk_rows() {
+    let stats = lifecycle::cycle().expect("a game is running");
+    RISK_ROWS.store(modal::risk_row_count(&stats), Ordering::Relaxed);
 }
 
 fn sleep() {
@@ -383,9 +393,13 @@ pub static SHOTS: &[Shot] = &[
     ),
     shot!(
         "risk-marker",
-        [Do(content), Poke(DebugPoke::Stuffed), Open(ModalKind::Feed)],
-        || menu_is(ModalKind::Feed)
-            && lifecycle::cycle().is_some_and(|s| modal::risk_row_count(&s) > 0)
+        [
+            Do(content),
+            Poke(DebugPoke::Stuffed),
+            Open(ModalKind::Feed),
+            Do(count_risk_rows)
+        ],
+        || menu_is(ModalKind::Feed) && RISK_ROWS.load(Ordering::Relaxed) > 0
     ),
     shot!(
         "refusal-water",
