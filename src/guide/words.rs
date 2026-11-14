@@ -23,7 +23,7 @@ use crate::game::engine::{GameState, PetKind, Phase};
 use crate::game::pet_registry;
 use crate::game::{diary, diary_view, lifecycle, modal, pet_select, screen_words, stats_pages};
 
-pub const GROUPS: [&str; 14] = [
+pub const GROUPS: [&str; 15] = [
     "status",
     "conditions",
     "causes",
@@ -38,6 +38,7 @@ pub const GROUPS: [&str; 14] = [
     "toasts",
     "screen",
     "pet-select",
+    "naming",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -204,6 +205,13 @@ fn build() -> Vec<Entry> {
     }
     for t in pet_select::words() {
         add("pet-select", t);
+    }
+
+    for t in crate::text_entry::words() {
+        add("naming", t);
+    }
+    for t in crate::menu::main_menu_words() {
+        add("menu", t);
     }
 
     out.sort_by(|a, b| (a.group, &a.text).cmp(&(b.group, &b.text)));

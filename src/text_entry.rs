@@ -521,6 +521,29 @@ where
     Ok(())
 }
 
+/// Fixed labels this screen draws.
+const LABEL_SAVE_PROMPT: &str = "Save name?";
+const LABEL_SAVE_EXE: &str = "EXE = save";
+const LABEL_QUIT: &str = "Cancel = quit";
+const LABEL_A_I: &str = "A-I";
+const LABEL_J_R: &str = "J-R";
+const LABEL_S_Z: &str = "S-Z";
+const LABEL_CMD: &str = "CMD";
+
+/// The fixed labels (host-only, for the guide's word list).
+#[cfg(any(test, feature = "simulator"))]
+pub fn words() -> [&'static str; 7] {
+    [
+        LABEL_SAVE_PROMPT,
+        LABEL_SAVE_EXE,
+        LABEL_QUIT,
+        LABEL_A_I,
+        LABEL_J_R,
+        LABEL_S_Z,
+        LABEL_CMD,
+    ]
+}
+
 /// Submit-confirmation prompt shown when Execute is pressed from `Root`.
 /// Shows the pending text so the user can see what they're about to save.
 fn draw_confirm<D>(display: &mut D, entry: &TextEntry) -> Result<(), D::Error>
@@ -530,13 +553,13 @@ where
     let ts = crate::ui::CENTERED;
     let cx = DISPLAY_W / 2;
     let text = core::str::from_utf8(&entry.text).unwrap_or("");
-    Text::with_text_style("Save name?", Point::new(cx, KB_Y + 16), FONT, ts).draw(display)?;
+    Text::with_text_style(LABEL_SAVE_PROMPT, Point::new(cx, KB_Y + 16), FONT, ts).draw(display)?;
     if text.is_empty() {
         Text::with_text_style("(empty)", Point::new(cx, KB_Y + 34), FONT, ts).draw(display)?;
     } else {
         Text::with_text_style(text, Point::new(cx, KB_Y + 34), FONT, ts).draw(display)?;
     }
-    Text::with_text_style("EXE = save", Point::new(cx, KB_Y + 54), FONT, ts).draw(display)?;
+    Text::with_text_style(LABEL_SAVE_EXE, Point::new(cx, KB_Y + 54), FONT, ts).draw(display)?;
     Text::with_text_style("any key = back", Point::new(cx, KB_Y + 70), FONT, ts).draw(display)?;
     Ok(())
 }
@@ -566,7 +589,7 @@ where
     Text::with_text_style("- Keyboard -", Point::new(cx, KB_Y + 16), FONT, ts).draw(display)?;
     Text::with_text_style("type to enter", Point::new(cx, KB_Y + 34), FONT, ts).draw(display)?;
     Text::with_text_style("Enter = save", Point::new(cx, KB_Y + 52), FONT, ts).draw(display)?;
-    Text::with_text_style("Cancel = quit", Point::new(cx, KB_Y + 70), FONT, ts).draw(display)?;
+    Text::with_text_style(LABEL_QUIT, Point::new(cx, KB_Y + 70), FONT, ts).draw(display)?;
     Ok(())
 }
 
@@ -710,10 +733,10 @@ where
     draw_arrow(display, Dir::Right)?;
     draw_arrow(display, Dir::Up)?;
     draw_arrow(display, Dir::Down)?;
-    draw_label(display, "A-I", KB_CX - 34, KB_CY, Alignment::Right)?;
-    draw_label(display, "J-R", KB_CX, KB_CY - 28, Alignment::Center)?;
-    draw_label(display, "S-Z", KB_CX + 34, KB_CY, Alignment::Left)?;
-    draw_label(display, "CMD", KB_CX, KB_CY + 28, Alignment::Center)?;
+    draw_label(display, LABEL_A_I, KB_CX - 34, KB_CY, Alignment::Right)?;
+    draw_label(display, LABEL_J_R, KB_CX, KB_CY - 28, Alignment::Center)?;
+    draw_label(display, LABEL_S_Z, KB_CX + 34, KB_CY, Alignment::Left)?;
+    draw_label(display, LABEL_CMD, KB_CX, KB_CY + 28, Alignment::Center)?;
     Ok(())
 }
 

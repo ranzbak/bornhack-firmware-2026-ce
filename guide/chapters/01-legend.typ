@@ -29,5 +29,6 @@ hall of fame for pets that have gone, and it is a kind place. It keeps the
 last #v("REALM_MAX_PETS") pets: their names, their kinds, how long they
 stayed and what they were like. Nobody there ever has to wash.
 
-You can visit at any time: Main screen, Bornagotchi, Unicorn Realm.
-@ch-realm shows what you will find there. Your pet's name goes in the book when it leaves, so choose a good one.
+You can visit at any time: Main screen, #w("Bornagotchi"), #w("Unicorn Realm").
+@ch-realm shows what you will find there.
+Your pet's name goes in the book when it leaves, so choose a good one.

@@ -197,10 +197,8 @@
 #let joke(body) = sidebar("JOKE", sprite-fit("hero", "idle", w: 40pt, h: 40pt), rgb("#f6dd9a"), body)
 #let warn(body) = sidebar("WARNING", sprite-fit("hero", "sick", w: 40pt, h: 40pt), rgb("#f1b8a8"), body)
 
-// Screen widths for the walk-through, and text beside a picture.
+// Screen width for the walk-through.
 #let shot-s = 32mm
-#let shot-m = 46mm
-#let beside(body, art) = grid(columns: (1fr, auto), column-gutter: 5mm, align: top, body, art)
 
 // The hero hatching: three egg frames, then the happy pet.
 #let egg-strip() = align(center, grid(columns: 4, column-gutter: 3mm, align: bottom + center,

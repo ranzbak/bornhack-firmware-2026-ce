@@ -10,17 +10,17 @@ pet has hatched, eaten, had a drink and gone to bed. #hero is waiting.
 #pad-card()
 
 #block(above: 3mm)[
-- *Up, Down, Left, Right* move the cursor. When there is nothing left to move
-  to, Left and Right flip to the next screen of the badge.
+- *Up, Down, Left, Right* move the cursor. On the pet screen, Right at the
+  last icon flips to the next screen, and Left stops at the first icon.
 - *Fire* is the joystick pressed in. *EXE* does the same job. Both pick and
   confirm.
 - *CAN* is Cancel. It steps back or closes a menu, and the menus list it as
   #w("Cancel").
 ]
 
-The badge keeps several screens in a row, and Left and Right walk along it.
-The game is one of them. If you get lost, keep pushing Left or Right until
-the pet shows up.
+The badge keeps several screens in a row. The game is one of them. Until
+your pet hatches, Left and Right flip the screen from the game too. If you
+get lost, keep pushing Left or Right until the pet shows up.
 
 == Step by step
 
@@ -41,7 +41,7 @@ the pet shows up.
   again for every new pet.
   - #w("With money"): the pet starts with #v("START_HAX"). Food, drinks and
     medicine have prices. See @ch-money.
-  - #w("Without money"): no prices, no HAX, no worries.
+  - #w("Without money"): no prices and no HAX to earn, so no worries.
   - #w("Hard mode (US)"): money is on, and some prices are higher. See
     @ch-hard. Bring a flag.
 ]
@@ -53,13 +53,16 @@ the pet shows up.
 ]
 
 #step(art: screen("naming", width: shot-s, caption: [Naming.]))[
-  *Name your pet.* When the egg hatches, the badge opens a naming screen. A
-  random Danish or Dutch name is already filled in, so you can accept it.
-  Press EXE. The badge asks whether to save it. Press EXE again.
+  *Name your pet.* When the egg hatches, the badge opens #w("Name your Pet").
+  A random Danish or Dutch name is already filled in, so you can accept it.
+  Press EXE. The badge asks #w("Save name?") and shows #w("EXE = save").
+  Press EXE again.
 
-  To type your own, push the joystick towards a group of letters, then again
-  to narrow it down, until you land on a letter. The screen draws the arrows.
-  The CMD group holds Backspace and Clear. A name can be up to
+  To type your own, use the joystick. Push towards #w("A-I"), #w("J-R") or
+  #w("S-Z"). Push again to pick a group of three letters. Then push Left or
+  Right to move along them and press Fire to take one. #w("CMD") holds
+  Backspace, special characters, numbers, Shift, Clear and the submit key.
+  #w("Cancel = quit") leaves the screen. A name can be up to
   #v("PET_NAME_MAX") letters long.
 ]
 
@@ -79,29 +82,27 @@ the pet shows up.
   and choose #w("Water"). @ch-care has the details.
 ]
 
-#step[
+#step(art: grid(columns: 2, column-gutter: 3mm, align: top,
+  screen("menu-rest", width: shot-s, caption: [The Rest menu.]),
+  screen("asleep", width: shot-s, caption: [Goodnight.])))[
   *Put it to bed.* Pick the #w("Rest") icon, press Fire and choose
   #w("Sleep"). The menu also has #w("Relax") and #w("Wash"). #w("Wake up") is
-  greyed out until your pet is asleep.
+  greyed out until your pet is asleep. A sleeping pet says #w("asleep").
 ]
 
-#align(center, grid(columns: 2, column-gutter: 6mm, align: top,
-  screen("menu-rest", width: shot-s, caption: [The Rest menu.]),
-  screen("asleep", width: shot-s, caption: [Goodnight.])))
-
-A sleeping pet says #w("asleep"). Sleep has no timer: the pet sleeps until you
+Sleep has no timer: the pet sleeps until you
 wake it, or until it wakes itself. @ch-care tells you more. You did it:
 hatched, fed and asleep. Well done.
 
 == Classic or Casual
 
 The game has two rule sets, and this guide describes Classic. To change it,
-go to the Main screen, then Bornagotchi, and step the Mode row. The change
+go to the Main screen, then #w("Bornagotchi"), and step the #w("Mode:") row. The change
 takes effect after a reboot. @ch-hackers has the details.
 
 == When something is wrong
 
-#beside(
+#grid(columns: (1fr, auto), column-gutter: 4mm, align: top,
   [
     - #w("No pets installed") and #w("Check PETS.CFG"): the list of pets
       comes from a file called PETS.CFG on the badge's USB drive. It is
