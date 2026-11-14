@@ -444,13 +444,19 @@ accept wins. It never takes a row the menu would refuse.
   mood of the day, up to #v("DEMO_LAZY_MAX_PCT"), rolled again every
   #v("DEMO_LAZY_MIN").
 + *Whims.* Now and then, every #v("DEMO_WHIM_BASE_MIN") plus up to
-  #v("DEMO_WHIM_SPREAD_MIN"), a pet with low booze fancies a beer or a cake,
-  and a tired, bored one takes a nap of #v("DEMO_NAP_BASE_MIN") plus up to
+  #v("DEMO_WHIM_SPREAD_MIN"), a pet under #v("DEMO_WHIM_BOOZE_LO_PCT") booze
+  fancies a beer (it does, #v("DEMO_WHIM_BEER_LO_PCT") of the time) or else a
+  cake, if it is not heavy. A pet under #v("DEMO_WHIM_BOOZE_HI_PCT") booze may
+  fancy one more beer, #v("DEMO_WHIM_BEER_HI_PCT") of the time. A pet that
+  carries a high drink counter in from your time asks for no beer. A tired,
+  bored one takes a nap of #v("DEMO_NAP_BASE_MIN") plus up to
   #v("DEMO_NAP_SPREAD_MIN").
 
 A heavy pet picks light food, and a thin one picks rich food, so the pet
-does not run to fat or to bones. A drunk pet asks for water first, after
-only #v("DEMO_DRY_BASE_MIN") plus up to #v("DEMO_DRY_SPREAD_MIN"). Casual
+does not run to fat or to bones. A pet over #v("DEMO_EDGE_BOOZE_PCT") booze is drunk. Past the edge
+rows above, which still come first, a drunk pet does nothing but drink water,
+after only #v("DEMO_DRY_BASE_MIN") plus up to #v("DEMO_DRY_SPREAD_MIN"). It
+skips bedtime by the clock, relaxing, the soft wants and the whims until its booze is back under that line. Casual
 moves these lines a little. @ch-hackers shows how to read them all.
 
 === Sleep
