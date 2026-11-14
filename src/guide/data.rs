@@ -115,6 +115,16 @@ pub fn fixed() -> Vec<(&'static str, u32, Unit)> {
             (SECOND_WORD_UNDER / P) as u32,
             Unit::Pct
         ),
+        (
+            "RESTLESS_MIN",
+            crate::game::engine::advance::RESTLESS_MIN as u32,
+            Unit::Min
+        ),
+        (
+            "ALERT_VISIBLE_SECS",
+            crate::game::DIABETES_ALERT_MIN_VISIBLE_MS / 1000,
+            Unit::Secs
+        ),
         ("TICKS_PER_MINUTE", TICKS_PER_MINUTE, Unit::Count),
         ("PET_NAME_MAX", PET_NAME_MAX as u32, Unit::Count),
         ("REALM_MAX_PETS", REALM_MAX_PETS as u32, Unit::Count),

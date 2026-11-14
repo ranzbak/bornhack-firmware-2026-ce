@@ -24,7 +24,7 @@ pub const SLOW_SCALE: u32 = 4;
 pub const LEAVING_SCALE: u32 = 2;
 /// A night is a bad night when at least this many minutes of it were poor
 /// (display constant, not a balance value) ...
-const RESTLESS_MIN: u16 = 60;
+pub const RESTLESS_MIN: u16 = 60;
 /// ... and the poor minutes are more than 1 in this many of the minutes
 /// slept short of oversleeping (more than half).
 const BAD_NIGHT_POOR_SHARE_DEN: u32 = 2;

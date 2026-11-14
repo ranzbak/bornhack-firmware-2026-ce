@@ -322,15 +322,25 @@ pub static SHOTS: &[Shot] = &[
     shot!("wasted", [Do(content), Poke(DebugPoke::Drunk)], || {
         line().is_some_and(|l| l.first == Word::Wasted && l.danger)
     }),
+    // The onset alert takes the whole screen for a few seconds. These two let
+    // it lapse (one tick on the fake clock; the draw drops an expired alert)
+    // so the screen shows the status line the word lives on.
     shot!(
         "no-insulin",
-        [Do(content), Poke(DebugPoke::Diabetic)],
+        [Do(content), Poke(DebugPoke::Diabetic), Step::Ticks(1)],
         || { has_word(Word::NoInsulin) }
     ),
     shot!(
         "needs-rehab",
-        [Do(content), Poke(DebugPoke::Dependent)],
+        [Do(content), Poke(DebugPoke::Dependent), Step::Ticks(1)],
         || { has_word(Word::NeedsRehab) }
+    ),
+    // The alert itself: the onset cycle runs on the fake clock and the clock
+    // does not move, so the alert is still up when the screen is drawn.
+    shot!(
+        "alert-diabetes",
+        [Do(content), Poke(DebugPoke::Diabetic)],
+        crate::game::diabetes_alert_active
     ),
     shot!("stats-needs", [Do(stats_needs)], || {
         modal::stats_view_open() && modal::stats_page() == Page::Needs

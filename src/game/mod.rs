@@ -225,7 +225,13 @@ const TOAST_MIN_VISIBLE_MS: u32 = 2000;
 /// just occupying the whole screen instead of one line.
 static DIABETES_ALERT: TimedFlag = TimedFlag::new();
 /// Minimum wall-clock visibility for the diabetes alert screen.
-const DIABETES_ALERT_MIN_VISIBLE_MS: u32 = 3000;
+pub const DIABETES_ALERT_MIN_VISIBLE_MS: u32 = 3000;
+
+/// Whether the diabetes alert is up (host-only, for the guide's shot check).
+#[cfg(any(test, feature = "simulator"))]
+pub fn diabetes_alert_active() -> bool {
+    DIABETES_ALERT.is_active()
+}
 
 /// Show the full-screen "now diabetic" alert, taking over the whole
 /// display (icons, pet, everything) for at least
