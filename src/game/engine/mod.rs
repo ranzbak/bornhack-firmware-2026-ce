@@ -1382,6 +1382,8 @@ impl GameState {
     /// running action does not block it. Off always works and keeps only the
     /// lifetime, the care mode and whose action is running.
     pub fn set_demo(&mut self, on: bool) -> Result<(), doses::Reason> {
+        // An old note must not come back with the next switch-on.
+        self.note = None;
         let keep = demo::Demo {
             demo_min: self.demo.demo_min,
             animated: self.demo.animated,

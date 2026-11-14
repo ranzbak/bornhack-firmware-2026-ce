@@ -2196,6 +2196,19 @@ mod calm {
         assert!(matches!(s.pet_line(), PetLine::Status(_)), "{:?}", s.pet_line());
     }
 
+    /// An old note does not come back when demo is switched on again.
+    #[test]
+    fn switching_demo_off_and_on_forgets_the_note() {
+        let mut s = quiet();
+        s.fullness = pct(19);
+        s.update(s.last_update_tick + 1);
+        assert!(s.note().is_some(), "the pet ate and left a note");
+        s.set_demo(false).unwrap();
+        s.set_demo(true).unwrap();
+        assert!(s.note().is_none());
+        assert!(matches!(s.pet_line(), PetLine::Status(_)));
+    }
+
     #[test]
     fn a_note_never_shows_with_demo_off() {
         let mut s = quiet();
