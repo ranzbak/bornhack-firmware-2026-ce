@@ -1734,6 +1734,38 @@ mod acts {
         );
     }
 
+    /// A player's action can leave the clock part-way through a minute
+    /// (`tick_rem`). The first wake after it may land off a whole minute: the
+    /// pause it starts ends there. Every wake after that is on a whole
+    /// minute again.
+    #[test]
+    fn a_player_action_is_the_one_wake_off_a_whole_minute() {
+        let mut s = quiet();
+        at(&mut s, 8 * HOUR);
+        s.demo.whim_min = 0;
+        // Part-way through a minute, then the player feeds the pet.
+        s.update(s.last_update_tick + TICKS_PER_MINUTE + 1);
+        assert_ne!(s.tick_rem, 0, "the update left part of a minute");
+        assert!(s.feed(FoodKind::Apple));
+        finish(&mut s);
+        assert_ne!(s.tick_rem, 0, "the action left part of a minute");
+        assert!(s.demo.pause_min > 0, "the player's action paused the pet");
+        let (mut off, mut wakes) = (0u32, 0u32);
+        let end = s.last_update_tick + SIX_HOURS * TICKS_PER_MINUTE;
+        while s.last_update_tick < end {
+            let before = s.last_update_tick;
+            let wake = s.next_wake_tick();
+            assert!(wake > before);
+            s.update(wake);
+            wakes += 1;
+            if s.tick_rem != 0 {
+                off += 1;
+                assert_eq!(wakes, 1, "wake {wakes} fell off a whole minute");
+            }
+        }
+        assert!(off <= 1, "{off} wakes off a whole minute");
+    }
+
     #[test]
     fn note_words_fit_the_line() {
         let mut notes = vec![
@@ -1779,7 +1811,12 @@ mod split {
 
     /// Run `start` to `t0 + span` with updates cut at `cuts` (sorted). A
     /// player drink lands at `player` (a tick offset, also a cut).
-    fn drive(start: &GameState, span: u32, cuts: &[u32], player: Option<u32>) -> GameState {
+    pub(super) fn drive(
+        start: &GameState,
+        span: u32,
+        cuts: &[u32],
+        player: Option<u32>,
+    ) -> GameState {
         let t0 = start.last_update_tick;
         let mut s = start.clone();
         let mut did = false;
@@ -1857,12 +1894,13 @@ mod split {
 
 mod animated {
     use super::policy::{at, lcg, pct, quiet, random_demo};
+    use super::split::drive;
     use bornhack_aegg::game::engine::causes::Cause;
     use bornhack_aegg::game::engine::demo::{self, Choice, Note};
     use bornhack_aegg::game::engine::doses::Reason;
     use bornhack_aegg::game::engine::thresholds as t;
     use bornhack_aegg::game::engine::{
-        Action, DrinkKind, FoodKind, GameState, Phase, TICKS_PER_MINUTE,
+        Action, DisplayAnim, DrinkKind, FoodKind, GameState, Phase, TICKS_PER_MINUTE,
     };
 
     const HOUR: u16 = 60;
@@ -1905,7 +1943,7 @@ mod animated {
         // The wake after a pending choice is one tick: the meal starts.
         s.update(s.last_update_tick + 1);
         assert_eq!(s.active_action, Some(Action::Feed));
-        assert!(format!("{:?}", s.display_anim()).contains("Feeding"));
+        assert!(matches!(s.display_anim(), DisplayAnim::Feeding));
         assert!(s.demo.pet_action);
         assert_eq!(s.fullness, pct(19), "the dose lands at the end");
         assert!(s.note().is_none(), "the note comes with the end");
@@ -1938,6 +1976,10 @@ mod animated {
         assert_eq!((s.hydration, s.energy, s.fun), needs, "needs did not age");
     }
 
+    /// As `split::demo_update_is_split_invariant`, with the pet's care
+    /// animated: a pet's action eats the engine-time stream, a player's
+    /// action (every fourth pet is helped) eats fresh ticks, and the cuts
+    /// fall around both and around the pause that follows the player's.
     #[test]
     fn animated_update_is_split_invariant() {
         let snapshot = |s: &GameState| {
@@ -1951,27 +1993,30 @@ mod animated {
                 s.action_ticks_remaining,
             )
         };
-        let drive = |start: &GameState, span: u32, cuts: &[u32]| {
-            let t0 = start.last_update_tick;
-            let mut s = start.clone();
-            for &c in cuts.iter().chain(&[span]) {
-                s.update(t0 + c);
-            }
-            s
-        };
-        let (mut acted, mut mid_action) = (0, 0);
+        let (mut acted, mut mid_action, mut helped) = (0, 0, 0);
         for seed in 0..200u64 {
             let mut next = lcg(5000 + seed);
             let mut start = random_demo(&mut next);
             start.set_demo_care(true);
             let span = 3 * DAY_TICKS;
             let mut cuts: Vec<u32> = (0..50).map(|_| next(span as u64 - 1) as u32 + 1).collect();
+            // Every fourth pet is helped by the player somewhere in the span.
+            let player = (seed % 4 == 0).then(|| next(span as u64 - 1) as u32 + 1);
+            if let Some(p) = player {
+                let pause = t::DEMO_PAUSE_MIN() as u32 * TICKS_PER_MINUTE;
+                cuts.extend([p, p + pause - 1, p + pause, p + pause + 1]);
+                helped += 1;
+            }
             // Cut at, before and after every tick where a pet action runs.
             let mut probe = start.clone();
             let t0 = probe.last_update_tick;
             let mut at_tick = 0;
             while at_tick < span {
                 let step = (at_tick + TICKS_PER_MINUTE).min(span);
+                if let Some(p) = player.filter(|p| (at_tick..step).contains(p)) {
+                    probe.update(t0 + p);
+                    probe.drink(DrinkKind::Water);
+                }
                 probe.update(t0 + step);
                 if probe.demo.pet_action {
                     cuts.extend([step.saturating_sub(1), step, step + 1]);
@@ -1982,11 +2027,12 @@ mod animated {
             cuts.retain(|&c| c > 0 && c < span);
             cuts.sort_unstable();
             cuts.dedup();
-            let whole = drive(&start, span, &[]);
-            let split = drive(&start, span, &cuts);
+            let whole = drive(&start, span, &[], player);
+            let split = drive(&start, span, &cuts, player);
             assert_eq!(snapshot(&whole), snapshot(&split), "seed {seed}");
             acted += whole.note().is_some() as u32;
         }
+        assert!(helped > 40, "only {helped} pets were helped");
         assert!(acted > 100, "only {acted} of 200 pets acted");
         assert!(
             mid_action > 50,
@@ -2089,7 +2135,7 @@ mod animated {
             wakes += 1;
             assert_ne!(s.phase, Phase::Leaving);
             assert!(s.health >= pct(t::DEMO_HEALTH_FLOOR_PCT() as i32));
-            feeding += format!("{:?}", s.display_anim()).contains("Feeding") as u32;
+            feeding += matches!(s.display_anim(), DisplayAnim::Feeding) as u32;
         }
         assert!(feeding > 0, "never saw it feeding in {wakes} wakes");
     }
