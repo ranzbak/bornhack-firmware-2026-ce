@@ -428,8 +428,12 @@ fn log_causes(state: &mut GameState) {
         log_cause(*cause, at_min);
     }
     // The diary logs always; the toast only where it can be seen and cleared:
-    // not behind a full-screen view, nor under a modal's popover.
-    if let Some(first) = causes.iter().next()
+    // not behind a full-screen view, nor under a modal's popover. A demo pet
+    // stays quiet about its own causes; the player who just stepped in
+    // (`pause_min` running) is answered.
+    let answers_player = !state.demo.on || state.demo.pause_min > 0;
+    if answers_player
+        && let Some(first) = causes.iter().next()
         && !super::full_screen_view_up()
         && !super::modal::is_open()
     {
@@ -471,11 +475,17 @@ pub fn action_ticks_remaining() -> u8 {
     })
 }
 
-/// The status line under the pet (cheap read, no update, like
+/// What is written under the pet (cheap read, no update, like
 /// [`display_anim`]). `None` before a game exists.
-pub fn status_line() -> Option<super::engine::status::StatusLine> {
+pub fn pet_line() -> Option<super::engine::PetLine> {
     let state = unsafe { (*GAME.get()).as_ref() }?;
-    Some(super::engine::status::status_line(state))
+    Some(state.pet_line())
+}
+
+/// Whether the current pet is in demo mode (false without a game).
+pub fn is_demo() -> bool {
+    let state = unsafe { (*GAME.get()).as_ref() };
+    state.is_some_and(|s| s.is_demo())
 }
 
 /// Install (or clear) the game state for a test. The caller holds
@@ -551,6 +561,14 @@ fn current_severity(state: &GameState) -> Severity {
     }
 }
 
+/// Should a buzzer alert play? The one place that decides it: not while
+/// muted, and never in demo mode, which is silent. `upward` is whether the
+/// event is an alert at all (a severity rise; the onset alerts and the
+/// farewell pass `true`).
+fn alert_due(muted: bool, demo: bool, upward: bool) -> bool {
+    upward && !muted && !demo
+}
+
 fn check_severity_transition(state: &GameState) {
     let now = current_severity(state) as u8;
     let prev = LAST_SEVERITY.swap(now, Ordering::Relaxed);
@@ -562,13 +580,14 @@ fn check_severity_transition(state: &GameState) {
     }
 
     let muted = crate::GAME_MUTE.load(Ordering::Relaxed);
+    let demo = state.demo.on;
 
     // Pet just left: play the "funny ending" melody.  Triggers on any
     // transition into Gone so e.g. a natural Leaving → Gone fires the
     // melody; `new_generation()` goes via Hatching, not Gone, so it
     // does not trigger this path.
     if now == Severity::Gone as u8 && prev != Severity::Gone as u8 {
-        if !muted {
+        if alert_due(muted, demo, true) {
             #[cfg(feature = "embassy-core")]
             crate::fw::buzzer::play(crate::FUNNY_ENDING_INDEX);
         }
@@ -580,7 +599,7 @@ fn check_severity_transition(state: &GameState) {
     //   Warning(2) → Severe(3)
     //   Severe(3)  → Leaving(4)
     let upward = now > prev && now <= Severity::Leaving as u8;
-    if upward && !muted {
+    if alert_due(muted, demo, upward) {
         #[cfg(feature = "embassy-core")]
         crate::fw::buzzer::play(crate::PET_WARN_INDEX);
     }
@@ -609,7 +628,7 @@ fn onset_alert_due(seen: &AtomicBool, present: bool, hibernating: bool) -> bool 
 fn check_diabetes_onset(state: &super::engine::GameState) {
     if onset_alert_due(&WAS_DIABETIC, state.diabetic, state.hibernating) {
         let muted = crate::GAME_MUTE.load(Ordering::Relaxed);
-        if !muted {
+        if alert_due(muted, state.demo.on, true) {
             #[cfg(feature = "embassy-core")]
             crate::fw::buzzer::play(crate::PET_WARN_INDEX);
         }
@@ -626,7 +645,7 @@ fn check_diabetes_onset(state: &super::engine::GameState) {
 fn check_alcoholism_onset(state: &super::engine::GameState) {
     if onset_alert_due(&WAS_ALCOHOLIC, state.dependent, state.hibernating) {
         let muted = crate::GAME_MUTE.load(Ordering::Relaxed);
-        if !muted {
+        if alert_due(muted, state.demo.on, true) {
             #[cfg(feature = "embassy-core")]
             crate::fw::buzzer::play(crate::PET_WARN_INDEX);
         }
@@ -1167,7 +1186,7 @@ pub async fn save_if_needed() -> bool {
 mod tests {
     use super::{
         Severity, apply_boot_catch_up, boot_catch_up_minutes, catch_up_minutes, current_severity, deferred_catch_up_minutes,
-        event_at, forget_boot_gap, onset_alert_due, saved_unix_to_write,
+        alert_due, event_at, forget_boot_gap, onset_alert_due, saved_unix_to_write,
     };
     use crate::game::engine::status::{Word, status_line};
     use crate::game::engine::needs::P;
@@ -1276,6 +1295,58 @@ mod tests {
             assert!(line.alerts(), "{name}");
             assert!(current_severity(&s) == Severity::Severe, "{name}");
         }
+    }
+
+    #[test]
+    fn demo_never_buzzes() {
+        // The one rule every buzz site asks: severity rise, the funny ending
+        // and both onset alerts. Demo is silent whatever else is true.
+        for muted in [false, true] {
+            for upward in [false, true] {
+                assert!(!alert_due(muted, true, upward), "demo {muted} {upward}");
+            }
+        }
+        assert!(alert_due(false, false, true));
+        assert!(!alert_due(true, false, true), "muted");
+        assert!(!alert_due(false, false, false), "not rising");
+    }
+
+    /// A pet in the cause toast tests: installed, with one cause queued.
+    fn install_with_cause(demo_on: bool, pause_min: u8) {
+        let mut s = pet();
+        s.demo.on = demo_on;
+        s.demo.pause_min = pause_min;
+        s.causes.push(crate::game::engine::causes::Cause::FoodComa);
+        super::set_state_for_test(Some(s));
+    }
+
+    #[test]
+    fn pet_causes_do_not_toast() {
+        let _guard = crate::game::lock_test_state();
+        install_with_cause(true, 0);
+        super::cycle();
+        assert_eq!(super::diary().len(), 1, "the diary has it");
+        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::None);
+        super::set_state_for_test(None);
+    }
+
+    #[test]
+    fn player_causes_toast_in_demo() {
+        let _guard = crate::game::lock_test_state();
+        install_with_cause(true, 30);
+        super::cycle();
+        assert_eq!(super::diary().len(), 1);
+        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::Cause);
+        super::set_state_for_test(None);
+    }
+
+    #[test]
+    fn causes_toast_with_demo_off() {
+        let _guard = crate::game::lock_test_state();
+        install_with_cause(false, 0);
+        super::cycle();
+        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::Cause);
+        super::set_state_for_test(None);
     }
 
     #[test]

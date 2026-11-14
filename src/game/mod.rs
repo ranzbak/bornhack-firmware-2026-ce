@@ -434,7 +434,7 @@ pub fn status_wants_full_refresh() -> bool {
             && (TOAST.is_active()
                 || lifecycle::display_anim() == engine::DisplayAnim::Gone
                 || (!lifecycle::is_hibernating()
-                    && lifecycle::status_line().is_some_and(|l| l.danger))
+                    && lifecycle::pet_line().is_some_and(|l| l.red()))
                 || battle_view::wants_full_refresh()))
 }
 
@@ -638,12 +638,42 @@ pub fn draw_status_line<D>(
 where
     D: DrawTarget<Color = TriColor>,
 {
-    let text = line.text();
     let style = if line.danger {
         crate::ui::TEXT_BOLD_RED
     } else {
         crate::ui::TEXT_BOLD_BLACK
     };
+    draw_pet_text(display, line.text().as_str(), style)
+}
+
+/// Draw what is written under the pet: the status line, the demo pet's note
+/// (bold black) or its help line (bold red), all at the same place on the
+/// same white backing.
+pub fn draw_pet_line<D>(display: &mut D, line: &engine::PetLine) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    match line {
+        engine::PetLine::Status(l) => draw_status_line(display, l),
+        engine::PetLine::Note(n) => {
+            draw_pet_text(display, n.text(), crate::ui::TEXT_BOLD_BLACK)
+        }
+        engine::PetLine::Help => draw_pet_text(display, HELP_TEXT, crate::ui::TEXT_BOLD_RED),
+    }
+}
+
+/// The help line's words (the demo pet is below `DEMO_HELP_HEALTH_PCT`).
+const HELP_TEXT: &str = "could use a hand";
+
+/// Bottom-centred `text` (lines split on `\n`), each on its own backing.
+fn draw_pet_text<D>(
+    display: &mut D,
+    text: &str,
+    style: embedded_graphics::mono_font::MonoTextStyle<'static, TriColor>,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
     let count = text.split('\n').count() as i32;
     for (i, row) in text.split('\n').enumerate() {
         let base = STATUS_BASE_Y - (count - 1 - i as i32) * STATUS_LINE_H;
@@ -662,6 +692,34 @@ where
         )?;
     }
     Ok(())
+}
+
+/// The battery bar's top edge (embassy builds draw the bar).
+const BATTERY_Y: i32 = 2;
+
+/// The demo mark: a 4 x 5 `D`, bit 3 the left column.
+const DEMO_MARK: [u8; 5] = [0b1110, 0b1001, 0b1001, 0b1001, 0b1110];
+
+/// Where the demo mark sits: under the battery bar, with a 2 px gap.
+const DEMO_MARK_POS: Point = Point::new(
+    152 - crate::BATTERY_BAR_W as i32,
+    BATTERY_Y + crate::BATTERY_BAR_H as i32 + 2,
+);
+
+/// Draw the demo mark in black. Black only, so plain delta refreshes keep it.
+fn draw_demo_mark<D>(display: &mut D) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = TriColor>,
+{
+    let on = DEMO_MARK.iter().enumerate().flat_map(|(row, bits)| {
+        (0..4).filter(move |col| bits & (0b1000 >> col) != 0).map(move |col| {
+            Pixel(
+                DEMO_MARK_POS + Point::new(col, row as i32),
+                BLACK,
+            )
+        })
+    });
+    display.draw_iter(on)
 }
 
 /// The action feedback toast, shown until the first render at or after
@@ -802,7 +860,7 @@ where
     {
         let pct = crate::fw::battery::read_pct();
         let x = 152 - crate::BATTERY_BAR_W as i32;
-        crate::draw_battery_bar(display, x, 2, pct)?;
+        crate::draw_battery_bar(display, x, BATTERY_Y, pct)?;
     }
 
     // HAX balance — top-right, below the battery icon + menu icon row
@@ -960,9 +1018,14 @@ where
     // The status line replaces the old corner banners. A hibernating pet is
     // frozen, so it says nothing.
     if !lifecycle::is_hibernating()
-        && let Some(line) = lifecycle::status_line()
+        && let Some(line) = lifecycle::pet_line()
     {
-        draw_status_line(display, &line)?;
+        draw_pet_line(display, &line)?;
+    }
+
+    // The demo mark shows on the main game screen only: not under a menu.
+    if lifecycle::is_demo() && !modal::is_open() {
+        draw_demo_mark(display)?;
     }
 
     modal::draw_modal(display)?;
@@ -1571,5 +1634,158 @@ mod tests {
         assert!(!super::live_view_open());
         assert_eq!(super::next_ui_deadline_tick(), u32::MAX);
         crate::game::lifecycle::set_state_for_test(None);
+    }
+
+    use super::{BATTERY_Y, DEMO_MARK, DEMO_MARK_POS, draw_demo_mark, draw_pet_line};
+    use crate::game::engine::PetLine;
+    use crate::game::{nim, pet_select, tictactoe};
+
+    fn demo_pet() -> crate::game::engine::GameState {
+        let mut s = active_test_pet();
+        s.demo.on = true;
+        s
+    }
+
+    /// Whether the 4 x 5 mark box on `c` holds exactly `DEMO_MARK` in black.
+    fn mark_drawn(c: &Canvas) -> bool {
+        (0..5).all(|row| {
+            (0..4).all(|col| {
+                let on = DEMO_MARK[row] & (0b1000 >> col) != 0;
+                let want = if on { BLACK } else { crate::WHITE };
+                c.get(DEMO_MARK_POS.x + col as i32, DEMO_MARK_POS.y + row as i32) == want
+            })
+        })
+    }
+
+    #[test]
+    fn demo_mark_sits_under_the_battery() {
+        let x = 152 - crate::BATTERY_BAR_W as i32;
+        let mut bar = Canvas::new();
+        crate::draw_battery_bar(&mut bar, x, BATTERY_Y, 100).unwrap();
+        let mut c = Canvas::new();
+        crate::draw_battery_bar(&mut c, x, BATTERY_Y, 100).unwrap();
+        draw_demo_mark(&mut c).unwrap();
+        assert_eq!(DEMO_MARK_POS, Point::new(148, 19));
+        assert!(mark_drawn(&c));
+        for yy in BATTERY_Y..BATTERY_Y + crate::BATTERY_BAR_H as i32 {
+            for xx in x..x + 4 {
+                assert_eq!(c.get(xx, yy), bar.get(xx, yy), "bar pixel ({xx},{yy})");
+            }
+        }
+        for yy in 17..=18 {
+            for xx in 148..=151 {
+                assert_eq!(c.get(xx, yy), crate::WHITE, "gap ({xx},{yy})");
+            }
+        }
+        let mut m = Canvas::new();
+        draw_demo_mark(&mut m).unwrap();
+        assert!(!m.any(rows(0, 151), RED));
+        let blacks = (0..152)
+            .flat_map(|yy| (0..152).map(move |xx| (xx, yy)))
+            .filter(|&(xx, yy)| m.get(xx, yy) == BLACK);
+        for (xx, yy) in blacks {
+            let drink = (120..146).contains(&xx) && (4..30).contains(&yy);
+            assert!(!drink, "({xx},{yy}) in the Drink icon box");
+            assert!(xx >= 148, "({xx},{yy}) closer than 2 columns to Drink");
+            assert!(yy < 33, "({xx},{yy}) reaches the HAX row or the separator");
+        }
+    }
+
+    #[test]
+    fn demo_mark_only_on_the_game_screen() {
+        let _guard = super::lock_test_state();
+        let _clear = ClearPet;
+        let nav = crate::game::nav::get_nav();
+        crate::game::lifecycle::set_state_for_test(Some(demo_pet()));
+        let mut c = Canvas::new();
+        super::draw_screen_game(&mut c, nav).unwrap();
+        assert!(mark_drawn(&c), "demo on");
+
+        crate::game::lifecycle::set_state_for_test(Some(active_test_pet()));
+        let mut c = Canvas::new();
+        super::draw_screen_game(&mut c, nav).unwrap();
+        let box_px = Rectangle::new(DEMO_MARK_POS, Size::new(4, 5));
+        assert!(!c.any(box_px, BLACK) && !c.any(box_px, RED), "demo off");
+
+        crate::game::lifecycle::set_state_for_test(Some(demo_pet()));
+        super::modal::open(super::modal::ModalKind::Stats);
+        let mut c = Canvas::new();
+        super::draw_screen_game(&mut c, nav).unwrap();
+        assert!(!mark_drawn(&c), "a menu is open");
+        super::modal::close();
+
+        // The views `draw_screen_game` itself hands the screen to; the others
+        // (diary, realm, ...) are dispatched before it is called at all.
+        for (name, open, close) in [
+            ("tictactoe", tictactoe::open as fn(), tictactoe::close as fn()),
+            ("nim", nim::open, nim::close),
+            ("pet_select", pet_select::open_new_game, pet_select::close),
+        ] {
+            open();
+            let mut c = Canvas::new();
+            super::draw_screen_game(&mut c, nav).unwrap();
+            assert!(!mark_drawn(&c), "{name} is up");
+            close();
+        }
+
+        let mut gone = demo_pet();
+        gone.phase = crate::game::engine::Phase::Gone;
+        crate::game::lifecycle::set_state_for_test(Some(gone));
+        let mut c = Canvas::new();
+        super::draw_screen_game(&mut c, nav).unwrap();
+        assert!(!mark_drawn(&c), "a gone pet");
+    }
+
+    #[test]
+    fn demo_hides_hax() {
+        let _guard = super::lock_test_state();
+        let _clear = ClearPet;
+        let nav = crate::game::nav::get_nav();
+        let hax_rows = |c: &Canvas| {
+            (33..=46)
+                .flat_map(|yy| (110..152).map(move |xx| (xx, yy)))
+                .map(|(xx, yy)| c.get(xx, yy))
+                .collect::<Vec<_>>()
+        };
+        let draw = |demo: bool, money: bool| {
+            let mut s = active_test_pet();
+            s.money_enabled = money;
+            s.money = 50;
+            s.demo.on = demo;
+            crate::game::lifecycle::set_state_for_test(Some(s));
+            let mut c = Canvas::new();
+            super::draw_screen_game(&mut c, nav).unwrap();
+            hax_rows(&c)
+        };
+        let none = draw(false, false);
+        assert_ne!(draw(false, true), none, "HAX shows when live");
+        assert_eq!(draw(true, true), none, "demo hides it");
+    }
+
+    #[test]
+    fn help_line_is_red() {
+        let mut c = Canvas::new();
+        draw_pet_line(&mut c, &PetLine::Help).unwrap();
+        assert!(c.any(rows(96, 110), RED));
+        let mut n = Canvas::new();
+        let note = crate::game::engine::demo::Note::Washing;
+        draw_pet_line(&mut n, &PetLine::Note(note)).unwrap();
+        assert!(n.any(rows(96, 110), BLACK));
+        assert!(!n.any(rows(0, 151), RED), "a note is black");
+    }
+
+    #[test]
+    fn full_refresh_follows_the_pet_line() {
+        use crate::game::engine::needs::P;
+        let _guard = super::lock_test_state();
+        let _clear = ClearPet;
+        let mut s = demo_pet();
+        s.fullness = (2 * P) as u16;
+        crate::game::lifecycle::set_state_for_test(Some(s));
+        assert!(!super::status_wants_full_refresh(), "no red in demo");
+        let mut s = demo_pet();
+        s.health = (30 * P) as u16;
+        crate::game::lifecycle::set_state_for_test(Some(s));
+        assert!(super::status_wants_full_refresh(), "the help line is red");
     }
 }

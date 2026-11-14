@@ -525,10 +525,17 @@ fn decide_row(s: &GameState) -> Option<(Choice, Row)> {
     None
 }
 
+/// Whether the demo pet's help line is up: demo, and health at or below
+/// `DEMO_HELP_HEALTH_PCT`. The solver's line is `health > HELP` (`sig`), so
+/// the flip lands on a segment boundary.
+pub fn needs_help(s: &GameState) -> bool {
+    s.demo.on && (s.health as i32) <= lvl(t::DEMO_HELP_HEALTH_PCT())
+}
+
 /// The demo part of the wake view: bit 0 a choice is waiting, bit 1 the
-/// help line (Task 6 sets it).
+/// help line.
 pub fn wake_view(s: &GameState) -> u8 {
-    decide(s).is_some() as u8
+    (decide(s).is_some() as u8) | ((needs_help(s) as u8) << 1)
 }
 
 // ---------------------------------------------------------------------------

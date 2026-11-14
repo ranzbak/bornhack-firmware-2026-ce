@@ -2076,3 +2076,121 @@ mod animated {
         assert!(feeding > 0, "never saw it feeding in {wakes} wakes");
     }
 }
+
+mod calm {
+    use super::policy::{at, pct, quiet};
+    use bornhack_aegg::game::engine::demo::{self, Choice, Note};
+    use bornhack_aegg::game::engine::needs::P;
+    use bornhack_aegg::game::engine::status::status_line;
+    use bornhack_aegg::game::engine::thresholds as t;
+    use bornhack_aegg::game::engine::{
+        DrinkKind, FoodKind, GameState, PetLine, TICKS_PER_MINUTE,
+    };
+
+    #[test]
+    fn the_demo_line_is_never_red() {
+        let mut s = quiet();
+        s.fullness = pct(2);
+        assert!(!status_line(&s).danger, "demo");
+        assert!(!s.pet_line().red());
+        s.demo.on = false;
+        assert!(status_line(&s).danger, "demo off");
+        assert!(s.pet_line().red());
+    }
+
+    #[test]
+    fn help_line_below_35() {
+        let mut s = quiet();
+        s.health = pct(34);
+        assert_eq!(s.pet_line(), PetLine::Help);
+        assert!(s.pet_line().red());
+        s.health = pct(36);
+        assert!(!matches!(s.pet_line(), PetLine::Help));
+        assert!(!s.pet_line().red());
+        // Demo off: never a help line, whatever the health.
+        s.health = pct(34);
+        s.demo.on = false;
+        assert!(matches!(s.pet_line(), PetLine::Status(_)));
+    }
+
+    #[test]
+    fn a_note_ends_when_the_line_changes() {
+        let mut s = quiet();
+        at(&mut s, 12 * 60);
+        demo::act(&mut s, Choice::Eat(FoodKind::Apple));
+        while s.active_action.is_some() {
+            s.update(s.last_update_tick + s.action_ticks_remaining as u32);
+        }
+        assert_eq!(s.pet_line(), PetLine::Note(Note::Ate(FoodKind::Apple)));
+        let before = status_line(&s);
+        let mut m = 0;
+        while status_line(&s) == before {
+            m += 1;
+            assert!(m < 1500, "the line never changed");
+            s.update(s.last_update_tick + TICKS_PER_MINUTE);
+        }
+        assert!(matches!(s.pet_line(), PetLine::Status(_)), "{:?}", s.pet_line());
+    }
+
+    #[test]
+    fn a_note_never_shows_with_demo_off() {
+        let mut s = quiet();
+        at(&mut s, 12 * 60);
+        demo::act(&mut s, Choice::Eat(FoodKind::Apple));
+        s.update(s.last_update_tick + s.action_ticks_remaining as u32);
+        assert!(matches!(s.pet_line(), PetLine::Note(_)), "{:?}", s.pet_line());
+        s.demo.on = false;
+        assert!(matches!(s.pet_line(), PetLine::Status(_)), "{:?}", s.pet_line());
+        assert!(s.note().is_some(), "the stale note is still held");
+    }
+
+    #[test]
+    fn help_flip_is_a_wake() {
+        let mut s = quiet();
+        s.health = (t::DEMO_HELP_HEALTH_PCT() as i32 * P + P / 2) as u16;
+        s.demo.pause_min = 90;
+        s.fullness = 0;
+        s.hydration = 0;
+        s.dirt = pct(99);
+        let t0 = s.last_update_tick;
+        assert_ne!(s.pet_line(), PetLine::Help);
+        let mut c = s.clone();
+        let first = (1..=120u32)
+            .find(|&m| {
+                c.update(t0 + m * TICKS_PER_MINUTE);
+                c.pet_line() == PetLine::Help
+            })
+            .expect("health falls below the help line");
+        let wake = s.next_wake_tick();
+        assert_eq!(wake, t0 + first * TICKS_PER_MINUTE, "first {first}");
+        // The help bit alone: with the other lines unchanged the wake is exact.
+        let bit = |g: &GameState| demo::wake_view(g) & 2;
+        let mut d = s.clone();
+        d.update(t0 + (first - 1) * TICKS_PER_MINUTE);
+        assert_eq!(bit(&d), 0);
+        d.update(t0 + first * TICKS_PER_MINUTE);
+        assert_eq!(bit(&d), 2);
+    }
+
+    #[test]
+    fn notes_fit() {
+        let mut all = vec![
+            Note::OneTooMany,
+            Note::Napping,
+            Note::OffToBed,
+            Note::UpAndAbout,
+            Note::Washing,
+            Note::Played,
+            Note::Rested,
+            Note::Medicine,
+            Note::Insulin,
+            Note::Rehab,
+        ];
+        all.extend(FoodKind::ALL.map(Note::Ate));
+        all.extend(DrinkKind::ALL.map(Note::Drank));
+        for n in all {
+            assert!(n.text().len() <= 21, "{:?}: {}", n, n.text());
+        }
+        assert!(Note::OneTooMany.text().ends_with("..."));
+    }
+}

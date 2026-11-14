@@ -357,7 +357,8 @@ pub fn status_line(s: &GameState) -> StatusLine {
     StatusLine {
         first: first.unwrap_or_else(|| info_word(s)),
         second,
-        danger: danger.is_some(),
+        // A demo pet shows no red: the word stays, the alarm goes.
+        danger: danger.is_some() && !s.demo.on,
     }
 }
 

@@ -1147,6 +1147,26 @@ type Visible = (
     u8,
 );
 
+/// What is written under the pet.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PetLine {
+    Status(status::StatusLine),
+    Note(demo::Note),
+    Help,
+}
+
+impl PetLine {
+    /// Whether the line is drawn in red: the help line, or a status line in
+    /// danger.
+    pub fn red(&self) -> bool {
+        match self {
+            PetLine::Help => true,
+            PetLine::Status(l) => l.danger,
+            PetLine::Note(_) => false,
+        }
+    }
+}
+
 impl GameState {
     /// Tell the engine the local time `local_min` (0..1440) at `now_tick`.
     /// Stores the minute at `last_update_tick`, where the next update starts.
@@ -1155,6 +1175,21 @@ impl GameState {
         let day = demo::MINUTES_PER_DAY as u32;
         let ago = now_tick.saturating_sub(self.last_update_tick) / TICKS_PER_MINUTE % day;
         self.day_min = local_min.map(|m| ((m as u32 % day + day - ago) % day) as u16);
+    }
+
+    /// What sits under the pet: the help line when demo and health is low;
+    /// else the demo note while the status line still equals the one it was
+    /// taken on; else the status line. With demo off it is always the status
+    /// line, whatever note a pet action left behind.
+    pub fn pet_line(&self) -> PetLine {
+        let line = status::status_line(self);
+        if demo::needs_help(self) {
+            return PetLine::Help;
+        }
+        match self.note {
+            Some((n, at)) if self.demo.on && at == line => PetLine::Note(n),
+            _ => PetLine::Status(line),
+        }
     }
 
     /// Host test hook: what the demo pet last did.
