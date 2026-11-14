@@ -8,7 +8,11 @@
 
 // A price table row: the item as shown, its price in money mode, and what it
 // costs without money. Every price comes from the numbers dump.
-#let prow(label, item) = (label, price(item), [free])
+#let prow(label, item, hard: false) = if hard {
+  (label, price(item), price(item, hard: true))
+} else {
+  (label, price(item), [free])
+}
 
 // One box of a flow row.
 #let _step(title, sub, fill: white) = box(
