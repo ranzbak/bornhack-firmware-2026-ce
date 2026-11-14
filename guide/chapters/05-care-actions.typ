@@ -264,7 +264,7 @@ and gives fitness #sg("Play", "fit"). It also cuts a groggy spell by
 
 *#w("Only pets")* is free, takes #v("PLAY_DURATION") and costs energy
 #sg("OnlyPets", "energy") and mood #sg("OnlyPets", "mood"), for fun
-#sg("OnlyPets", "fun"). In money mode it also pays HAX: see @ch-money. It is
+#sg("OnlyPets", "fun"). It also pays HAX: see @ch-money. It is
 never held back by the price, so a broke pet can still work its way out.
 Refused when #w("asleep"), #w("injured") or #w("too tired") (energy under
 #v("ENERGY_LO_PCT")).

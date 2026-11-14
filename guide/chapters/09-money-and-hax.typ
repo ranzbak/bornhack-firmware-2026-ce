@@ -65,7 +65,7 @@ Without money, every row is free.
     ..prow(w("Exercise now"), "Exercise"),
     ..prow(w("Wash"), "Wash"),
     ..prow(w("Relax"), "Relax"),
-    ..prow(w("Only pets"), "OnlyPets"),
+    ..(w("Only pets"), price("OnlyPets"), [no row]),
   ))
 ]
 
