@@ -38,6 +38,19 @@ def git(*args):
     return subprocess.check_output(["git", *args], text=True).strip()
 
 
+def with_dirty(commit, porcelain):
+    """`git describe --dirty` ignores untracked files. Output of
+    `git status --porcelain -- guide` also makes the build dirty."""
+    if porcelain.strip() and not commit.endswith("-dirty"):
+        return commit + "-dirty"
+    return commit
+
+
+def build_commit():
+    return with_dirty(git("describe", "--always", "--dirty=-dirty", "--abbrev=12"),
+                      git("status", "--porcelain", "--", "guide"))
+
+
 def typst_args(commit):
     return ["--root", ".", "--font-path", "guide/fonts", "--ignore-system-fonts",
             "--input", f"commit={commit}"]
@@ -252,7 +265,7 @@ def main():
     a = ap.parse_args()
     os.chdir(git("rev-parse", "--show-toplevel"))
     check_typst()
-    commit = git("describe", "--always", "--dirty=-dirty", "--abbrev=12")
+    commit = build_commit()
     if not a.pdf_only:
         if not a.stage:
             shutil.rmtree("guide/build", ignore_errors=True)

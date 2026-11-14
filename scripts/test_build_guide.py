@@ -34,6 +34,11 @@ class GuideChecks(unittest.TestCase):
         self.assertEqual(len(bg.check_colophon("abc-dirty", "abc")), 1)
         self.assertEqual(bg.check_colophon("abc", "abc"), [])
 
+    def test_untracked_guide_file_makes_build_dirty(self):
+        self.assertEqual(bg.with_dirty("abc", "?? guide/chapters/new.typ\n"), "abc-dirty")
+        self.assertEqual(bg.with_dirty("abc-dirty", " M guide/main.typ\n"), "abc-dirty")
+        self.assertEqual(bg.with_dirty("abc", ""), "abc")
+
     def test_marks_must_exist_on_the_badge(self):
         errs = bg.check_marks({"hungy", "hungry"}, [{"text": "hungry", "group": "status"}])
         self.assertEqual(errs, ["marked word not on the badge: hungy"])
