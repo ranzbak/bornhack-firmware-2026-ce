@@ -28,7 +28,9 @@
           mkShell rec {
             packages = [
               gnumake
-              # scripts/build_guide.py needs the typst version in guide/typst-version
+              # scripts/build_guide.py needs the typst version in guide/typst-version.
+              # This is nixpkgs' typst, which may differ; the build then reports
+              # the version it found and the one it needs (not pinned here).
               typst
               python3
             ];
