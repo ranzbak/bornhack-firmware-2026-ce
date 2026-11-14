@@ -304,7 +304,10 @@ pub struct GameState {
     /// What the demo pet last did by itself, and the status line it was taken
     /// on (the note shows while the line is unchanged). Transient; the
     /// player's next action clears it.
-    pub note: Option<(demo::Note, status::StatusLine)>,
+    pub(crate) note: Option<(demo::Note, status::StatusLine)>,
+    /// The player's running action woke the pet grumpy: no thanks for it.
+    /// Transient.
+    pub(crate) woke_grumpy: bool,
 
     // Diabetes — permanent once triggered by sustained overweight.
     pub diabetic: bool,
@@ -478,6 +481,7 @@ impl GameState {
             soft_dry: false,
             self_care: false,
             note: None,
+            woke_grumpy: false,
 
             diabetic: false,
             diabetes_min: 0,
@@ -714,28 +718,40 @@ impl GameState {
         };
         let player_in_demo = self.demo.on && !self.self_care;
         let penalty_before = regime::mood_penalty(self);
-        let before = core::mem::take(&mut self.causes);
-        // A refusal leaves the pet untouched. The starters already turned
-        // those away and needs do not age during an action (R23), so it only
-        // happens when the saved state changed under a running action (a
-        // reboot mid-action).
-        if let Err(_refusal) = doses::apply(self, action) {
-            #[cfg(feature = "embassy-core")]
-            defmt::warn!("action dose refused at animation end: {}", _refusal);
-        }
-        let warned = self.causes.iter().any(|c| c.is_warning());
+        let ((), queued) = self.queued_by(|s| {
+            // A refusal leaves the pet untouched. The starters already turned
+            // those away and needs do not age during an action (R23), so it
+            // only happens when the saved state changed under a running
+            // action (a reboot mid-action).
+            if let Err(_refusal) = doses::apply(s, action) {
+                #[cfg(feature = "embassy-core")]
+                defmt::warn!("action dose refused at animation end: {}", _refusal);
+            }
+        });
+        let warned = queued.iter().any(|c| c.is_warning());
         let helped = regime::mood_penalty(self) < penalty_before;
-        let mut queue = before;
-        for &cause in self.causes.iter() {
-            queue.push(cause);
+        // The player's care helped, nothing went wrong with it and it did
+        // not wake the pet grumpy.
+        if player_in_demo && helped && !warned && !self.woke_grumpy {
+            self.causes.push(causes::Cause::Thanks);
         }
-        // The player's care helped and nothing went wrong with it.
-        if player_in_demo && helped && !warned {
-            queue.push(causes::Cause::Thanks);
-        }
-        self.causes = queue;
+        self.woke_grumpy = false;
         self.active_food = None;
         self.active_drink = None;
+    }
+
+    /// Run `f` and hand back the causes it queued, apart from what was
+    /// waiting already (those stay queued, in order, with the new ones).
+    pub(crate) fn queued_by<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> (R, causes::CauseQueue) {
+        let mut all = core::mem::take(&mut self.causes);
+        let out = f(self);
+        let queued = core::mem::take(&mut self.causes);
+        all.extend_from(&queued);
+        self.causes = all;
+        (out, queued)
     }
 
     /// The player did something: the demo pet's policy waits and its last
@@ -778,7 +794,8 @@ impl GameState {
         {
             return false; // can't afford — action rejected
         }
-        advance::wake(self, !self.self_care);
+        let ((), woke) = self.queued_by(|s| advance::wake(s, !s.self_care));
+        self.woke_grumpy = woke.iter().any(|&c| c == causes::Cause::Grumpy);
         if let Some(price) = price {
             self.spend_money(price);
         }
@@ -945,9 +962,7 @@ impl GameState {
             return None;
         }
         // The dose lands exactly as `consume_action_ticks` lands it.
-        if let Some(done) = c.active_action.take() {
-            let _ = doses::apply(&mut c, done);
-        }
+        c.finish_action();
         c.causes.iter().copied().find(|cause| cause.is_warning())
     }
 
@@ -969,6 +984,9 @@ impl GameState {
         }
         let mut c = self.clone();
         c.causes = causes::CauseQueue::default();
+        // The forecast covers the night only: the demo policy does not act
+        // inside the clone.
+        c.demo.on = false;
         if !c.sleep() {
             return None;
         }
@@ -1115,6 +1133,12 @@ impl GameState {
         let day = demo::MINUTES_PER_DAY as u32;
         let ago = now_tick.saturating_sub(self.last_update_tick) / TICKS_PER_MINUTE % day;
         self.day_min = local_min.map(|m| ((m as u32 % day + day - ago) % day) as u16);
+    }
+
+    /// Host test hook: what the demo pet last did.
+    #[cfg(feature = "simulator")]
+    pub fn note(&self) -> Option<(demo::Note, status::StatusLine)> {
+        self.note
     }
 
     /// Host test hook: the demo pet's dice.
@@ -1366,7 +1390,14 @@ impl GameState {
         // minutes, so one tick is enough and the wakes do not repeat.
         demo::settle(&mut c);
         if demo::decide(&c).is_some() {
-            return (self.last_update_tick + 1).min(cap);
+            // A cap hit (`run` gave up with a choice left) waits for the next
+            // whole minute; it never wakes tick by tick.
+            let wake = if demo::run_capped(&mut c.clone()).1 {
+                self.last_update_tick + TICKS_PER_MINUTE - self.tick_rem as u32
+            } else {
+                self.last_update_tick + 1
+            };
+            return wake.min(cap);
         }
         let start = c.visible();
         // Look as far ahead as the cap allows, and no further.

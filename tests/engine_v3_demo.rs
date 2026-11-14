@@ -276,6 +276,22 @@ mod tunables {
     }
 
     #[test]
+    fn a_wake_line_above_the_eat_line_is_clamped() {
+        let ok = validate(&with("DEMO_WAKE_FULL_PCT", 60), &Thresholds::CLASSIC);
+        assert_eq!(ok.DEMO_WAKE_FULL_PCT, ok.DEMO_EDGE_FULL_PCT);
+        let mut t = Thresholds::CLASSIC;
+        t.DEMO_SOFT_FUN_PCT = 90;
+        t.DEMO_WIRED_FUN_PCT = 30;
+        let ok = validate(&t, &Thresholds::CLASSIC);
+        assert!(ok.DEMO_SOFT_FUN_PCT < ok.DEMO_WIRED_FUN_PCT);
+        // Ordered values pass untouched.
+        assert_eq!(
+            validate(&Thresholds::CASUAL, &Thresholds::CASUAL),
+            Thresholds::CASUAL
+        );
+    }
+
+    #[test]
     fn bad_orders_and_sums_fall_back() {
         let mut t = Thresholds::CLASSIC;
         t.DEMO_PICK_APPLE_PCT = 90;
@@ -1358,11 +1374,11 @@ mod wake {
                 // counts as a change, whether or not the screen differs.
                 let first = (1..=LOOKAHEAD_MIN).find(|m| {
                     c.update(t0 + m * TICKS_PER_MINUTE);
-                    obs(&c) != o || c.note.is_some()
+                    obs(&c) != o || c.note().is_some()
                 });
                 if first.is_some() {
                     timed += 1;
-                    if c.note.is_some() {
+                    if c.note().is_some() {
                         flipped += 1;
                     }
                 }
@@ -1394,12 +1410,12 @@ mod acts {
     use super::policy::{at, lcg, pct, quiet, random_demo};
     use bornhack_aegg::game::engine::causes::Cause;
     use bornhack_aegg::game::engine::demo::{self, Choice, Note};
+    use bornhack_aegg::game::engine::sim;
     use bornhack_aegg::game::engine::thresholds as t;
-    use bornhack_aegg::game::engine::{
-        DrinkKind, FoodKind, GameState, TICKS_PER_MINUTE,
-    };
+    use bornhack_aegg::game::engine::{DrinkKind, FoodKind, GameState, TICKS_PER_MINUTE};
 
     const HOUR: u16 = 60;
+    const SIX_HOURS: u32 = 6 * 60;
 
     fn minutes(s: &mut GameState, n: u32) {
         s.update(s.last_update_tick + n * TICKS_PER_MINUTE);
@@ -1413,6 +1429,8 @@ mod acts {
     #[test]
     fn the_pet_eats_when_hungry() {
         let mut s = quiet();
+        s.money_enabled = true;
+        s.money = 100;
         at(&mut s, 12 * HOUR);
         s.fullness = pct(19);
         let (money, age) = (s.money, s.age_ticks);
@@ -1420,7 +1438,11 @@ mod acts {
         assert!(s.fullness > pct(19), "fullness {}", s.fullness);
         assert_eq!(s.money, money);
         assert_eq!(s.active_action, None);
-        assert!(matches!(s.note, Some((Note::Ate(FoodKind::Pizza), _))), "{:?}", s.note);
+        assert!(
+            matches!(s.note(), Some((Note::Ate(FoodKind::Pizza), _))),
+            "{:?}",
+            s.note()
+        );
         assert_eq!(s.age_ticks - age, TICKS_PER_MINUTE);
     }
 
@@ -1428,15 +1450,26 @@ mod acts {
     fn the_pet_uses_the_real_doses() {
         for food in FoodKind::ALL {
             let mut a = quiet();
+            a.money_enabled = true;
+            a.money = 100;
             a.fullness = pct(30);
             let mut b = a.clone();
             demo::act(&mut a, Choice::Eat(food));
+            assert_eq!(a.money, 100, "the pet's care is free: {food:?}");
             assert!(b.feed(food));
             finish(&mut b);
             let needs = |s: &GameState| {
                 (
-                    s.fullness, s.hydration, s.energy, s.fun, s.dirt, s.booze, s.weight,
-                    s.health, s.fitness, s.mood,
+                    s.fullness,
+                    s.hydration,
+                    s.energy,
+                    s.fun,
+                    s.dirt,
+                    s.booze,
+                    s.weight,
+                    s.health,
+                    s.fitness,
+                    s.mood,
                 )
             };
             assert_eq!(needs(&a), needs(&b), "{food:?}");
@@ -1447,7 +1480,10 @@ mod acts {
         demo::act(&mut a, Choice::Drink(DrinkKind::Cola));
         assert!(b.drink(DrinkKind::Cola));
         finish(&mut b);
-        assert_eq!((a.hydration, a.energy, a.mood), (b.hydration, b.energy, b.mood));
+        assert_eq!(
+            (a.hydration, a.energy, a.mood),
+            (b.hydration, b.energy, b.mood)
+        );
     }
 
     #[test]
@@ -1460,13 +1496,13 @@ mod acts {
         assert_eq!(s.demo.pause_min, t::DEMO_PAUSE_MIN());
         finish(&mut s);
         minutes(&mut s, t::DEMO_PAUSE_MIN() as u32 - 1);
-        assert_eq!(s.note, None, "the pet acted during the pause");
+        assert_eq!(s.note(), None, "the pet acted during the pause");
         assert_eq!(s.demo.pause_min, 1);
         minutes(&mut s, 2);
         assert!(
-            matches!(s.note, Some((Note::Ate(_) | Note::Drank(_), _))),
+            matches!(s.note(), Some((Note::Ate(_) | Note::Drank(_), _))),
             "{:?}",
-            s.note
+            s.note()
         );
     }
 
@@ -1475,9 +1511,9 @@ mod acts {
         let mut s = quiet();
         s.dirt = pct(80);
         demo::act(&mut s, Choice::Wash);
-        assert!(matches!(s.note, Some((Note::Washing, _))));
+        assert!(matches!(s.note(), Some((Note::Washing, _))));
         assert!(s.play());
-        assert_eq!(s.note, None);
+        assert_eq!(s.note(), None);
         let mut s = quiet();
         s.dirt = pct(80);
         demo::act(&mut s, Choice::Wash);
@@ -1505,6 +1541,30 @@ mod acts {
     }
 
     #[test]
+    fn no_thanks_for_a_grumpy_wake() {
+        let mut s = quiet();
+        s.is_sleeping = true;
+        s.energy = pct(5);
+        s.fullness = pct(10);
+        assert!(s.feed(FoodKind::Apple));
+        finish(&mut s);
+        let got: Vec<Cause> = s.take_causes().iter().copied().collect();
+        assert!(got.contains(&Cause::Grumpy), "{got:?}");
+        assert!(!got.contains(&Cause::Thanks), "{got:?}");
+    }
+
+    #[test]
+    fn the_sleep_forecast_leaves_the_policy_out() {
+        let mut s = quiet();
+        s.energy = pct(30);
+        s.fullness = pct(25);
+        let mut off = s.clone();
+        off.demo.on = false;
+        assert_eq!(s.preview_sleep(), off.preview_sleep());
+        assert!(s.demo.on);
+    }
+
+    #[test]
     fn the_pets_own_acts_get_no_thanks() {
         let mut s = quiet();
         s.fullness = pct(10);
@@ -1515,7 +1575,10 @@ mod acts {
     #[test]
     fn thanks_is_a_cause_but_not_a_warning() {
         assert!(!Cause::Thanks.is_warning());
-        assert_eq!((Cause::Thanks.what(), Cause::Thanks.why()), ("thanks!", "that helped"));
+        assert_eq!(
+            (Cause::Thanks.what(), Cause::Thanks.why()),
+            ("thanks!", "that helped")
+        );
         assert_eq!(Cause::unpack(Cause::Thanks.pack()), Some(Cause::Thanks));
         assert!(Cause::all().any(|c| c == Cause::Thanks));
     }
@@ -1530,7 +1593,7 @@ mod acts {
         assert!(!s.is_sleeping);
         assert_eq!(s.mood, mood);
         assert!(!s.take_causes().iter().any(|&c| c == Cause::Grumpy));
-        assert!(matches!(s.note, Some((Note::UpAndAbout, _))));
+        assert!(matches!(s.note(), Some((Note::UpAndAbout, _))));
     }
 
     #[test]
@@ -1542,10 +1605,11 @@ mod acts {
             let n = demo::run(&mut s);
             assert!(n <= demo::MAX_ACTS_PER_BOUNDARY, "state {i}: {n} acts");
             assert!(
-                demo::decide(&s).is_none() || n == demo::MAX_ACTS_PER_BOUNDARY,
+                demo::decide(&s).is_none(),
                 "state {i}: {:?} still pending after {n} acts",
                 demo::decide(&s)
             );
+            assert!(n < demo::MAX_ACTS_PER_BOUNDARY, "state {i} hit the cap");
             acted += (n > 0) as u32;
         }
         assert!(acted > 1000, "only {acted} of 2000 states acted");
@@ -1561,7 +1625,7 @@ mod acts {
         assert_eq!(demo::decide(&s), Some(Choice::Nap));
         assert_eq!(demo::run(&mut s), 1);
         assert!(s.is_sleeping);
-        assert!(matches!(s.note, Some((Note::Napping, _))));
+        assert!(matches!(s.note(), Some((Note::Napping, _))));
         assert!(s.demo.clock_armed);
         let base = t::DEMO_NAP_BASE_MIN();
         assert!(
@@ -1575,7 +1639,7 @@ mod acts {
         assert!(s.is_sleeping);
         minutes(&mut s, 1);
         assert!(!s.is_sleeping);
-        assert!(matches!(s.note, Some((Note::UpAndAbout, _))));
+        assert!(matches!(s.note(), Some((Note::UpAndAbout, _))));
     }
 
     #[test]
@@ -1585,7 +1649,11 @@ mod acts {
         s.demo.soft_armed = true;
         s.demo.next_min = 0;
         demo::run(&mut s);
-        assert!(matches!(s.note, Some((Note::Drank(_), _))), "{:?}", s.note);
+        assert!(
+            matches!(s.note(), Some((Note::Drank(_), _))),
+            "{:?}",
+            s.note()
+        );
         // Drunk, the pet is no longer thirsty: the delay is not running.
         assert!(!s.demo.soft_armed);
     }
@@ -1601,7 +1669,11 @@ mod acts {
         let wake = s.next_wake_tick();
         assert_eq!(wake, t0 + 10 * TICKS_PER_MINUTE);
         s.update(wake);
-        assert!(matches!(s.note, Some((Note::Drank(_), _))), "{:?}", s.note);
+        assert!(
+            matches!(s.note(), Some((Note::Drank(_), _))),
+            "{:?}",
+            s.note()
+        );
         assert!(s.next_wake_tick() > wake + 1);
     }
 
@@ -1614,19 +1686,33 @@ mod acts {
         s.fullness = pct(12);
         s.hydration = pct(18);
         s.demo.whim_min = 0;
-        let (mut wakes, mut ones, mut longest) = (0u32, 0u32, 0u32);
-        let end = s.last_update_tick + 6 * 60 * TICKS_PER_MINUTE;
+        let (mut wakes, mut ones) = (0u32, 0u32);
+        let acts0 = sim::self_care_acts();
+        let end = s.last_update_tick + SIX_HOURS * TICKS_PER_MINUTE;
         while s.last_update_tick < end {
             let before = s.last_update_tick;
             let wake = s.next_wake_tick();
             assert!(wake > before);
             s.update(wake);
             wakes += 1;
-            ones = if wake - before == 1 { ones + 1 } else { 0 };
-            longest = longest.max(ones);
+            if wake - before == 1 {
+                // Only the first wake, for the choice the setup left pending.
+                ones += 1;
+            } else {
+                assert_eq!(s.tick_rem, 0, "wake {wakes} fell off a whole minute");
+            }
         }
-        assert!(longest <= 1, "{longest} single-tick wakes in a row");
-        assert!(wakes < 6 * 60 / 2, "{wakes} wakes in 6 hours");
+        assert_eq!(ones, 1, "single-tick wakes");
+        // The shortest delay between the pet's own soft acts is the soft
+        // delay (the urgent rows are state edges, a few an hour at most), so
+        // that many wakes is the bound.
+        let shortest = t::DEMO_REACT_BASE_MIN().min(t::DEMO_DRY_BASE_MIN()) as u32;
+        let acts = sim::self_care_acts() - acts0;
+        assert!(acts > 0);
+        assert!(
+            wakes <= SIX_HOURS / shortest,
+            "{wakes} wakes in 6 hours, {acts} acts"
+        );
     }
 
     #[test]
@@ -1656,7 +1742,9 @@ mod acts {
 
 mod split {
     use super::policy::{lcg, random_demo};
-    use bornhack_aegg::game::engine::{GameState, TICKS_PER_MINUTE};
+    use bornhack_aegg::game::engine::sim;
+    use bornhack_aegg::game::engine::thresholds as t;
+    use bornhack_aegg::game::engine::{DrinkKind, GameState, TICKS_PER_MINUTE};
 
     const DAY_TICKS: u32 = 1440 * TICKS_PER_MINUTE;
 
@@ -1666,33 +1754,84 @@ mod split {
             s.age_ticks,
             s.tick_rem,
             s.demo_rng(),
-            format!("{:?}", s.note),
+            format!("{:?}", s.note()),
         )
     }
 
+    /// Run `start` to `t0 + span` with updates cut at `cuts` (sorted). A
+    /// player drink lands at `player` (a tick offset, also a cut).
+    fn drive(start: &GameState, span: u32, cuts: &[u32], player: Option<u32>) -> GameState {
+        let t0 = start.last_update_tick;
+        let mut s = start.clone();
+        let mut did = false;
+        for &c in cuts.iter().chain(&[span]) {
+            if let Some(p) = player
+                && !did
+                && c >= p
+            {
+                s.update(t0 + p);
+                s.drink(DrinkKind::Water);
+                did = true;
+            }
+            s.update(t0 + c);
+        }
+        s
+    }
+
+    /// The ticks where the pet acts, found by stepping a copy a minute at a
+    /// time (a test oracle: the engine itself never steps).
+    fn act_ticks(start: &GameState, span: u32, player: Option<u32>) -> Vec<u32> {
+        let mut s = start.clone();
+        let t0 = s.last_update_tick;
+        let mut found = Vec::new();
+        let mut at = 0;
+        while at < span {
+            let next = (at + TICKS_PER_MINUTE).min(span);
+            if player.is_some_and(|p| (at..next).contains(&p)) {
+                s.update(t0 + player.unwrap());
+                s.drink(DrinkKind::Water);
+            }
+            let before = sim::self_care_acts();
+            s.update(t0 + next);
+            if sim::self_care_acts() != before {
+                found.push(next);
+            }
+            at = next;
+        }
+        found
+    }
+
     /// The pet's own acts are events of the engine: one long update and the
-    /// same span cut anywhere leave the same pet, the same dice and the same
-    /// note.
+    /// same span cut anywhere (at random, and at, just before and just after
+    /// each act and each pause expiry) leave the same pet, the same dice and
+    /// the same note.
     #[test]
     fn demo_update_is_split_invariant() {
-        let mut acted = 0;
+        let (mut acted, mut cut_at_acts) = (0, 0);
         for seed in 0..200u64 {
             let mut next = lcg(1000 + seed);
             let start = random_demo(&mut next);
             let span = 3 * DAY_TICKS;
             let mut cuts: Vec<u32> = (0..50).map(|_| next(span as u64 - 1) as u32 + 1).collect();
-            cuts.sort_unstable();
-            let t0 = start.last_update_tick;
-            let mut whole = start.clone();
-            whole.update(t0 + span);
-            let mut split = start.clone();
-            for c in cuts {
-                split.update(t0 + c);
+            // Every fourth pet is helped by the player somewhere in the span.
+            let player = (seed % 4 == 0).then(|| next(span as u64 - 1) as u32 + 1);
+            if let Some(p) = player {
+                let pause = t::DEMO_PAUSE_MIN() as u32 * TICKS_PER_MINUTE;
+                cuts.extend([p, p + pause - 1, p + pause, p + pause + 1]);
             }
-            split.update(t0 + span);
+            for tick in act_ticks(&start, span, player) {
+                cuts.extend([tick.saturating_sub(1), tick, tick + 1]);
+                cut_at_acts += 1;
+            }
+            cuts.retain(|&c| c > 0 && c < span);
+            cuts.sort_unstable();
+            cuts.dedup();
+            let whole = drive(&start, span, &[], player);
+            let split = drive(&start, span, &cuts, player);
             assert_eq!(snapshot(&whole), snapshot(&split), "seed {seed}");
-            acted += whole.note.is_some() as u32;
+            acted += whole.note().is_some() as u32;
         }
         assert!(acted > 100, "only {acted} of 200 pets acted");
+        assert!(cut_at_acts > 500, "only {cut_at_acts} act points were cut");
     }
 }

@@ -295,7 +295,8 @@ fn roll(s: &GameState) -> u32 {
     s.demo_rng % PERCENT
 }
 
-/// A draw of 0..=`n` that steps the dice (`settle` only).
+/// A draw of 0..=`n` that steps the dice (`settle` and `act`: every delay
+/// they set is a draw).
 fn draw(s: &mut GameState, n: u32) -> u32 {
     let v = s.demo_rng % (n + 1);
     s.demo_rng = crate::platform::xorshift32(s.demo_rng);
@@ -617,12 +618,45 @@ fn action_of(c: Choice) -> Option<(Action, Option<FoodKind>, Option<DrinkKind>)>
 
 /// Take `c` now, through the real starter and dose, and leave a note. The act
 /// takes no ticks: the dose lands in the same minute. It steps the dice once,
-/// plus once for each delay it draws.
+/// plus once for each delay it draws. Called directly, it re-arms the delays
+/// of the row `decide` would pick for `c` (none when `decide` disagrees).
 pub fn act(s: &mut GameState, c: Choice) {
     let row = decide_row(s).filter(|&(d, _)| d == c).map(|(_, r)| r);
+    act_row(s, c, row);
+}
+
+/// `act`, with the row that chose `c` already known.
+fn act_row(s: &mut GameState, c: Choice, row: Option<Row>) {
     s.self_care = true;
     // The causes this act queues, apart from what was waiting already.
-    let waiting = core::mem::take(&mut s.causes);
+    let (started, queued) = s.queued_by(|s| act_start(s, c));
+    debug_assert!(started, "{c:?} was refused");
+    match row {
+        Some(Row::Whim) => {
+            let wait = t::DEMO_WHIM_BASE_MIN() as u32 + draw(s, t::DEMO_WHIM_SPREAD_MIN() as u32);
+            s.demo.whim_min = wait.min(u16::MAX as u32) as u16;
+        }
+        Some(Row::Soft) => {
+            s.demo.soft_armed = false;
+            s.demo.next_min = 0;
+        }
+        Some(Row::Urgent) | None => {}
+    }
+    s.demo_rng = crate::platform::xorshift32(s.demo_rng);
+    let too_many = queued.iter().any(|&q| q == Cause::OneTooMany);
+    let note = if too_many {
+        Note::OneTooMany
+    } else {
+        note_for(c)
+    };
+    s.note = Some((note, super::status::status_line(s)));
+    s.self_care = false;
+    #[cfg(feature = "simulator")]
+    super::sim::note_self_care();
+}
+
+/// Start `c` through its starter and land the dose of a timed one.
+fn act_start(s: &mut GameState, c: Choice) -> bool {
     let started = match (action_of(c), c) {
         (Some((a, food, drink)), _) => s.start_choice(a, food, drink),
         (None, Choice::Sleep) => s.sleep(),
@@ -641,51 +675,34 @@ pub fn act(s: &mut GameState, c: Choice) {
         // `action_of` answers every other choice.
         (None, _) => false,
     };
-    debug_assert!(started, "{c:?} was refused");
     if action_of(c).is_some() {
         s.finish_action();
     }
-    match row {
-        Some(Row::Whim) => {
-            let wait = t::DEMO_WHIM_BASE_MIN() as u32 + draw(s, t::DEMO_WHIM_SPREAD_MIN() as u32);
-            s.demo.whim_min = wait.min(u16::MAX as u32) as u16;
-        }
-        Some(Row::Soft) => {
-            s.demo.soft_armed = false;
-            s.demo.next_min = 0;
-        }
-        Some(Row::Urgent) | None => {}
-    }
-    s.demo_rng = crate::platform::xorshift32(s.demo_rng);
-    let too_many = s.causes.iter().any(|&q| q == Cause::OneTooMany);
-    let mut queue = waiting;
-    for &cause in s.causes.iter() {
-        queue.push(cause);
-    }
-    s.causes = queue;
-    let note = if too_many {
-        Note::OneTooMany
-    } else {
-        note_for(c)
-    };
-    s.note = Some((note, super::status::status_line(s)));
-    s.self_care = false;
-    #[cfg(feature = "simulator")]
-    super::sim::note_self_care();
+    started
 }
 
 /// Everything the pet does at a boundary: settle, decide, act, until nothing
 /// is left to do (at most `MAX_ACTS_PER_BOUNDARY` acts). Returns the acts.
+/// Hitting the cap with a choice left is a policy bug (a cycle), so it
+/// asserts; `thresholds::validate` keeps the lines from making one.
 pub fn run(s: &mut GameState) -> u8 {
+    let (acts, capped) = run_capped(s);
+    debug_assert!(!capped, "the demo policy cycles: {acts} acts and more to do");
+    acts
+}
+
+/// `run`, also saying whether the cap stopped it with a choice left.
+pub fn run_capped(s: &mut GameState) -> (u8, bool) {
     let mut acts = 0;
     loop {
         settle(s);
-        match decide(s) {
-            Some(c) if acts < MAX_ACTS_PER_BOUNDARY => {
-                act(s, c);
+        match decide_row(s) {
+            Some((c, row)) if acts < MAX_ACTS_PER_BOUNDARY => {
+                act_row(s, c, Some(row));
                 acts += 1;
             }
-            _ => return acts,
+            Some(_) => return (acts, true),
+            None => return (acts, false),
         }
     }
 }

@@ -1984,6 +1984,16 @@ pub fn validate(t: &Thresholds, preset: &Thresholds) -> Thresholds {
         r.DEMO_ON_HEALTH_PCT = preset.DEMO_ON_HEALTH_PCT;
         r.DEMO_MED_HEALTH_PCT = preset.DEMO_MED_HEALTH_PCT;
     }
+    // A sleeper wakes below `WAKE_FULL` and an awake pet eats below
+    // `EDGE_FULL`: a wake line above the eat line would put a tired pet to
+    // bed and wake it again at one boundary, for ever. Clamp, never reorder.
+    r.DEMO_WAKE_FULL_PCT = r.DEMO_WAKE_FULL_PCT.min(r.DEMO_EDGE_FULL_PCT);
+    // Play below the soft fun line, relax above the wired line: the soft line
+    // stays under the wired one, or the two undo each other.
+    if r.DEMO_SOFT_FUN_PCT >= r.DEMO_WIRED_FUN_PCT {
+        r.DEMO_SOFT_FUN_PCT = preset.DEMO_SOFT_FUN_PCT;
+        r.DEMO_WIRED_FUN_PCT = preset.DEMO_WIRED_FUN_PCT;
+    }
     if r.DEMO_RICH_FOOD_PCT >= r.DEMO_LIGHT_FOOD_PCT {
         r.DEMO_RICH_FOOD_PCT = preset.DEMO_RICH_FOOD_PCT;
         r.DEMO_LIGHT_FOOD_PCT = preset.DEMO_LIGHT_FOOD_PCT;

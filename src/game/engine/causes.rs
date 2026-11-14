@@ -253,6 +253,13 @@ impl CauseQueue {
         self.0.iter()
     }
 
+    /// Queue every cause of `other`, in order.
+    pub fn extend_from(&mut self, other: &CauseQueue) {
+        for &c in other.iter() {
+            self.push(c);
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
