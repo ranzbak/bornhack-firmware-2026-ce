@@ -383,9 +383,126 @@ still counts. Exercise also shortens a hangover by
 #tip[Check the status line first. A #w("sore") pet is close to the strain
 line, one session from a torn muscle. Relax lowers strain.]
 
+== Demo mode
+
+Sometimes nobody can look after the pet: the badge is in a bag, or on a
+table at a party. *Demo mode* makes the pet look after itself. It eats when it
+is hungry, drinks when it is thirsty, goes to bed and gets up, washes, plays
+and takes its medicine. You can still step in whenever you like.
+
+#grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
+  [
+    The switches live in the Main screen, #w("Bornagotchi") menu. Two rows
+    sit between #w("Mode:") and the separator above #w("Reset Pet"). The
+    first switches demo mode. The second picks how the pet cares. A refused
+    press changes nothing, and the label already says why.
+  ],
+  hero-pic("idle"))
+
+#word-table(see: false,
+  table.header([*The row says*], [*What it means*]),
+  [#w("Demo mode: off")], [Demo is off. Press to switch it on.],
+  [#w("Demo mode: on")], [Demo is on. Press to switch it off. This always
+    works, and the pet goes back to your care.],
+  [#w("Demo: fix me first")], [Refused: the pet is leaving, or its health is
+    under #v("DEMO_ON_HEALTH_PCT"). The reason has its own words,
+    #w("fix me first"). Care for the pet, then try again.],
+  [#w("Demo: frozen")], [Refused: the pet is hibernating. Defrost it first.],
+  [#w("Demo: no pet")], [Refused: there is no pet, or it is still an egg, or
+    it has left.],
+  [#w("Demo care: instant")], [The pet does its care in the same minute. A note
+    says what it did. This is the default.],
+  [#w("Demo care: animated")], [The pet runs the real action, with its
+    animation, just as you would.],
+)
+
+#warn[*Animated care costs battery.* Every frame of an animation is a screen
+refresh, and the e-paper refresh is what the badge pays for. A demo pet in
+animated care refreshes the screen several times as often as one in instant
+care. The row works while demo is off too, and the badge remembers it.]
+
+=== What the demo pet does
+
+The pet acts in this order. The first line that fits and that the menu would
+accept wins. It never takes a row the menu would refuse.
+
++ *Medicine it needs.* Insulin when it is diabetic, and rehab when it is
+  dependent.
++ *Edges.* It eats under #v("DEMO_EDGE_FULL_PCT") fullness, drinks water under
+  #v("DEMO_EDGE_WATER_PCT") hydration, goes to bed under
+  #v("DEMO_EDGE_ENERGY_PCT") energy, and takes medicine when its health is at
+  or under #v("DEMO_MED_HEALTH_PCT"). It does these at once.
++ *Bed and getting up*, from the clock, below.
++ *Too wired.* Fun over #v("DEMO_WIRED_FUN_PCT"): it relaxes.
++ *Soft wants.* A softer need waits a little before the pet acts:
+  #v("DEMO_REACT_BASE_MIN") plus up to #v("DEMO_REACT_SPREAD_MIN"). The pet
+  drinks under #v("DEMO_SOFT_WATER_PCT") hydration, eats under
+  #v("DEMO_SOFT_FULL_PCT"), washes over #v("DEMO_SOFT_DIRT_PCT") dirt, and
+  plays under #v("DEMO_SOFT_FUN_PCT") fun, if its energy is over
+  #v("DEMO_PLAY_ENERGY_PCT") and it is not injured. A play is sometimes a
+  mini-game it finishes by itself. These lines drift a little with the pet's
+  mood of the day, up to #v("DEMO_LAZY_MAX_PCT"), rolled again every
+  #v("DEMO_LAZY_MIN").
++ *Whims.* Now and then, every #v("DEMO_WHIM_BASE_MIN") plus up to
+  #v("DEMO_WHIM_SPREAD_MIN"), a pet with low booze fancies a beer or a cake,
+  and a tired, bored one takes a nap of #v("DEMO_NAP_BASE_MIN") plus up to
+  #v("DEMO_NAP_SPREAD_MIN").
+
+A heavy pet picks light food, and a thin one picks rich food, so the pet
+does not run to fat or to bones. A drunk pet asks for water first, after
+only #v("DEMO_DRY_BASE_MIN") plus up to #v("DEMO_DRY_SPREAD_MIN"). Casual
+moves these lines a little. @ch-hackers shows how to read them all.
+
+=== Sleep
+
+*With the clock.* A pet that knows the time goes to bed from
+#v("DEMO_BED_AT_MIN") on the clock, plus up to #v("DEMO_BED_SPREAD_MIN"). It
+gets up from #v("DEMO_UP_AT_MIN"), plus up to #v("DEMO_UP_SPREAD_MIN"). A pet
+that is awake at night and tired goes to bed at once. One that is rested
+stays up until the next evening.
+
+*Without the clock.* While the badge's clock is not set, the pet keeps its
+own rhythm. It goes to bed when its energy is under #v("DEMO_SOFT_ENERGY_PCT"),
+and a sleeper whose energy has reached #v("DEMO_RISE_ENERGY_PCT") gets up
+after #v("DEMO_RISE_BASE_MIN") plus up to #v("DEMO_RISE_SPREAD_MIN"). Set the
+clock and the pet switches to it by itself.
+
+In both cases a sleeper whose fullness has fallen under
+#v("DEMO_WAKE_FULL_PCT") wakes up to eat.
+
+=== What it never does, and what is held
+
+- *It never leaves.* Its health stops falling at #v("DEMO_HEALTH_FLOOR_PCT"),
+  and the pet does not go to the Unicorn Realm.
+- *It never exercises.* Its fitness stops falling at
+  #v("DEMO_FIT_FLOOR_PCT"). Under #v("CEILING_FIT_STEP3_PCT") it asks you with
+  #w("I feel stiff.") (see "Demo mode on the game screen" in @ch-reading). Only you can answer that.
+- *It never drinks wine or whiskey.* It also never becomes dependent. A pet
+  that already is gets its rehab.
+- *It never rings.* No red status line, no buzz, no alarm (@ch-reading).
+- *HAX are paused.* The balance is hidden, nothing costs HAX, nothing pays,
+  not even #w("Only pets"). The balance is not lost. It comes back when demo
+  goes off.
+
+A floor holds a stat where it stands, it does not lift it. The pet's own
+care lifts it.
+
+=== You step in
+
+Your action pauses the pet for #v("DEMO_PAUSE_MIN"). A good one earns a
+#w("thanks!") toast with #w("that helped") under it. "Demo mode on the game screen" in @ch-reading has the
+screen side: the note, the mark and the red #w("could use a hand").
+
+#tip[Demo mode is a nanny, not a hero. Leave the pet alone for a day, and it
+will be well. Leave it alone for a month, and it will still not run
+marathons.]
+
+#pagebreak(weak: true)
 == Every refusal
 
-When a row says no, it uses one of these words.
+#grid(columns: (1fr, auto), column-gutter: 5mm, align: bottom,
+  [When a row says no, it uses one of these words.],
+  hero-pic("idle"))
 
 #tbl((auto, 1fr),
   table.header([*The badge says*], [*What it means*]),
@@ -394,6 +511,7 @@ When a row says no, it uses one of these words.
   [#w("busy")], [Another action is still running.],
   [#w("can't afford")], [Money mode: the price is more than the balance.],
   [#w("hibernating")], [The pet is frozen. Only #w("Defrost") and the Stats views work. Hibernate on a frozen pet says it too.],
+  [#w("fix me first")], [The demo row, when the pet is leaving or its health is under #v("DEMO_ON_HEALTH_PCT"). It shows as #w("Demo: fix me first").],
   [#w("injured")], [Play now, Exercise or #w("Only pets") on an injured pet.],
   [#w("no need")], [Wake up on an awake pet. Defrost on a pet that is not frozen. Insulin without diabetes. Rehab without dependence.],
   [#w("not thirsty")], [Water, when hydration is over #v("WATER_REFUSE_PCT").],

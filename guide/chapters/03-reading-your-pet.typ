@@ -74,6 +74,11 @@ fixed order, and the first one that fits wins:
 The whole line turns red, second word and all. The danger word always comes
 first.
 
+#tip[A pet in demo mode never shows a red status line. The danger word is
+still there, in black, but nothing turns red and nothing buzzes. The only
+red line a demo pet has is its call for help, in
+the last section of this chapter.]
+
 === The info words
 
 When nothing is wrong, the line shows one of five words. The badge tries
@@ -91,6 +96,11 @@ them in this order:
   screen("asleep", width: shot-m, caption: [Asleep.]))
 
 === Every status word
+
+#grid(columns: (1fr, auto), column-gutter: 5mm, align: bottom,
+  [Here is every word the line can show, what it says, and the chapter that
+  tells more.],
+  hero-pic("hungry"))
 
 #let row(word, means, see) = (w(word), means, see)
 #word-table(see: true,
@@ -152,6 +162,9 @@ Two more buzzes do not come from the status line. The diabetes and
 dependence alarms sound on *every boot*, unless the pet is hibernating.
 @ch-conditions tells the full story.
 
+A pet in demo mode is silent. It does not buzz for the status line, and it
+does not sound the two boot alarms either.
+
 To silence the game, go to the Main screen, then #w("Bornagotchi"). The
 second row is the mute switch. It reads #w("Mute (On)") while the game is
 muted and #w("Mute (Off)") while it is not. Muting silences the status
@@ -198,6 +211,9 @@ pet's name: #w("<name> says"). A pet with no name says
     - #w("Zzz...") when asleep, #w("I feel great!") when well rested, and
       #w("I'm happy!") when content.
     - A tired-out pet with nothing worse to say reads #w("I'm worn out!").
+    - #w("I feel stiff.") from a demo pet that is awake, has only an info word
+      to say, and has a fitness under #v("CEILING_FIT_STEP3_PCT"). The second
+      line then asks for exercise. the last section of this chapter has the story.
     - #w("*wobble*") for an egg, #w("...") for a pet that has left, and
       #w("Brrr, frozen!") for a hibernating one.
   ])
@@ -273,3 +289,70 @@ toast stays away. The cause still lands in the diary.
 
 #joke[Never mind. Nobody reads their own diary after a bad night. Your pet
 does not, either.]
+
+== Demo mode on the game screen
+
+In demo mode the pet looks after itself. @ch-care tells how to switch it on
+and what the pet does with its day. Here we only read the screen. A demo pet
+adds four things to it.
+
+#grid(columns: (auto, 1fr), column-gutter: 5mm, align: top,
+  stack(spacing: gap-s,
+    screen("demo-note", width: shot-m, caption: [A note, and the demo mark.]),
+    screen("demo-help", width: shot-m, caption: [The red call for help.])),
+  [
+    - *The demo mark.* A small black letter *D* sits under the battery meter
+      in the top corner. It shows on the game screen only. A menu or a
+      full-screen view, such as the diary, hides it. It is black, so it
+      never costs a full refresh.
+    - *The note.* When the pet has looked after itself, a one-line note
+      stands where the status line stands. It says what the pet did. It
+      stays while the status line is the same as it was when the pet acted.
+      When the status line changes, or when you do something yourself, the
+      status line is back.
+    - *The call for help.* When health is at or under
+      #v("DEMO_HELP_HEALTH_PCT"), the whole line reads #w("could use a hand")
+      in red. It beats the note and the status line. It goes when health is
+      back over the line.
+    - *The hint.* An awake demo pet that has nothing worse to say, and is not
+      fit, says #w("I feel stiff."). It asks for exercise, the one thing it
+      never does by itself.
+  ])
+
+=== Every note
+
+#word-table(see: false,
+  table.header([*The note*], [*What the pet did*]),
+  [#w("had an apple") #w("had a salad") #w("had some pizza")
+   #w("had a Frikandel spec") #w("had some cake")], [It ate that food.],
+  [#w("had some water") #w("had a cola") #w("fancied a beer")], [It drank.
+    Any beer reads #w("fancied a beer"), a thirsty one too.],
+  [#w("had some wine") #w("had a whiskey")], [The badge can word them. The pet
+    never reaches for them by itself, so you will not meet them.],
+  [#w("one too many...")], [A drink took its booze over the high line. It
+    stands in place of the drink note.],
+  [#w("napping")], [It lay down for a short sleep.],
+  [#w("off to bed")], [It went to bed.],
+  [#w("up and about")], [It got up.],
+  [#w("having a wash")], [It washed.],
+  [#w("had a play")], [It played, or finished a mini-game by itself.],
+  [#w("had a rest")], [It relaxed.],
+  [#w("took medicine")], [It healed itself.],
+  [#w("took insulin") #w("went to rehab")], [A diabetic pet took its insulin,
+    and a dependent one went to rehab.],
+)
+
+#tip[A note is a short story, not a log. Only the last thing the pet did is
+there. The diary (above) stays about what went wrong, and the pet's own
+acts do not go in it.]
+
+=== When you step in
+
+The pet does not mind help. Anything you do for it costs no HAX in demo mode, and
+the pet then leaves it alone for #v("DEMO_PAUSE_MIN"), so it does not undo
+what you did. Your action also wipes the note.
+
+If your care made things better, nothing went wrong with it, and it did not
+wake the pet grumpy, a toast thanks you: #w("thanks!") on the first line and
+#w("that helped") on the second. Only your help earns it. The pet's own
+causes stay quiet on the screen, and the diary keeps them.

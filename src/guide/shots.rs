@@ -14,7 +14,7 @@ use crate::game::engine::doses::{Reason, Refusal};
 use crate::game::engine::sim;
 use crate::game::engine::status::{Condition, Word};
 use crate::game::engine::thresholds::{HATCHING_TICKS, Mode, badge_preset};
-use crate::game::engine::{DebugPoke, DisplayAnim, FoodKind, PetKind};
+use crate::game::engine::{DebugPoke, DisplayAnim, FoodKind, PetKind, PetLine};
 use crate::game::modal::{self, ModalKind};
 use crate::game::stats_pages::Page;
 use crate::game::{
@@ -35,6 +35,8 @@ const TICK_MS: u64 = 10_000;
 const MAX_SKIPS: u32 = 1000;
 /// Length of one waiting skip, in minutes.
 const SKIP_MIN: u32 = 30;
+/// Minutes between two renewals of the player's help (under the 30 minute pause).
+const HOLD_OFF_MIN: u32 = 20;
 /// Most pizzas a shot feeds before a cause shows.
 const MAX_PIZZAS: u32 = 12;
 
@@ -221,6 +223,78 @@ fn wait_for_gone() {
 
 static GONE: &[Step] = &[Do(leaving), Do(wait_for_gone)];
 
+/// Demo mode on, with the pet in fair shape (the comfort poke ran first).
+fn demo_on() {
+    lifecycle::toggle_demo().unwrap_or_else(|why| panic!("demo refused: {}", why.text()));
+}
+
+fn is_note() -> bool {
+    matches!(lifecycle::pet_line(), Some(PetLine::Note(_)))
+}
+
+fn is_help() -> bool {
+    matches!(lifecycle::pet_line(), Some(PetLine::Help))
+}
+
+/// Let the demo pet go on a minute at a time until `done`.
+fn minutes_until(done: fn() -> bool) {
+    for _ in 0..MAX_SKIPS {
+        if done() {
+            return;
+        }
+        lifecycle::debug_skip_minutes(1);
+        let _ = lifecycle::cycle();
+    }
+    assert!(done(), "the demo pet never got there");
+}
+
+fn wait_for_note() {
+    minutes_until(is_note);
+}
+
+static DEMO_NOTE: &[Step] = &[
+    Do(content),
+    Do(demo_on),
+    Poke(DebugPoke::Hungry),
+    Do(wait_for_note),
+];
+
+fn demo_note() {
+    play(DEMO_NOTE);
+}
+
+/// A player's help pauses the demo pet for `DEMO_PAUSE_MIN` minutes. A
+/// finished mini-game is such help and costs the pet nothing, so the shot
+/// renews it just before it ends: the neglected pet is left to its troubles
+/// until its health drops under the help line.
+fn wait_for_help() {
+    let game = crate::game::engine::MiniGame::ALL[0];
+    for _ in 0..MAX_SKIPS {
+        if is_help() {
+            return;
+        }
+        lifecycle::award_inspiration(game, 0);
+        lifecycle::debug_skip_minutes(HOLD_OFF_MIN);
+        let _ = lifecycle::cycle();
+    }
+    assert!(is_help(), "the neglected pet never called for help");
+}
+
+static DEMO_HELP: &[Step] = &[
+    Do(content),
+    Do(demo_on),
+    Poke(DebugPoke::Injured),
+    Poke(DebugPoke::Drunk),
+    Poke(DebugPoke::Hungry),
+    Poke(DebugPoke::Thirsty),
+    Poke(DebugPoke::Dirty),
+    Do(wait_for_help),
+];
+
+fn demo_help() {
+    play(DEMO_HELP);
+}
+
 fn gone() {
     play(GONE);
 }
@@ -231,7 +305,7 @@ fn gone() {
 /// its place (the shots start with demo off).
 fn line() -> Option<crate::game::engine::status::StatusLine> {
     match lifecycle::pet_line()? {
-        crate::game::engine::PetLine::Status(l) => Some(l),
+        PetLine::Status(l) => Some(l),
         _ => None,
     }
 }
@@ -441,6 +515,12 @@ pub static SHOTS: &[Shot] = &[
     ),
     shot!("leaving", [Do(leaving)], is_leaving),
     shot!("gone", [Do(gone)], is_gone),
+    shot!("demo-note", [Do(demo_note)], || {
+        is_note() && lifecycle::is_demo()
+    }),
+    shot!("demo-help", [Do(demo_help)], || {
+        is_help() && lifecycle::is_demo()
+    }),
     shot!("debug-menu", [Do(debug_menu)], || menu_is(ModalKind::Debug)),
     shot!("engine-info", [Do(debug_menu), Press(Fire)], || {
         toast_is(Toast::DebugInfo)
