@@ -3,39 +3,12 @@ extern crate embedded_graphics as eg;
 extern crate embedded_graphics_simulator as simulator;
 
 use bornhack_aegg::menu::ButtonId;
-use bornhack_aegg::{TriColor, draw_graphics};
+use bornhack_aegg::draw_graphics;
+use bornhack_aegg::sim_support::{self, TriColorDisplay, install_pets_from_repo_cfg};
 use eg::pixelcolor::Rgb888;
 use eg::prelude::*;
 use embedded_graphics_simulator::sdl2::Keycode;
 use embedded_graphics_simulator::{OutputSettings, SimulatorDisplay, SimulatorEvent, Window};
-
-/// Adapter that translates TriColor draw calls to an Rgb888 SimulatorDisplay.
-struct TriColorDisplay<'a>(&'a mut SimulatorDisplay<Rgb888>);
-
-impl DrawTarget for TriColorDisplay<'_> {
-    type Color = TriColor;
-    type Error = core::convert::Infallible;
-
-    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Pixel<TriColor>>,
-    {
-        self.0
-            .draw_iter(
-                pixels
-                    .into_iter()
-                    .map(|Pixel(p, c)| Pixel(p, Rgb888::from(c))),
-            )
-            .unwrap();
-        Ok(())
-    }
-}
-
-impl OriginDimensions for TriColorDisplay<'_> {
-    fn size(&self) -> Size {
-        self.0.size()
-    }
-}
 
 /// Map SDL keycode to ButtonId.
 ///
@@ -55,22 +28,6 @@ fn key_to_button(k: Keycode) -> Option<ButtonId> {
         Keycode::E => Some(ButtonId::Execute),
         _ => None,
     }
-}
-
-/// The badge reads `PETS.CFG` off its FAT12 partition at boot; the simulator
-/// has no such partition, so it compiles the repo's copy in and installs the
-/// same roster from it. Not a fallback for the firmware — that deliberately
-/// has none — just the sim's stand-in for the USB volume, kept pointed at the
-/// one file so a pet added there shows up in both.
-#[cfg(feature = "game")]
-fn install_pets_from_repo_cfg() {
-    use bornhack_aegg::game::pet_registry::{self, MAX_PETS, PetDef};
-
-    const CFG: &[u8] = include_bytes!("../../assets/to-badge/PETS.CFG");
-
-    let mut pets: heapless::Vec<PetDef, MAX_PETS> = heapless::Vec::new();
-    bornhack_aegg::game::pets_cfg::parse(CFG, &mut pets);
-    pet_registry::install(&pets);
 }
 
 fn main() -> Result<(), core::convert::Infallible> {
@@ -93,6 +50,8 @@ fn main() -> Result<(), core::convert::Infallible> {
     let frame_period = Duration::from_millis(200);
     let mut next_frame = Instant::now() + frame_period;
     let mut need_redraw = true;
+    // F12 saves the live screen for the guide: how many have been saved.
+    let mut manual_shots = 0u32;
 
     'running: loop {
         let now = Instant::now();
@@ -124,6 +83,26 @@ fn main() -> Result<(), core::convert::Infallible> {
         for event in window.events() {
             match event {
                 SimulatorEvent::Quit => break 'running,
+                SimulatorEvent::KeyDown {
+                    keycode: Keycode::F12,
+                    ..
+                } => {
+                    let path = std::path::PathBuf::from(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/guide/build/screens"
+                    ))
+                    .join(format!("manual-{manual_shots}.png"));
+                    let saved = std::fs::create_dir_all(path.parent().unwrap())
+                        .map_err(|e| e.to_string())
+                        .and_then(|()| sim_support::save_png(&display, &path));
+                    match saved {
+                        Ok(()) => {
+                            println!("saved {}", path.display());
+                            manual_shots += 1;
+                        }
+                        Err(e) => eprintln!("F12: {e}"),
+                    }
+                }
                 SimulatorEvent::KeyDown { keycode, .. } => {
                     if let Some(btn) = key_to_button(keycode) {
                         handle_button(btn);

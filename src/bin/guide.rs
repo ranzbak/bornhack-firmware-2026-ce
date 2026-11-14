@@ -1,12 +1,14 @@
 //! Host-only helper for the player's guide:
 //!   `guide data --preset classic|casual --out FILE`
 //!   `guide words --out FILE`
+//!   `guide shots`                      (one shot name per line)
+//!   `guide shot NAME --out DIR`        (writes DIR/NAME.png)
+//!   `guide sprites --out DIR`          (PNGs and DIR/roster.json)
 use bornhack_aegg::game::engine::thresholds::Mode;
 use bornhack_aegg::guide::data::dump;
 use bornhack_aegg::guide::json::J;
 
-const USAGE: &str =
-    "usage: guide data --preset classic|casual --out FILE\n       guide words --out FILE";
+const USAGE: &str = "usage: guide data --preset classic|casual --out FILE\n       guide words --out FILE\n       guide shots\n       guide shot NAME --out DIR\n       guide sprites --out DIR";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -32,6 +34,27 @@ fn main() {
             };
             let Some(out) = out else { usage() };
             (dump(mode), out.to_string())
+        }
+        ["shots"] => {
+            for shot in bornhack_aegg::guide::shots::SHOTS {
+                println!("{}", shot.name);
+            }
+            return;
+        }
+        ["shot", name, "--out", dir] => {
+            match bornhack_aegg::guide::shots::run(name, std::path::Path::new(dir)) {
+                Ok(s) => println!("{name} {}x{} non_white={}", s.w, s.h, s.non_white),
+                Err(e) => {
+                    eprintln!("guide: {e}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
+        ["sprites", "--out", dir] => {
+            let dir = std::path::Path::new(dir);
+            let roster = bornhack_aegg::guide::sprites::export(dir);
+            (roster, dir.join("roster.json").to_string_lossy().into_owned())
         }
         ["words", "--out", out] => (bornhack_aegg::guide::words::dump(), out.to_string()),
         _ => usage(),

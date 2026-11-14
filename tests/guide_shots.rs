@@ -1,0 +1,92 @@
+//! The guide's screens and sprites (`guide shots`, `guide shot`, `guide sprites`).
+//! Each shot runs in its own process: the game's state is global.
+use std::path::PathBuf;
+use std::process::{Command, Output};
+
+use bornhack_aegg::sim_support::PNG_SCALE;
+
+/// The screen's side in pixels.
+const SCREEN: u32 = 152;
+
+fn guide(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_guide"))
+        .args(args)
+        .output()
+        .expect("run the guide bin")
+}
+
+fn out_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("guide_shots_{}_{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn text(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+#[test]
+fn every_shot_reaches_its_state() {
+    let listed = guide(&["shots"]);
+    assert!(listed.status.success(), "guide shots failed");
+    let names = text(&listed);
+    let names: Vec<&str> = names.lines().collect();
+    assert_eq!(names.len(), bornhack_aegg::guide::shots::SHOTS.len());
+    assert!(names.len() >= 30, "only {} shots", names.len());
+    let dir = out_dir("shots");
+    let side = SCREEN * PNG_SCALE;
+    for name in names {
+        let o = guide(&["shot", name, "--out", dir.to_str().unwrap()]);
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(o.status.success(), "shot {name} failed: {err}");
+        let line = text(&o);
+        let rest = line
+            .trim()
+            .strip_prefix(&format!("{name} {side}x{side} non_white="))
+            .unwrap_or_else(|| panic!("shot {name}: unexpected output {line:?}"));
+        let n: usize = rest.parse().expect("non_white is a number");
+        assert!(n > 0, "shot {name} is blank");
+        assert!(dir.join(format!("{name}.png")).exists(), "{name}.png missing");
+    }
+}
+
+#[test]
+fn a_failed_expectation_names_the_shot() {
+    let o = guide(&["shot", "no-such-shot", "--out", out_dir("bad").to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("no-such-shot"));
+}
+
+#[test]
+fn sprites_cover_the_roster_without_sponsors() {
+    let dir = out_dir("sprites");
+    let o = guide(&["sprites", "--out", dir.to_str().unwrap()]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let json = std::fs::read_to_string(dir.join("roster.json")).expect("roster.json");
+    let cfg = include_str!("../assets/to-badge/PETS.CFG");
+    let prefixes: Vec<u8> = cfg
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .filter_map(|l| l.split('=').next()?.trim().parse().ok())
+        .collect();
+    assert!(prefixes.len() >= 5);
+    for p in prefixes {
+        let hex = format!("{p:02X}");
+        if p == 3 || p == 4 {
+            assert!(!json.contains(&format!("\"prefix\":\"{hex}\"")), "{hex} listed");
+            continue;
+        }
+        assert!(json.contains(&format!("\"prefix\":\"{hex}\"")), "pet {hex} missing");
+        assert!(
+            dir.join(format!("{hex}-idle-0.png")).exists(),
+            "{hex} has no idle frame"
+        );
+    }
+    assert!(json.contains("\"hero\":{\"name\":\"Bob\""));
+    assert!(dir.join("start.png").exists());
+    for f in std::fs::read_dir(&dir).unwrap() {
+        let n = f.unwrap().file_name().into_string().unwrap();
+        assert!(!n.starts_with("03") && !n.starts_with("04"), "sponsor/icon art {n}");
+    }
+}

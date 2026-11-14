@@ -65,6 +65,9 @@ pub struct Hint {
 /// Widest line of the popover body, in columns.
 const COLS: usize = 18;
 
+/// The worn-out pet's line 1 (the guide lists it as a template word).
+pub const WORN_OUT_LINE: &str = "I'm worn out!";
+
 /// Line 1: the pet names its state.
 pub fn subject_line(subject: Subject) -> &'static str {
     match subject {
@@ -99,7 +102,7 @@ pub fn subject_line(subject: Subject) -> &'static str {
             Word::WellRested => "I feel great!",
             Word::Content => "I'm happy!",
         },
-        Subject::WornOut => "I'm worn out!",
+        Subject::WornOut => WORN_OUT_LINE,
         Subject::Egg => "*wobble*",
         Subject::Gone => "...",
         Subject::Hibernating => "Brrr, frozen!",

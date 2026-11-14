@@ -108,6 +108,24 @@ pub fn is_active() -> bool {
     ACTIVE.load(Ordering::Relaxed)
 }
 
+/// The two phases of the screen (host-only, for the guide's shot checks).
+#[cfg(any(test, feature = "simulator"))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Phase {
+    Pet,
+    Money,
+}
+
+/// Which phase is showing. Host-only, for the guide's shot checks.
+#[cfg(any(test, feature = "simulator"))]
+pub fn phase() -> Phase {
+    if PHASE.load(Ordering::Relaxed) == PHASE_MONEY {
+        Phase::Money
+    } else {
+        Phase::Pet
+    }
+}
+
 /// Open the pet selection screen for a brand new game.
 pub fn open_new_game() {
     SELECTION.store(0, Ordering::Relaxed);

@@ -29,6 +29,37 @@
   [#metadata(t) <gw>]
 }
 
+// The sprite roster (guide/build/sprites/roster.json, made by `guide sprites`).
+// A missing file or key fails the compile.
+#let roster = json("/guide/build/sprites/roster.json")
+
+// A simulator screen in a bezel frame. `name` is a shot of `guide shots`.
+#let screen(name, width: 46mm, caption: none) = {
+  let img = image("/guide/build/screens/" + name + ".png", width: width, scaling: "pixelated")
+  let framed = box(
+    stroke: 2.5pt + ink,
+    inset: 3pt,
+    fill: rgb("#6d6a63"),
+    box(stroke: 1pt + ink, img),
+  )
+  if caption == none {
+    framed
+  } else {
+    box(width: width + 12pt, align(center, stack(spacing: 3pt, framed, text(size: 8pt, caption))))
+  }
+}
+
+// One frame of a pet animation. `pet` is a prefix as in roster.json ("00",
+// "05", ...) or "hero". `anim` is a name from roster.json's anims.
+#let sprite(pet, anim, frame: 0, width: auto) = {
+  let prefix = if pet == "hero" { roster.hero.prefix } else { pet }
+  image(
+    "/guide/build/sprites/" + prefix + "-" + anim + "-" + str(frame) + ".png",
+    width: width,
+    scaling: "pixelated",
+  )
+}
+
 // Pixel heart drawn from rectangles (no sprite needed).
 #let pixel-heart(size: 6pt, color: rgb("#c0392b")) = {
   let rows = (

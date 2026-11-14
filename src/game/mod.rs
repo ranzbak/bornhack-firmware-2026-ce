@@ -522,6 +522,15 @@ pub fn show_cause(c: engine::causes::Cause) {
     raise_toast(Toast::Cause);
 }
 
+/// The toast that is up now, if any (host-only, for the guide's shot checks).
+#[cfg(any(test, feature = "simulator"))]
+pub fn current_toast() -> Option<Toast> {
+    TOAST
+        .is_active()
+        .then(|| Toast::from_u8(TOAST_MSG.load(Ordering::Relaxed)))
+        .filter(|t| *t != Toast::None)
+}
+
 /// The toast that is up now.
 #[cfg(test)]
 pub(crate) fn current_toast_for_test() -> Toast {

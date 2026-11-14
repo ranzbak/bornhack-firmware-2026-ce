@@ -749,6 +749,39 @@ pub fn is_open() -> bool {
     MODAL_KIND.load(Ordering::Relaxed) != 0
 }
 
+/// The menu that is open (`ModalKind::None` when none is). Host-only, for the
+/// guide's shot checks.
+#[cfg(any(test, feature = "simulator"))]
+pub fn open_kind() -> ModalKind {
+    ModalKind::from_u8(MODAL_KIND.load(Ordering::Relaxed))
+}
+
+/// Whether the hint view is showing. Host-only, for the guide's shot checks.
+#[cfg(any(test, feature = "simulator"))]
+pub fn hint_view_open() -> bool {
+    HINT_VIEW.load(Ordering::Relaxed)
+}
+
+/// Whether the stats bars are showing. Host-only, for the guide's shot checks.
+#[cfg(any(test, feature = "simulator"))]
+pub fn stats_view_open() -> bool {
+    STATS_VIEW.load(Ordering::Relaxed)
+}
+
+/// How many rows of the open menu carry the risk mark now. Host-only, for the
+/// guide's shot checks (the mark is drawn, not typed).
+#[cfg(any(test, feature = "simulator"))]
+pub fn risk_row_count() -> usize {
+    let Some(stats) = super::lifecycle::cycle() else {
+        return 0;
+    };
+    open_kind()
+        .items()
+        .iter()
+        .filter(|item| item.risk(&stats).is_some())
+        .count()
+}
+
 // ── Cursor navigation
 // ─────────────────────────────────────────────────────────
 

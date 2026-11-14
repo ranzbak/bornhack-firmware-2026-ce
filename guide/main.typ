@@ -12,6 +12,13 @@ in later tasks.
 An egg on this badge hatches after #v("HATCHING_TICKS"). A hungry pet
 shows the word #w("hungry") under its picture.
 
+#align(center, grid(
+  columns: 2,
+  column-gutter: 6mm,
+  screen("content"),
+  sprite("hero", "idle", width: 46mm),
+))
+
 #align(center, pixel-heart(size: 8pt))
 
 #finish()

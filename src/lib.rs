@@ -104,6 +104,8 @@ pub mod display_flush;
 pub mod evict_table;
 #[cfg(feature = "simulator")]
 pub mod guide;
+#[cfg(feature = "simulator")]
+pub mod sim_support;
 pub mod hex;
 pub mod menu;
 pub mod lut_file;

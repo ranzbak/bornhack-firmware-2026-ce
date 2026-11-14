@@ -15,10 +15,12 @@ use std::sync::OnceLock;
 use super::json::J;
 use crate::game::engine::causes::Cause;
 use crate::game::engine::doses::Reason;
-use crate::game::engine::hint::{Remedy, Subject, otherwise, remedies, subject_line};
+use crate::game::engine::hint::{
+    Remedy, Subject, WORN_OUT_LINE, otherwise, remedies, subject_line,
+};
 use crate::game::engine::status::{Condition, StatusWord, Word};
 use crate::game::engine::{GameState, PetKind, Phase};
-use crate::game::pet_registry::{self, PetDef};
+use crate::game::pet_registry;
 use crate::game::{diary, diary_view, lifecycle, modal, pet_select, screen_words, stats_pages};
 
 pub const GROUPS: [&str; 14] = [
@@ -75,13 +77,10 @@ pub fn dump() -> J {
     ])
 }
 
-/// Put one pet in the roster when nothing has (the badge reads `PETS.CFG`).
+/// Put the repo's pets in the roster when nothing has (the badge reads `PETS.CFG`).
 fn ensure_roster() {
     if pet_registry::roster().is_empty() {
-        let mut name = heapless::String::new();
-        let _ = name.push_str("One");
-        let defs = [PetDef { id: 0, name }];
-        pet_registry::install(&defs);
+        crate::sim_support::install_pets_from_repo_cfg();
     }
 }
 
@@ -134,7 +133,7 @@ fn build() -> Vec<Entry> {
             Subject::Word(w) if line == alloc::format!("I'm {}!", w.text()) => {
                 add("hint", "I'm <word>!")
             }
-            Subject::WornOut if line == "I'm worn out!" => add("hint", "I'm <word>!"),
+            Subject::WornOut if line == WORN_OUT_LINE => add("hint", "I'm <word>!"),
             _ => add("hint", line),
         }
         for r in remedies(*s) {

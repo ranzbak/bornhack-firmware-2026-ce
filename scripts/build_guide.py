@@ -3,7 +3,7 @@
 
   build_guide.py                 clean guide/build/, all inputs, compile, check
   build_guide.py --stage NAME    rebuild only those inputs (repeatable), compile, check
-                                 (stages: data, words; each rewrites only its own files)
+                                 (stages: data, words, screens, sprites; each rewrites only its own files)
   build_guide.py --pdf-only      no inputs, only compile and check
 """
 import argparse
@@ -16,14 +16,19 @@ import sys
 
 ROOT = ""
 OUT_PDF = "guide/out/bornpets-guide.pdf"
-STAGES = ("data", "words")  # Task 4 adds: screens, sprites
+STAGES = ("data", "words", "screens", "sprites")
 GUIDE_BIN = "target/x86_64-unknown-linux-gnu/debug/guide"
 PRESETS = ("classic", "casual")
 DATA_DIR = "guide/build/data"
 WORDS_JSON = f"{DATA_DIR}/words.json"
 COVERED_GROUPS = "guide/covered-groups"
 # Inputs `--pdf-only` needs, and the stage that makes each.
-INPUTS = ([(f"{DATA_DIR}/{p}.json", "data") for p in PRESETS] + [(WORDS_JSON, "words")])
+SCREENS_DIR = "guide/build/screens"
+SPRITES_DIR = "guide/build/sprites"
+INPUTS = ([(f"{DATA_DIR}/{p}.json", "data") for p in PRESETS]
+          + [(WORDS_JSON, "words"),
+             (f"{SCREENS_DIR}/content.png", "screens"),
+             (f"{SPRITES_DIR}/roster.json", "sprites")])
 _built = False
 SKIP_PREFIXES = ("//", "#let", "#import", "#set", "#show", "#include")
 DIGITS_OK = re.compile(r"//\s*digits-ok:\s*\S")
@@ -132,6 +137,25 @@ def stage_words():
     subprocess.run([GUIDE_BIN, "words", "--out", WORDS_JSON], check=True)
 
 
+def stage_screens():
+    """Rewrites the shot PNGs only: manual-<n>.png (the simulator's F12) stay."""
+    build_guide_bin()
+    os.makedirs(SCREENS_DIR, exist_ok=True)
+    names = subprocess.check_output([GUIDE_BIN, "shots"], text=True).split()
+    for name in names:
+        remove(f"{SCREENS_DIR}/{name}.png")
+    for name in names:
+        subprocess.run([GUIDE_BIN, "shot", name, "--out", SCREENS_DIR], check=True)
+
+
+def stage_sprites():
+    """Rewrites the whole sprites folder."""
+    build_guide_bin()
+    shutil.rmtree(SPRITES_DIR, ignore_errors=True)
+    os.makedirs(SPRITES_DIR)
+    subprocess.run([GUIDE_BIN, "sprites", "--out", SPRITES_DIR], check=True)
+
+
 def require_inputs():
     """Exit 1, naming the stage, when a built input is missing."""
     for path, stage in INPUTS:
@@ -140,7 +164,6 @@ def require_inputs():
 
 
 def build_inputs(stages):
-    """Task 4 adds the stages screens and sprites."""
     for s in stages:
         if s not in STAGES:
             sys.exit(f"guide: unknown stage {s!r}")
@@ -148,6 +171,10 @@ def build_inputs(stages):
         stage_data()
     if "words" in stages:
         stage_words()
+    if "screens" in stages:
+        stage_screens()
+    if "sprites" in stages:
+        stage_sprites()
 
 
 def compile_pdf(commit):

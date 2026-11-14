@@ -2,3 +2,5 @@
 pub mod data;
 pub mod json;
 pub mod words;
+pub mod shots;
+pub mod sprites;
