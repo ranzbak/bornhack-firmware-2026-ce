@@ -94,7 +94,7 @@ one, the pet is clear. A night in between, of #v("NIGHT_SHORT_MIN") to just
 under #v("NIGHT_GOOD_MIN"), stops the short run but does not count as good.
 Put the pet to bed fed, watered and sober, and do not wake it early.
 
-#joke[Three short nights and the pet is worn out. Three nights is also how
+#joke[#v("DEPRIVED_NIGHTS") short nights and the pet is worn out. Three nights is also how
 long a badge hacker lasts at a hacker camp. Nobody has a cure for that.]
 
 == Sore and injured
@@ -142,7 +142,7 @@ at the onset (see below).
 
 #grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
   [
-    *What it does.* Each drink gives half the mood and energy. Booze clears at
+    *What it does.* Each drink gives less mood and energy. Booze clears at
     #v("BOOZE_CLEAR_SLOW_PCT") of the speed. And there are *cravings*. An
     awake, dependent pet with booze under #v("MOOD_CRAVING_BOOZE_PCT")
     loses #v("MOOD_PEN_CRAVING_PCT") of target. The status line shows the
@@ -152,7 +152,7 @@ at the onset (see below).
 
 *How to get rid of it.* Open the #w("Rehab") row. It costs #price("Rehab")
 and runs for #v("DOSE_REHAB_MIN"). The row says #w("no need") if the pet is
-not dependent or is already in rehab. While it runs the pet is #w("in rehab"):
+not dependent. While a rehab runs it says #w("wait <time>"), the time left. While it runs the pet is #w("in rehab"):
 the mood loses #v("MOOD_PEN_REHAB_PCT"), and sleep goes badly. Sleeping with
 a rehab running gives the reason #w("withdrawal"). When it ends the pet is
 free: no #w("dependent"), a clean total.
@@ -185,7 +185,8 @@ At #v("DIABETES_ONSET_MIN") on the total, the pet is #w("diabetic"). The
     *Insulin.* The #w("Insulin") row costs #price("Medicate"). One dose works
     for #v("DOSE_INSULIN_MIN"). The row opens again in the last
     #v("DOSE_INSULIN_WINDOW_MIN") of a dose, so a dose is never wasted. Before
-    that it says #w("no need"), and so it does for a pet that is not diabetic.
+    that the row says #w("wait <time>"), the time left. A pet that is not
+    diabetic gets #w("no need").
   ],
   screen("no-insulin", width: shot-m, caption: [No insulin.]))
 
