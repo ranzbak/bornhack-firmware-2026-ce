@@ -86,7 +86,7 @@ fn dump_lists_groups_and_words() {
 fn every_drawn_literal_is_listed() {
     // (file, source, label tables too?, exempt literals). Only the two files
     // whose text lives in label tables get the table scan.
-    const FILES: [(&str, &str, bool, &[&str]); 5] = [
+    const FILES: [(&str, &str, bool, &[&str]); 9] = [
         ("mod.rs", include_str!("../src/game/mod.rs"), false, &[]),
         (
             "modal.rs",
@@ -103,6 +103,31 @@ fn every_drawn_literal_is_listed() {
         (
             "diary_view.rs",
             include_str!("../src/game/diary_view.rs"),
+            false,
+            &[],
+        ),
+        (
+            "text_entry.rs",
+            include_str!("../src/text_entry.rs"),
+            false,
+            // The text cursor is a glyph, not a word.
+            &["_"],
+        ),
+        (
+            "battle_view.rs",
+            include_str!("../src/game/battle_view.rs"),
+            false,
+            &[],
+        ),
+        (
+            "friends_view.rs",
+            include_str!("../src/game/friends_view.rs"),
+            false,
+            &[],
+        ),
+        (
+            "realm_view.rs",
+            include_str!("../src/game/realm_view.rs"),
             false,
             &[],
         ),

@@ -56,14 +56,18 @@ get lost, keep pushing Left or Right until the pet shows up.
   *Name your pet.* When the egg hatches, the badge opens #w("Name your Pet").
   A random Danish or Dutch name is already filled in, so you can accept it.
   Press EXE. The badge asks #w("Save name?") and shows #w("EXE = save").
-  Press EXE again.
+  Press EXE again. Any other button backs out, as #w("any key = back") says,
+  and an empty name shows as #w("(empty)").
 
   To type your own, use the joystick. Push towards #w("A-I"), #w("J-R") or
   #w("S-Z"). Push again to pick a group of three letters. Then push Left or
-  Right to move along them and press Fire to take one. #w("CMD") holds
+  Right to move along them and press Fire to take one. The bottom line
+  reminds you: #w("</>: move  Fire: select"). #w("CMD") holds
   Backspace, special characters, numbers, Shift, Clear and the submit key.
   #w("Cancel = quit") leaves the screen. A name can be up to
-  #v("PET_NAME_MAX") letters long.
+  #v("PET_NAME_MAX") letters long. With an external keyboard plugged in, the
+  joystick picker gives way to a plain hint: #w("- Keyboard -"),
+  #w("type to enter") and #w("Enter = save").
 ]
 
 #step(art: screen("hatched", width: shot-s, caption: [Hatched.]))[

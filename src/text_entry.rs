@@ -524,6 +524,12 @@ where
 /// Fixed labels this screen draws.
 const LABEL_SAVE_PROMPT: &str = "Save name?";
 const LABEL_SAVE_EXE: &str = "EXE = save";
+const LABEL_EMPTY: &str = "(empty)";
+const LABEL_BACK: &str = "any key = back";
+const LABEL_KB_TITLE: &str = "- Keyboard -";
+const LABEL_KB_TYPE: &str = "type to enter";
+const LABEL_KB_SAVE: &str = "Enter = save";
+const LABEL_MOVE_HINT: &str = "</>: move  Fire: select";
 const LABEL_QUIT: &str = "Cancel = quit";
 const LABEL_A_I: &str = "A-I";
 const LABEL_J_R: &str = "J-R";
@@ -532,7 +538,7 @@ const LABEL_CMD: &str = "CMD";
 
 /// The fixed labels (host-only, for the guide's word list).
 #[cfg(any(test, feature = "simulator"))]
-pub fn words() -> [&'static str; 7] {
+pub fn words() -> [&'static str; 13] {
     [
         LABEL_SAVE_PROMPT,
         LABEL_SAVE_EXE,
@@ -541,6 +547,12 @@ pub fn words() -> [&'static str; 7] {
         LABEL_J_R,
         LABEL_S_Z,
         LABEL_CMD,
+        LABEL_EMPTY,
+        LABEL_BACK,
+        LABEL_KB_TITLE,
+        LABEL_KB_TYPE,
+        LABEL_KB_SAVE,
+        LABEL_MOVE_HINT,
     ]
 }
 
@@ -555,12 +567,12 @@ where
     let text = core::str::from_utf8(&entry.text).unwrap_or("");
     Text::with_text_style(LABEL_SAVE_PROMPT, Point::new(cx, KB_Y + 16), FONT, ts).draw(display)?;
     if text.is_empty() {
-        Text::with_text_style("(empty)", Point::new(cx, KB_Y + 34), FONT, ts).draw(display)?;
+        Text::with_text_style(LABEL_EMPTY, Point::new(cx, KB_Y + 34), FONT, ts).draw(display)?;
     } else {
         Text::with_text_style(text, Point::new(cx, KB_Y + 34), FONT, ts).draw(display)?;
     }
     Text::with_text_style(LABEL_SAVE_EXE, Point::new(cx, KB_Y + 54), FONT, ts).draw(display)?;
-    Text::with_text_style("any key = back", Point::new(cx, KB_Y + 70), FONT, ts).draw(display)?;
+    Text::with_text_style(LABEL_BACK, Point::new(cx, KB_Y + 70), FONT, ts).draw(display)?;
     Ok(())
 }
 
@@ -586,9 +598,9 @@ where
 {
     let ts = crate::ui::CENTERED;
     let cx = DISPLAY_W / 2;
-    Text::with_text_style("- Keyboard -", Point::new(cx, KB_Y + 16), FONT, ts).draw(display)?;
-    Text::with_text_style("type to enter", Point::new(cx, KB_Y + 34), FONT, ts).draw(display)?;
-    Text::with_text_style("Enter = save", Point::new(cx, KB_Y + 52), FONT, ts).draw(display)?;
+    Text::with_text_style(LABEL_KB_TITLE, Point::new(cx, KB_Y + 16), FONT, ts).draw(display)?;
+    Text::with_text_style(LABEL_KB_TYPE, Point::new(cx, KB_Y + 34), FONT, ts).draw(display)?;
+    Text::with_text_style(LABEL_KB_SAVE, Point::new(cx, KB_Y + 52), FONT, ts).draw(display)?;
     Text::with_text_style(LABEL_QUIT, Point::new(cx, KB_Y + 70), FONT, ts).draw(display)?;
     Ok(())
 }
@@ -878,7 +890,7 @@ where
     // with one pixel of breathing room.
     let hint_ts = crate::ui::CENTERED_BOTTOM;
     Text::with_text_style(
-        "</>: move  Fire: select",
+        LABEL_MOVE_HINT,
         Point::new(KB_CX, 151),
         FONT,
         hint_ts,
