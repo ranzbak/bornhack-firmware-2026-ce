@@ -2503,38 +2503,50 @@ mod balance {
         }
     }
 
-    // Clock on: not exact. `day_min` only moves in `advance`, so it lags by the
-    // ticks an action spends, and the two drivers re-sync the clock at
-    // different moments (the oracle every minute, the delta at its wakes).
-    // `arm_clock` then reads a minute off now and then and the run takes
-    // another path (debug-runaway-report.md: no loop, no battery cost). So
-    // the drivers agree statistically per seed: neither runs away, and the
-    // self-care rate and the mood are close. Only the Delta driver has engine
-    // wakes, so only it is held to the wake bound.
+    // Clock on: not exact, not even per seed. `day_min` only moves in
+    // `advance`, so it lags by the ticks an action spends, and the two drivers
+    // re-sync the clock at different moments (the oracle every minute, the
+    // delta at its wakes). `arm_clock` then reads a minute off now and then,
+    // and from there each seed's dice take another path (debug-runaway-report.md:
+    // no loop, no battery cost). What the drivers share is the distribution:
+    // per seed neither runs away; over the seeds the mean mood and the mean
+    // self-care rate agree. Only the Delta driver has engine wakes, so only it
+    // is held to the wake bound.
     fn agree_with_a_clock(days: u32, seeds: &[u64]) {
         for (name, r) in ROUTINES {
             for animated in [false, true] {
+                let setup = Setup { animated, ..DEMO };
+                let (mut mood, mut care) = ([0.0f32; 2], [0.0f32; 2]);
                 for &seed in seeds {
-                    let setup = Setup { animated, ..DEMO };
                     let what = format!("{name} animated {animated} seed {seed}");
                     let o = run(&r, days, Driver::Oracle, seed, setup);
                     let d = run(&r, days, Driver::Delta, seed, setup);
                     assert!(o.alive && d.alive, "{what}: alive");
-                    for (driver, x) in [("oracle", &o), ("delta", &d)] {
+                    for (i, (driver, x)) in [("oracle", &o), ("delta", &d)].into_iter().enumerate()
+                    {
                         assert!(
                             x.self_care_per_day <= 20.0,
                             "{what}: {driver} self-care {}",
                             x.self_care_per_day
                         );
+                        mood[i] += x.avg_mood_pct as f32 / seeds.len() as f32;
+                        care[i] += x.self_care_per_day / seeds.len() as f32;
                     }
                     assert!(d.engine_wakes_per_day <= 60.0, "{what}: wakes {d:?}");
-                    let (a, b) = (o.self_care_per_day, d.self_care_per_day);
-                    assert!(
-                        (a - b).abs() <= 0.1 * a.max(b),
-                        "{what}: self-care oracle {a} vs delta {b}"
-                    );
-                    near(o.avg_mood_pct, d.avg_mood_pct, 3, &format!("{what}: mood"));
                 }
+                let what = format!("{name} animated {animated}");
+                assert!(
+                    (mood[0] - mood[1]).abs() <= 3.0,
+                    "{what}: mean mood oracle {} vs delta {}",
+                    mood[0],
+                    mood[1]
+                );
+                assert!(
+                    (care[0] - care[1]).abs() <= 0.1 * care[0].max(care[1]),
+                    "{what}: mean self-care oracle {} vs delta {}",
+                    care[0],
+                    care[1]
+                );
             }
         }
     }
