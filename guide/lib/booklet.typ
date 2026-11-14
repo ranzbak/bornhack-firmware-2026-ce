@@ -185,6 +185,7 @@
     grid(columns: (14mm, 1fr), column-gutter: 8pt, align: horizon,
       box(width: 14mm, icon),
       {
+        set par(justify: false)
         text(font: head-font, size: 6.5pt, title)
         parbreak()
         body
@@ -195,6 +196,52 @@
 #let tip(body) = sidebar("TIP", sprite-fit("hero", "happy", w: 40pt, h: 40pt), rgb("#e4efc9"), body)
 #let joke(body) = sidebar("JOKE", sprite-fit("hero", "idle", w: 40pt, h: 40pt), rgb("#f6dd9a"), body)
 #let warn(body) = sidebar("WARNING", sprite-fit("hero", "sick", w: 40pt, h: 40pt), rgb("#f1b8a8"), body)
+
+// Screen widths for the walk-through, and text beside a picture.
+#let shot-s = 32mm
+#let shot-m = 46mm
+#let beside(body, art) = grid(columns: (1fr, auto), column-gutter: 5mm, align: top, body, art)
+
+// The hero hatching: three egg frames, then the happy pet.
+#let egg-strip() = align(center, grid(columns: 4, column-gutter: 3mm, align: bottom + center,
+  ..range(3).map(i => sprite-fit("hero", "egg", frame: i, w: 70pt, h: 70pt)),
+  sprite-fit("hero", "happy", w: 70pt, h: 70pt)))
+
+// A numbered step of the walk-through; `art` (optional) sits beside the text.
+#let step(body, art: none) = {
+  counter("step").step()
+  let num = box(width: 9mm, text(font: head-font, size: 9pt, context counter("step").display()))
+  let text-col = grid(columns: (9mm, 1fr), num, body)
+  block(above: 4mm, breakable: false, if art == none { text-col } else {
+    grid(columns: (1fr, auto), column-gutter: 4mm, align: top, text-col, art)
+  })
+}
+
+// The hero, big enough to sit beside a paragraph.
+#let hero-pic(anim) = sprite-fit("hero", anim, w: 70pt, h: 70pt)
+
+// A keycap for the button diagram.
+#let keycap(label, round: false, fill: white) = box(
+  width: 17mm, height: 9mm, radius: if round { 4.5mm } else { 1.5mm },
+  stroke: 2pt + ink, fill: fill,
+  align(center + horizon, text(font: head-font, size: 5.5pt, label)),
+)
+
+// The badge's controls: the five-way joystick on the left, the two thumb
+// buttons on the right.
+#let pad-card() = {
+  pic()
+  let gap = box(width: 17mm, height: 9mm)
+  chunky(grid(columns: (1fr, auto, 1fr), align: horizon + center, column-gutter: 4mm,
+    grid(columns: 3, gutter: 1.5mm, align: horizon + center,
+      gap, keycap("UP"), gap,
+      keycap("LEFT"), keycap("FIRE", round: true, fill: rgb("#f6dd9a")), keycap("RIGHT"),
+      gap, keycap("DOWN"), gap),
+    box(width: 1.5pt, height: 28mm, fill: ink),
+    stack(spacing: 4mm, keycap("EXE", round: true, fill: rgb("#e4efc9")),
+      keycap("CAN", round: true, fill: rgb("#f1b8a8")))),
+    fill: white.transparentize(50%))
+}
 
 // A chapter. `name` is its label ("ch-care"), so `@ch-care` works. The
 // heading starts a new page and carries the chapter number in the pixel font
@@ -248,6 +295,7 @@
   )
   set text(font: body-font, size: 10.5pt, fill: ink, lang: "en")
   set par(justify: true, leading: 0.65em)
+  set heading(supplement: "Chapter")
   show heading: it => if it.level == 1 {
     block(
       width: 100%,
