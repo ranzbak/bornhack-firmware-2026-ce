@@ -899,6 +899,45 @@ fn shown_label(item: Item, hard: bool) -> &'static str {
     }
 }
 
+/// Every word the menus draw with the game's current money and hard modes
+/// (host-only, for the guide's word list): `(group, text)`. Group "menu" is
+/// the titles and rows, "debug" the hidden debug page, "hint" the hint
+/// view's title and refusal line. The templates are the drawn text with its
+/// value left out: "<price>H", "risk: <what>", "!" (the risk mark's name in
+/// the guide), "<name> says" and "but <reason>".
+#[cfg(any(test, feature = "simulator"))]
+pub fn menu_words() -> std::vec::Vec<(&'static str, std::string::String)> {
+    use std::string::{String, ToString};
+    let hard = super::lifecycle::hard_mode();
+    let mut out: std::vec::Vec<(&'static str, String)> = std::vec::Vec::new();
+    for v in 1..=u8::MAX {
+        let kind = ModalKind::from_u8(v);
+        if kind == ModalKind::None {
+            continue;
+        }
+        let group = if kind == ModalKind::Debug { "debug" } else { "menu" };
+        out.push((group, kind.title().to_string()));
+        for &item in kind.items() {
+            let group = if matches!(item, Item::Cancel) { "menu" } else { group };
+            out.push((group, shown_label(item, hard).to_string()));
+        }
+    }
+    for food in super::engine::FoodKind::ALL {
+        let name = match food {
+            super::engine::FoodKind::Frikandel if hard => "Hamburger",
+            f => f.full_name(),
+        };
+        out.push(("menu", name.to_string()));
+    }
+    for t in ["<price>H", "risk: <what>", "!"] {
+        out.push(("menu", t.to_string()));
+    }
+    for t in ["<name> says", "Your pet says", "but <reason>"] {
+        out.push(("hint", t.to_string()));
+    }
+    out
+}
+
 /// The title bar: the reason a refused row just gave (its toast sits under the
 /// popover), else the selected row's risk, else the selected food's whole
 /// name on the Feed page, else the menu title.

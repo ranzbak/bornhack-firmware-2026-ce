@@ -34,6 +34,24 @@ class GuideChecks(unittest.TestCase):
         self.assertEqual(len(bg.check_colophon("abc-dirty", "abc")), 1)
         self.assertEqual(bg.check_colophon("abc", "abc"), [])
 
+    def test_marks_must_exist_on_the_badge(self):
+        errs = bg.check_marks({"hungy"}, [{"text": "hungry", "group": "status"}], set())
+        self.assertEqual(errs, ["marked word not on the badge: hungy"])
+
+    def test_unmarked_word_fails(self):
+        errs = bg.check_marks(set(), [{"text": "hungry", "group": "status"}], {"status"})
+        self.assertEqual(errs, ["unexplained status word: hungry"])
+
+    def test_uncovered_group_is_not_required(self):
+        self.assertEqual(
+            bg.check_marks(set(), [{"text": "hungry", "group": "status"}], set()), [])
+
+    def test_covered_groups_file_or_every_group(self):
+        words = [{"text": "a", "group": "status"}, {"text": "b", "group": "menu"}]
+        self.assertEqual(bg.covered_groups(None, words), {"status", "menu"})
+        self.assertEqual(bg.covered_groups("status\n\n", words), {"status"})
+        self.assertEqual(bg.covered_groups("", words), set())
+
 
 if __name__ == "__main__":
     unittest.main()

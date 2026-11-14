@@ -394,6 +394,44 @@ where
     Ok(())
 }
 
+/// The diabetes alert: two bold lines and a red hint.
+const ALERT_DIABETES: [&str; 2] = ["TYPE 2", "DIABETES"];
+const ALERT_DIABETES_HINT: &str = "Give medication soon";
+/// The dependence alert.
+const ALERT_ALCOHOL: [&str; 2] = ["ALCOHOL", "DEPENDENCE"];
+const ALERT_ALCOHOL_HINT: &str = "Give rehab soon";
+/// The gone screen: the farewell (when there is no farewell animation) and
+/// the two prompt lines.
+const GONE_LEFT: &str = "Your pet has left";
+const GONE_PROMPT: [&str; 2] = ["Press Fire", "for a new egg"];
+/// The pet area when the sprite files are missing.
+const NO_SPRITES: &str = "No sprites on flash";
+
+/// Every fixed word of the game screen: the toasts (group "toasts", the debug
+/// cheat toast "debug"), the alerts, the gone screen and the missing-sprites
+/// notice (group "screen"). Host-only, for the guide's word list.
+#[cfg(any(test, feature = "simulator"))]
+pub fn screen_words() -> std::vec::Vec<(&'static str, &'static str)> {
+    let mut out: std::vec::Vec<(&'static str, &'static str)> = std::vec::Vec::new();
+    for v in 0..=255u8 {
+        let toast = Toast::from_u8(v);
+        let text = toast.message();
+        if !text.is_empty() {
+            out.push((if toast == Toast::DebugCheat { "debug" } else { "toasts" }, text));
+        }
+    }
+    for line in ALERT_DIABETES.into_iter().chain(ALERT_ALCOHOL) {
+        out.push(("screen", line));
+    }
+    for text in [ALERT_DIABETES_HINT, ALERT_ALCOHOL_HINT, GONE_LEFT, NO_SPRITES] {
+        out.push(("screen", text));
+    }
+    for line in GONE_PROMPT {
+        out.push(("screen", line));
+    }
+    out
+}
+
 /// Full-screen one-shot condition alert: two bold black lines and a red hint,
 /// cleared once `ALERT_MIN_VISIBLE_MS` has elapsed.
 fn draw_alert<D>(
@@ -761,8 +799,8 @@ where
     if DIABETES_ALERT.is_active() {
         return draw_alert(
             display,
-            ["TYPE 2", "DIABETES"],
-            "Give medication soon",
+            ALERT_DIABETES,
+            ALERT_DIABETES_HINT,
         );
     }
 
@@ -771,8 +809,8 @@ where
     if ALCOHOLISM_ALERT.is_active() {
         return draw_alert(
             display,
-            ["ALCOHOL", "DEPENDENCE"],
-            "Give rehab soon",
+            ALERT_ALCOHOL,
+            ALERT_ALCOHOL_HINT,
         );
     }
 
@@ -904,11 +942,11 @@ where
         }
         // Farewell animation blitted by embassy.rs if available.
         if sprite_loader::frame_count() == 0 {
-            Text::with_text_style("Your pet has left", Point::new(76, 50), font_red, centered)
+            Text::with_text_style(GONE_LEFT, Point::new(76, 50), font_red, centered)
                 .draw(display)?;
         }
-        Text::with_text_style("Press Fire", Point::new(76, 90), font_red, centered).draw(display)?;
-        Text::with_text_style("for a new egg", Point::new(76, 106), font_red, centered)
+        Text::with_text_style(GONE_PROMPT[0], Point::new(76, 90), font_red, centered).draw(display)?;
+        Text::with_text_style(GONE_PROMPT[1], Point::new(76, 106), font_red, centered)
             .draw(display)?;
         return Ok(());
     }
@@ -943,7 +981,7 @@ where
     // Pet area: sprite blitted by embassy.rs, or fallback.
     if sprite_loader::frame_count() == 0 {
         Text::with_text_style(
-            "No sprites on flash",
+            NO_SPRITES,
             Point::new(76, (SEP_TOP + SEP_BOT) / 2),
             font,
             centered,

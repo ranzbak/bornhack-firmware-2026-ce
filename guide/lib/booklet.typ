@@ -15,6 +15,20 @@
   body,
 )
 
+// An on-screen word, as the badge draws it: monospace on a white chip. Every
+// use is also an index mark (`<gw>`): build_guide.py checks the marks against
+// guide/build/data/words.json, both ways.
+#let w(t) = {
+  box(
+    fill: white,
+    stroke: 0.5pt + ink,
+    inset: (x: 2pt, y: 0pt),
+    outset: (y: 2pt),
+    text(font: screen-font, size: 0.9em, t),
+  )
+  [#metadata(t) <gw>]
+}
+
 // Pixel heart drawn from rectangles (no sprite needed).
 #let pixel-heart(size: 6pt, color: rgb("#c0392b")) = {
   let rows = (
