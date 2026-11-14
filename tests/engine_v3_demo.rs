@@ -2546,3 +2546,85 @@ mod balance {
         );
     }
 }
+
+/// An overslept pet put straight back to bed (debug-runaway report): it was
+/// awake below the oversleep reset line, so the oversleep is over and it is
+/// not woken (and made groggy) again a minute later, every minute.
+mod oversleep {
+    use super::policy::{at, lcg, pct, quiet};
+    use bornhack_aegg::game::engine::causes::Cause;
+    use bornhack_aegg::game::engine::thresholds as t;
+    use bornhack_aegg::game::engine::{GameState, TICKS_PER_MINUTE, sim};
+
+    /// Wall minute of the day the runs below start at.
+    const START: u32 = 6 * 60 + 20;
+
+    /// A worn-out pet in bed at 06:20 at its deprived energy cap, five
+    /// minutes short of the oversleep wake.
+    fn overslept(demo: bool, animated: bool) -> GameState {
+        let mut s = quiet();
+        s.demo.on = demo;
+        s.set_demo_care(animated);
+        s.deprived = true;
+        s.energy = pct(t::ENERGY_CAP_DEPRIVED_PCT() as i32);
+        assert!(s.sleep());
+        s.demo.pause_min = 0;
+        s.sleep_min = 400;
+        s.oversleep_min = t::OVERSLEEP_WAKE_MIN() - 5;
+        at(&mut s, START as u16);
+        s
+    }
+
+    /// The badge's pattern: wake at the engine's next wake or at a button
+    /// press (irregular minutes, some mid-minute), whichever comes first,
+    /// and sync the wall clock before each update. Returns (self-care acts,
+    /// updates, groggy wakes).
+    fn badge_run(s: &mut GameState, hours: u32, seed: u64) -> (u32, u32, u32) {
+        let mut next = lcg(seed);
+        let t0 = s.last_update_tick;
+        let end = t0 + hours * 60 * TICKS_PER_MINUTE;
+        let acts = sim::self_care_acts();
+        let (mut updates, mut groggy) = (0, 0);
+        while s.last_update_tick < end {
+            let press = s.last_update_tick + 1 + (next(23 * TICKS_PER_MINUTE as u64) as u32);
+            let to = s.next_wake_tick().min(press).min(end);
+            let wall = (START + (to - t0) / TICKS_PER_MINUTE) % 1440;
+            s.sync_clock(to, Some(wall as u16));
+            s.update(to);
+            updates += 1;
+            groggy += s
+                .take_causes()
+                .iter()
+                .filter(|&&c| c == Cause::Groggy)
+                .count() as u32;
+        }
+        (sim::self_care_acts() - acts, updates, groggy)
+    }
+
+    #[test]
+    fn a_demo_pet_back_in_bed_is_not_woken_every_minute() {
+        for animated in [false, true] {
+            for seed in 1..=4 {
+                let mut s = overslept(true, animated);
+                let (acts, updates, groggy) = badge_run(&mut s, 6, seed);
+                let what = format!("animated {animated}, seed {seed}");
+                assert_eq!(groggy, 1, "{what}: groggy wakes");
+                assert!(acts <= 12, "{what}: {acts} self-care acts in 6 h");
+                assert!(updates <= 6 * 60 / 4, "{what}: {updates} updates in 6 h");
+            }
+        }
+    }
+
+    #[test]
+    fn a_player_can_put_an_overslept_pet_back_to_bed() {
+        let mut s = overslept(false, false);
+        let t0 = s.last_update_tick;
+        s.update(t0 + 5 * TICKS_PER_MINUTE);
+        assert!(!s.is_sleeping, "the oversleep wake");
+        assert!(s.take_causes().iter().any(|&c| c == Cause::Groggy));
+        assert!(s.sleep());
+        s.update(s.last_update_tick + 30 * TICKS_PER_MINUTE);
+        assert!(s.is_sleeping, "woken again: oversleep {}", s.oversleep_min);
+        assert!(!s.take_causes().iter().any(|&c| c == Cause::Groggy));
+    }
+}

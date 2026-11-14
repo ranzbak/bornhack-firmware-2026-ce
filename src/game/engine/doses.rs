@@ -410,6 +410,12 @@ pub fn fall_asleep(s: &mut GameState) -> Result<(), Refusal> {
         return Err(Refusal::Asleep);
     }
     s.night = (s.energy as i32) < lvl(t::DOSE_NIGHT_ENERGY_PCT());
+    // The awake reset of `advance`, for a pet that goes back to bed before
+    // a minute awake has passed: below the line its oversleep is over, else
+    // the next minute asleep wakes it (groggy) again, every minute.
+    if (s.energy as i32) < lvl(t::OVERSLEEP_RESET_PCT()) {
+        s.oversleep_min = 0;
+    }
     s.is_sleeping = true;
     s.demo.clock_armed = false;
     s.sleep_min = 0;
