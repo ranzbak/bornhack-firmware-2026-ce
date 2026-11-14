@@ -75,7 +75,7 @@ impl StatusWord {
             StatusWord::Overweight => "Overweight",
             StatusWord::Underweight => "Underweight",
             StatusWord::Unfit => "Unfit",
-            StatusWord::HungOver => "Hungover",
+            StatusWord::HungOver => "Hung over",
             StatusWord::Injured => "Injured",
             StatusWord::Groggy => "Groggy",
             StatusWord::Poorly => "Poorly",

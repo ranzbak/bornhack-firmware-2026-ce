@@ -155,7 +155,7 @@ group into one.
   w("Overweight"), [Weight is too high.], [@ch-needs],
   w("Underweight"), [Weight is too low.], [@ch-needs],
   w("Unfit"), [Fitness is too low.], [@ch-needs],
-  w("Hungover"), [A hangover is running. The status line spells it #w("hung over").], [@ch-conditions],
+  w("Hung over"), [A hangover is running.], [@ch-conditions],
   w("Injured"), [An injury is running.], [@ch-conditions],
   w("Groggy"), [A groggy spell is running.], [@ch-conditions],
   w("Poorly"), [Health is low.], [@ch-mood],

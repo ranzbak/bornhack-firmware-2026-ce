@@ -34,7 +34,7 @@ fn plan_2_words_are_listed() {
         "Frikandel speciaal",
         "risk: <what>",
         "Engine info",
-        "Hungover",
+        "Hung over",
         "cheat applied",
         "Give rehab soon",
         "Hard mode (US)",
