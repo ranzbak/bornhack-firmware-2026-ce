@@ -41,7 +41,7 @@ pub enum DebugPoke {
 const PAST_EDGE: i32 = 8 * P;
 
 /// Mood and health `Comfort` sets, in percent.
-const COMFORT_PCT: i32 = 70;
+pub const COMFORT_PCT: i32 = 70;
 
 /// What the engine is doing, for the "Engine info" row. Percent values.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

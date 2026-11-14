@@ -131,6 +131,16 @@ pub fn fixed() -> Vec<(&'static str, u32, Unit)> {
         ("DIARY_LEN", DIARY_LEN as u32, Unit::Count),
         ("MEDICATION_HARD_MULT", MEDICATION_HARD_MULT, Unit::Count),
         ("REHAB_HARD_MULT", REHAB_HARD_MULT, Unit::Count),
+        (
+            "PETS_CFG_NAME_CAP",
+            crate::game::pet_registry::NAME_CAP as u32,
+            Unit::Count
+        ),
+        (
+            "COMFORT_PCT",
+            crate::game::engine::debug::COMFORT_PCT as u32,
+            Unit::Pct
+        ),
         ("CATCH_UP_MAX_MIN", CATCH_UP_MAX_MIN, Unit::Min),
         (
             "STATION_COOLDOWN",

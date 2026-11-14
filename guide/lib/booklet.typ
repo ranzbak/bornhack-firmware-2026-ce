@@ -273,9 +273,28 @@
 // A chapter. `name` is its label ("ch-care"), so `@ch-care` works. The
 // heading starts a new page and carries the chapter number in the pixel font
 // and a sprite of the hero.
-#let chapter(name, title) = {
+//
+// `art: true` (the appendix chapters, whose generated tables run for pages
+// with no room for a picture) marks the chapter as an art chapter: from its
+// first page to the last content page, the page header draws a small roster
+// pet and counts as the page's picture (see `art-header`).
+#let chapter(name, title, art: false) = {
   pagebreak(weak: true)
+  if art { [#metadata(none) <art-chapter>] }
   [#heading(level: 1, numbering: "1", title) #label(name)]
+}
+
+// The page header: empty, except on the pages of an art chapter, where a small
+// pet (one of the roster, a different one on each page) sits at the right.
+// `pic()` inside `sprite` makes it the page's picture.
+#let art-header() = context {
+  let p = here().page()
+  let starts = query(<art-chapter>).map(m => m.location().page())
+  let ends = query(<content-end>)
+  if starts.len() > 0 and p >= starts.first() and ends.len() > 0 and p <= ends.first().location().page() {
+    let pet = roster.pets.at(calc.rem(p, roster.pets.len()))
+    align(right + horizon, sprite-fit(pet.prefix, "idle", w: 40pt, h: 24pt))
+  }
 }
 
 // One roster pet: idle and happy faces, its name, the hero marked.
@@ -313,6 +332,7 @@
     paper: "a5",
     margin: (x: 14mm, y: 16mm),
     fill: cream,
+    header: art-header(),
     footer: context {
       let p = here().page()
       if p > 1 {
