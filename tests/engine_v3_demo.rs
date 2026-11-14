@@ -1646,7 +1646,7 @@ mod acts {
     #[test]
     fn a_soft_act_clears_the_soft_delay() {
         let mut s = quiet();
-        s.hydration = pct(40);
+        s.hydration = pct(t::DEMO_SOFT_WATER_PCT() as i32 - 8);
         s.demo.soft_armed = true;
         s.demo.next_min = 0;
         demo::run(&mut s);
@@ -1663,7 +1663,7 @@ mod acts {
     fn the_badge_wakes_when_the_pet_acts() {
         let mut s = quiet();
         at(&mut s, 12 * HOUR);
-        s.hydration = pct(46);
+        s.hydration = pct(t::DEMO_SOFT_WATER_PCT() as i32 - 2);
         s.demo.soft_armed = true;
         s.demo.next_min = 10;
         let t0 = s.last_update_tick;
@@ -2326,6 +2326,22 @@ mod balance {
         assert!(o.causes_per_day <= 6.0, "{what}: causes {o:?}");
         assert!(o.night_asleep_pct >= 85, "{what}: night asleep {o:?}");
         assert!(o.day_asleep_pct <= 20, "{what}: day asleep {o:?}");
+    }
+
+    /// The pet's own care is not so eager that it lives in the top band
+    /// (spec 18.3: mood 57 to 65). Ten days and three seeds, short enough
+    /// to run locally; the 30-day runs below hold the full bounds.
+    #[test]
+    fn demo_mood_stays_in_the_band_for_10_days() {
+        for seed in [1, 2, 3] {
+            let o = run(&sim::absent, 10, Driver::Delta, seed, DEMO);
+            eprintln!("10 days seed {seed}: {o:?}");
+            assert!(
+                (50..=80).contains(&o.avg_mood_pct),
+                "seed {seed}: mood {o:?}"
+            );
+            assert!(o.miserable_pct <= 2, "seed {seed}: miserable {o:?}");
+        }
     }
 
     #[test]

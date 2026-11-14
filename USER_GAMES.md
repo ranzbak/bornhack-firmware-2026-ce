@@ -322,11 +322,11 @@ Known keys (everything else is silently ignored, so you don't have to keep your 
 | `DEMO_EDGE_WATER_PCT` | 22 | 22 |
 | `DEMO_EDGE_ENERGY_PCT` | 12 | 12 |
 | `DEMO_EDGE_BOOZE_PCT` | 55 | 55 |
-| `DEMO_SOFT_WATER_PCT` | 48 | 43 |
-| `DEMO_SOFT_FULL_PCT` | 36 | 31 |
+| `DEMO_SOFT_WATER_PCT` | 39 | 34 |
+| `DEMO_SOFT_FULL_PCT` | 27 | 22 |
 | `DEMO_SOFT_ENERGY_PCT` | 27 | 22 |
-| `DEMO_SOFT_DIRT_PCT` | 60 | 65 |
-| `DEMO_SOFT_FUN_PCT` | 27 | 22 |
+| `DEMO_SOFT_DIRT_PCT` | 68 | 73 |
+| `DEMO_SOFT_FUN_PCT` | 15 | 10 |
 | `DEMO_PLAY_ENERGY_PCT` | 25 | 25 |
 | `DEMO_WIRED_FUN_PCT` | 78 | 83 |
 | `DEMO_RISE_ENERGY_PCT` | 97 | 97 |
@@ -339,8 +339,8 @@ Known keys (everything else is silently ignored, so you don't have to keep your 
 | `DEMO_BEER_STOP_MIN` | 300 | 300 |
 | `DEMO_LIGHT_FOOD_PCT` | 56 | 56 |
 | `DEMO_RICH_FOOD_PCT` | 42 | 42 |
-| `DEMO_REACT_BASE_MIN` | 10 | 10 |
-| `DEMO_REACT_SPREAD_MIN` | 20 | 20 |
+| `DEMO_REACT_BASE_MIN` | 30 | 30 |
+| `DEMO_REACT_SPREAD_MIN` | 80 | 80 |
 | `DEMO_DRY_BASE_MIN` | 20 | 20 |
 | `DEMO_DRY_SPREAD_MIN` | 40 | 40 |
 | `DEMO_WHIM_BASE_MIN` | 180 | 180 |
