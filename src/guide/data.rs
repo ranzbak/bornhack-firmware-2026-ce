@@ -152,7 +152,11 @@ pub fn fixed() -> Vec<(&'static str, u32, Unit)> {
             crate::game::friends::FRIEND_BOOST_COOLDOWN_TICKS,
             Unit::Ticks
         ),
-        ("FRIENDS_MAX", crate::game::friends::FRIENDS_MAX as u32, Unit::Count),
+        (
+            "FRIENDS_MAX",
+            crate::game::friends::FRIENDS_MAX as u32,
+            Unit::Count
+        ),
         (
             "STATION_FOOD_FLOOR_PCT",
             crate::game::engine::STATION_FOOD_FLOOR_PCT as u32,
