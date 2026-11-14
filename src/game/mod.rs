@@ -761,12 +761,9 @@ where
     D: DrawTarget<Color = TriColor>,
 {
     let on = DEMO_MARK.iter().enumerate().flat_map(|(row, bits)| {
-        (0..4).filter(move |col| bits & (0b1000 >> col) != 0).map(move |col| {
-            Pixel(
-                DEMO_MARK_POS + Point::new(col, row as i32),
-                BLACK,
-            )
-        })
+        (0..4)
+            .filter(move |col| bits & (0b1000 >> col) != 0)
+            .map(move |col| Pixel(DEMO_MARK_POS + Point::new(col, row as i32), BLACK))
     });
     display.draw_iter(on)
 }
@@ -1855,5 +1852,27 @@ mod tests {
         s.health = (30 * P) as u16;
         crate::game::lifecycle::set_state_for_test(Some(s));
         assert!(super::status_wants_full_refresh(), "the help line is red");
+        // Both ways of the boundary: just over the line, the help line is
+        // off, and so is the red.
+        let mut s = demo_pet();
+        s.health = (crate::game::engine::thresholds::DEMO_HELP_HEALTH_PCT() as i32 * P + P) as u16;
+        crate::game::lifecycle::set_state_for_test(Some(s));
+        assert!(!super::status_wants_full_refresh(), "over the help line");
+    }
+
+    /// The views `lib.rs` hands the whole screen to (diary, realm, ...) never
+    /// reach `draw_screen_game`, so the demo mark is not drawn over them.
+    #[test]
+    fn full_screen_views_do_not_draw_the_demo_mark() {
+        let _guard = super::lock_test_state();
+        let _clear = ClearPet;
+        crate::game::lifecycle::set_state_for_test(Some(demo_pet()));
+        for (name, open, close) in super::FULL_SCREEN_VIEWS {
+            open();
+            let mut c = Canvas::new();
+            crate::draw_graphics(&mut c, "", &100).unwrap();
+            assert!(!mark_drawn(&c), "{name} is up");
+            close();
+        }
     }
 }
