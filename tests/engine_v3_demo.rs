@@ -2756,6 +2756,17 @@ mod oversleep {
         }
     }
 
+    /// Bedtime under the reset line wipes the carried oversleep, so the
+    /// Sleep row does not forecast the old groggy wake for the new night.
+    #[test]
+    fn the_sleep_forecast_reads_the_oversleep_after_bedtime() {
+        let mut s = overslept(false, false);
+        s.update(s.last_update_tick + 5 * TICKS_PER_MINUTE);
+        assert!(!s.is_sleeping, "the oversleep wake");
+        assert!(s.take_causes().iter().any(|&c| c == Cause::Groggy));
+        assert_ne!(s.preview_sleep(), Some(Cause::Groggy));
+    }
+
     #[test]
     fn a_player_can_put_an_overslept_pet_back_to_bed() {
         let mut s = overslept(false, false);

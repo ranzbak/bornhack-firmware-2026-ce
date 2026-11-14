@@ -1030,8 +1030,9 @@ impl GameState {
             .last_update_tick
             .saturating_add((SELF_WAKE_MIN() as u32 + 1) * TICKS_PER_MINUTE);
         // Rested means the oversleep grew past what carried into bedtime, so a
-        // re-nap with a carried oversleep is still simulated.
-        let carried = self.oversleep_min;
+        // re-nap with a carried oversleep is still simulated. Bedtime under
+        // the reset line wipes the count, so it is read after `sleep()`.
+        let carried = c.oversleep_min;
         while c.is_sleeping
             && c.phase != Phase::Gone
             && c.oversleep_min <= carried
