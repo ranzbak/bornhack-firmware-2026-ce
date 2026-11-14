@@ -104,8 +104,6 @@ pub mod display_flush;
 pub mod evict_table;
 #[cfg(feature = "simulator")]
 pub mod guide;
-#[cfg(feature = "simulator")]
-pub mod sim_support;
 pub mod hex;
 pub mod menu;
 pub mod lut_file;
@@ -116,6 +114,8 @@ pub mod platform;
 pub mod qr_screen;
 #[cfg(feature = "signed-channel")]
 pub mod signed_channel;
+#[cfg(feature = "simulator")]
+pub mod sim_support;
 pub mod sync;
 pub mod text_entry;
 pub mod text_wrap;

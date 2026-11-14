@@ -9,13 +9,17 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 
+use crate::game::engine::doses::{Reason, Refusal};
 use crate::game::engine::sim;
 use crate::game::engine::status::{Condition, Word};
 use crate::game::engine::thresholds::{HATCHING_TICKS, Mode, badge_preset};
 use crate::game::engine::{DebugPoke, DisplayAnim, FoodKind, PetKind};
 use crate::game::modal::{self, ModalKind};
 use crate::game::stats_pages::Page;
-use crate::game::{Toast, current_toast, diary_view, lifecycle, pet_select};
+use crate::game::{
+    NAME_PROMPT, Toast, current_toast, diary_view, lifecycle, pet_select, prompt_for_name,
+    reason_toast,
+};
 use crate::menu::{ButtonId, dispatch_press};
 use crate::platform::{fake_uptime_ms, set_fake_uptime_ms};
 use crate::sim_support;
@@ -144,18 +148,16 @@ fn debug_menu() {
     play(DEBUG_MENU);
 }
 
-/// What the firmware's render loop does once the egg has hatched: ask for a
-/// name, with a default filled in.
+/// What the firmware's render loop does once the egg has hatched.
 fn name_prompt() {
-    assert!(lifecycle::take_naming_pending(), "the egg has not hatched");
+    assert!(prompt_for_name(), "the egg has not hatched");
+}
+
+/// The naming prompt is up, with its title and the default name filled in.
+fn naming_prompt_is_up() -> bool {
     let default = lifecycle::random_default_name(lifecycle::now_tick());
-    text_entry::begin(
-        default.as_bytes(),
-        12,
-        |name| lifecycle::set_pet_name(name),
-        "Name your Pet",
-        true,
-    );
+    text_entry::active_entry()
+        .is_some_and(|(title, text)| title == NAME_PROMPT && text == default.as_bytes())
 }
 
 fn sleep() {
@@ -249,7 +251,9 @@ use ButtonId::{Down, Fire, Right};
 
 pub static SHOTS: &[Shot] = &[
     shot!("start", [], || !lifecycle::is_started()),
-    shot!("select-pet", [Press(Fire)], pet_select::is_active),
+    shot!("select-pet", [Press(Fire)], || {
+        pet_select::is_active() && pet_select::phase() == pet_select::Phase::Pet
+    }),
     shot!("select-mode", [Press(Fire), Press(Fire)], || {
         pet_select::is_active() && pet_select::phase() == pet_select::Phase::Money
     }),
@@ -264,7 +268,7 @@ pub static SHOTS: &[Shot] = &[
             Do(hatch),
             Do(name_prompt)
         ],
-        text_entry::is_active
+        naming_prompt_is_up
     ),
     shot!(
         "egg",
@@ -380,7 +384,8 @@ pub static SHOTS: &[Shot] = &[
     shot!(
         "risk-marker",
         [Do(content), Poke(DebugPoke::Stuffed), Open(ModalKind::Feed)],
-        || menu_is(ModalKind::Feed) && modal::risk_row_count() > 0
+        || menu_is(ModalKind::Feed)
+            && lifecycle::cycle().is_some_and(|s| modal::risk_row_count(&s) > 0)
     ),
     shot!(
         "refusal-water",
@@ -393,7 +398,7 @@ pub static SHOTS: &[Shot] = &[
             Press(ButtonId::Up),
             Press(Fire)
         ],
-        || toast_is(Toast::Reason)
+        || reason_toast() == Some(Reason::Refused(Refusal::NotThirsty))
     ),
     shot!(
         "hibernating",

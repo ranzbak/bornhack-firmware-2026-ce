@@ -190,7 +190,7 @@ mod tests {
         let before = crate::game::next_ui_deadline_tick();
         crate::game::lifecycle::cycle();
         assert_eq!(crate::game::lifecycle::diary().len(), 1);
-        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::None);
+        assert_eq!(crate::game::current_toast().unwrap_or(crate::game::Toast::None), crate::game::Toast::None);
         let now = crate::game::lifecycle::now_tick();
         assert!(crate::game::next_ui_deadline_tick() > now + 1);
         assert_eq!(crate::game::next_ui_deadline_tick(), before);

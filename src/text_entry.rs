@@ -892,6 +892,12 @@ pub(crate) fn close_for_test() {
     TEXT_ENTRY.lock(|cell| cell.replace(None));
 }
 
+/// The active entry's title and text (host-only, for the guide's shot checks).
+#[cfg(any(test, feature = "simulator"))]
+pub fn active_entry() -> Option<(&'static str, std::vec::Vec<u8>)> {
+    TEXT_ENTRY.with(|e| e.as_ref().map(|e| (e.title, e.text.to_vec())))
+}
+
 /// Returns true when text entry is active.
 pub fn is_active() -> bool {
     TEXT_ENTRY.with(|e| e.is_some())

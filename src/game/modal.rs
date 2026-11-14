@@ -768,17 +768,15 @@ pub fn stats_view_open() -> bool {
     STATS_VIEW.load(Ordering::Relaxed)
 }
 
-/// How many rows of the open menu carry the risk mark now. Host-only, for the
+/// How many rows of the open menu carry the risk mark, from the stats of the
+/// last cycle (the caller cycles first; this does not). Host-only, for the
 /// guide's shot checks (the mark is drawn, not typed).
 #[cfg(any(test, feature = "simulator"))]
-pub fn risk_row_count() -> usize {
-    let Some(stats) = super::lifecycle::cycle() else {
-        return 0;
-    };
+pub fn risk_row_count(stats: &super::engine::PetStats) -> usize {
     open_kind()
         .items()
         .iter()
-        .filter(|item| item.risk(&stats).is_some())
+        .filter(|item| item.risk(stats).is_some())
         .count()
 }
 
@@ -1684,7 +1682,7 @@ mod tests {
         super::close();
         lifecycle::debug_skip_minutes(5);
         lifecycle::cycle();
-        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::Cause);
+        assert_eq!(crate::game::current_toast().unwrap_or(crate::game::Toast::None), crate::game::Toast::Cause);
         assert_eq!(crate::game::last_cause_for_test(), Some(Cause::FoodComa));
         assert_eq!(lifecycle::diary().len(), 1);
         assert_eq!(
@@ -1750,7 +1748,7 @@ mod tests {
         });
         super::open(ModalKind::Stats);
         assert_eq!(crate::game::lifecycle::diary().len(), 1);
-        assert_eq!(crate::game::current_toast_for_test(), crate::game::Toast::None);
+        assert_eq!(crate::game::current_toast().unwrap_or(crate::game::Toast::None), crate::game::Toast::None);
         lifecycle::set_state_for_test(None);
     }
 

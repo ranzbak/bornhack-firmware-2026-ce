@@ -429,6 +429,7 @@ pub fn screen_words() -> std::vec::Vec<(&'static str, &'static str)> {
     for line in GONE_PROMPT {
         out.push(("screen", line));
     }
+    out.push(("screen", NAME_PROMPT));
     out
 }
 
@@ -529,16 +530,6 @@ pub fn current_toast() -> Option<Toast> {
         .is_active()
         .then(|| Toast::from_u8(TOAST_MSG.load(Ordering::Relaxed)))
         .filter(|t| *t != Toast::None)
-}
-
-/// The toast that is up now.
-#[cfg(test)]
-pub(crate) fn current_toast_for_test() -> Toast {
-    if TOAST.is_active() {
-        Toast::from_u8(TOAST_MSG.load(Ordering::Relaxed))
-    } else {
-        Toast::None
-    }
 }
 
 /// The cause the last `show_cause` stored.
@@ -1039,11 +1030,7 @@ where
         lifecycle::cycle();
 
         // After hatching completes, prompt the player to name their pet.
-        if lifecycle::take_naming_pending() {
-            let seed = lifecycle::now_tick();
-            let default = lifecycle::random_default_name(seed);
-            crate::text_entry::begin(default.as_bytes(), 12, on_pet_named, "Name your Pet", true);
-        }
+        prompt_for_name();
     }
 
     // Blit sprite from flash.
@@ -1133,8 +1120,31 @@ where
     }
 }
 
+/// Title of the naming prompt.
+pub const NAME_PROMPT: &str = "Name your Pet";
+
+/// Longest name the prompt accepts.
+const NAME_PROMPT_MAX: u8 = 12;
+
+/// Once the egg has hatched, open the naming prompt with a default name
+/// filled in. True when it opened. The firmware's render loop and the guide's
+/// `naming` shot both call this.
+pub fn prompt_for_name() -> bool {
+    if !lifecycle::take_naming_pending() {
+        return false;
+    }
+    let default = lifecycle::random_default_name(lifecycle::now_tick());
+    crate::text_entry::begin(
+        default.as_bytes(),
+        NAME_PROMPT_MAX,
+        on_pet_named,
+        NAME_PROMPT,
+        true,
+    );
+    true
+}
+
 /// Text entry callback: player has submitted a pet name.
-#[cfg(feature = "embassy-core")]
 fn on_pet_named(name: &[u8]) {
     lifecycle::set_pet_name(name);
 }
@@ -1266,7 +1276,7 @@ mod tests {
         });
         crate::game::lifecycle::cycle();
         assert_eq!(crate::game::lifecycle::diary().len(), 1);
-        assert_eq!(super::current_toast_for_test(), super::Toast::None);
+        assert_eq!(super::current_toast().unwrap_or(super::Toast::None), super::Toast::None);
     }
 
     #[test]

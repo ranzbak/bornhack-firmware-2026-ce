@@ -47,7 +47,10 @@ fn hex(prefix: u8) -> String {
 /// Draw the PCX `name` on a white display of its own size and save it.
 fn save_pcx(name: &[u8; 11], path: &Path) -> Result<(), String> {
     let (w, h) = pcx_size_sim(name).ok_or_else(|| {
-        alloc::format!("missing or unreadable sprite {}", String::from_utf8_lossy(name))
+        alloc::format!(
+            "missing or unreadable sprite {}",
+            String::from_utf8_lossy(name)
+        )
     })?;
     let mut display: SimulatorDisplay<Rgb888> = SimulatorDisplay::new(Size::new(w, h));
     display.clear(Rgb888::new(255, 255, 255)).unwrap();
@@ -77,7 +80,10 @@ pub fn export(out_dir: &Path) -> J {
         }
         pets.push(J::Obj(alloc::vec![
             ("prefix".to_string(), J::Str(prefix)),
-            ("name".to_string(), J::Str(pet_registry::name_of(kind.0).to_string())),
+            (
+                "name".to_string(),
+                J::Str(pet_registry::name_of(kind.0).to_string())
+            ),
             ("anims".to_string(), J::Obj(anims)),
         ]));
     }
