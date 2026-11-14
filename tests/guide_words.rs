@@ -135,6 +135,7 @@ fn scan(src: &str, tables: bool) -> Vec<String> {
     let mut out = Vec::new();
     for pat in [
         "Text::with_text_style(",
+        "Text::new(",
         "draw_text(",
         "draw_alert(",
         "draw_centered_message(",
