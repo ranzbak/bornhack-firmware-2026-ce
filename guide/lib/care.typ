@@ -38,3 +38,9 @@
 
 // The frozen hero, small, beside the Hibernate text.
 #let ice-pic() = sprite-fit("hero", "hibernating", w: 50pt, h: 50pt)
+
+// Like `sg`, but a dose that leaves the field alone (absent or zero) reads "none".
+#let sgn(item, field, preset: classic) = {
+  let d = dose(item, preset: preset)
+  if field in d and d.at(field) != 0 { sg(item, field, preset: preset) } else { "none" }
+}

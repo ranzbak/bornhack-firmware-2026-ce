@@ -41,8 +41,8 @@ reason for a moment. All the reasons are listed at the end of this chapter.
 
 *Actions take time.* A feed or a drink takes #v("FEED_DURATION"). The dose
 lands when that time is over, and the pet shows the matching animation. While
-one action runs, every other row says #w("busy"). Sleep and Wake up are
-instant.
+one action runs, the running row shows a countdown and every other row says #w("busy"),
+except Wake up, which is never busy. Sleep and Wake up are instant.
 
 *Money.* A price is charged when the action starts, and only if the action is
 accepted. A refused row costs nothing. A row you cannot pay for says
@@ -61,8 +61,9 @@ never suggests a row that would refuse. See @ch-reading.]
 #grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
   [
     Five foods, in this order. The title bar shows the whole name of the row
-    under the cursor: #w("Frikandel spec") is the Dutch snack
-    #w("Frikandel speciaal"). In Hard mode (US) it turns into a hamburger, see
+    under the cursor, unless a reason or a risk takes the title bar:
+    #w("Frikandel spec") is the Dutch snack
+    #w("Frikandel speciaal"). In Hard mode (US) it turns into a #w("Hamburger"), see
     @ch-hard.
 
     Every feed takes #v("FEED_DURATION"). Every food adds dirt. Salad and
@@ -74,15 +75,15 @@ never suggests a row that would refuse. See @ch-reading.]
 #block(above: 3mm)[
     #tbl((auto, auto, auto, auto, 1fr),
       table.header([*Food*], [*Price*], [*Full*], [*Weight*], [*Mood*]),
-      [#w("Salad")], pr("Salad"), sg("Salad", "full"), [none], [none],
-      [#w("Apple")], pr("Apple"), sg("Apple", "full"), sg("Apple", "weight"), [none],
-      [#w("Frikandel spec")], pr("Frikandel spec"), sg("Frikandel spec", "full"), sg("Frikandel spec", "weight"), sg("Frikandel spec", "mood"),
+      [#w("Salad")], pr("Salad"), sg("Salad", "full"), sgn("Salad", "weight"), sgn("Salad", "mood"),
+      [#w("Apple")], pr("Apple"), sg("Apple", "full"), sgn("Apple", "weight"), sgn("Apple", "mood"),
+      [#w("Frikandel spec") #linebreak() #text(size: 7pt)[(speciaal)]], pr("Frikandel spec"), sg("Frikandel spec", "full"), sg("Frikandel spec", "weight"), sg("Frikandel spec", "mood"),
       [#w("Pizza")], pr("Pizza"), sg("Pizza", "full"), sg("Pizza", "weight"), sg("Pizza", "mood"),
       [#w("Cake")], pr("Cake"), sg("Cake", "full"), sg("Cake", "weight"), sg("Cake", "mood"),
     )
 ]
 
-#block(breakable: false)[
+#block[
 - *The repeat-junk rule.* Frikandel, pizza and cake are *treats*. A treat
   gives its full mood only if the last treat is more than #v("DOSE_JUNK_MIN")
   old. A treat too soon gives its mood divided by
@@ -110,7 +111,9 @@ menu has no word for "no more cake". It only has the warning mark.]
     #v("DOSE_WATER_BELLY_MIN_PCT") also fills the belly a little. Its toast is
     #w("refreshed!"), the same as cola.
   ],
-  screen("refusal-water", width: shot-m, caption: [Not thirsty.]))
+  stack(spacing: gap-s,
+    screen("menu-drink", width: shot-s, caption: [The Drink menu.]),
+    screen("refusal-water", width: shot-s, caption: [Not thirsty.])))
 
 #block(above: 3mm)[
     #tbl((auto, auto, auto, 1fr),
@@ -119,7 +122,7 @@ menu has no word for "no more cake". It only has the warning mark.]
       [#w("Cola")], pr("Cola"), sg("Cola", "water"), [Energy #sg("Cola", "energy"), mood #sg("Cola", "mood").],
       [#w("Beer")], pr("Beer"), sg("Beer", "water"), [Booze #sg("Beer", "booze"), mood #sg("Beer", "mood").],
       [#w("Wine")], pr("Wine"), sg("Wine", "water"), [Booze #sg("Wine", "booze"), mood #sg("Wine", "mood").],
-      [#w("Whiskey")], pr("Whiskey"), [none], [Booze #sg("Whiskey", "booze"), mood #sg("Whiskey", "mood").],
+      [#w("Whiskey")], pr("Whiskey"), sgn("Whiskey", "water"), [Booze #sg("Whiskey", "booze"), mood #sg("Whiskey", "mood").],
     )
 ]
 
@@ -132,11 +135,12 @@ Its toast reads #w("+drunk"). A drunk pet feels less of the mood, a dependent
 one half of that, and a tired pet gets hit harder. @ch-conditions has the
 booze rules, dependence and rehab.
 
-#block(breakable: false)[
+#block[
 - *Risks.* #w("sloshing") (past the water or belly band),
-  #w("one too many") (past the booze band) and #w("barely felt") (already
-  drunk). Also a dry mouth (booze without water) and a relapse (alcohol in
-  rehab).
+  #w("sloppy") (past the booze band; the cause toast then says
+  #w("one too many")) and #w("barely felt") (already
+  drunk). Also #w("dry mouth") (booze on a pet that is already thirsty) and
+  #w("relapse!") (alcohol in rehab).
 - *Refused when:* water is asked of a pet above #v("WATER_REFUSE_PCT"):
   #w("not thirsty"). Also #w("busy"), #w("can't afford") and
   #w("hibernating").
@@ -165,21 +169,22 @@ booze rules, dependence and rehab.
     #tbl((auto, auto, auto, 1fr),
       table.header([*Row*], [*Price*], [*Takes*], [*Does*]),
       [#w("Sleep")], [free], [instant], [Puts the pet to bed.],
-      [#w("Relax")], pr("Relax"), [#v("PLAY_DURATION")], [Fun #sg("Relax", "fun"), strain #sg("Relax", "strain"), energy #sg("Relax", "energy").],
+      [#w("Relax")], pr("Relax"), [#v("PLAY_DURATION")], [Fun #sg("Relax", "fun"), strain #sg("Relax", "strain"), energy #sg("Relax", "energy"), fitness #sg("Relax", "fit").],
       [#w("Wash")], pr("Wash"), [#v("PLAY_DURATION")], [Dirt #sg("Wash", "dirt").],
       [#w("Wake up")], [free], [instant], [Ends a sleep.],
     )
 ]
 
 *Relax.* A rest for the head. It lowers fun, so a pet that was near the bottom
-of the Fun band turns #w("bored"), and the row warns #w("too much relax"). It
+of the Fun band turns #w("bored"), and the row warns #w("bored"); the cause toast then says
+#w("too much relax"). It
 is good for strain and is allowed on an injured pet.
 
 *Wash.* Only for a dirty pet.
 
 #pic-row((("sleeping", [Sleep.]), ("idle", [Relax.]), ("happy", [Clean.])))
 
-#block(breakable: false)[
+#block[
 *Refused when:*
 - #w("asleep"): Sleep, on a pet that is already asleep.
 - #w("no need"): Wake up, on a pet that is awake.
@@ -225,7 +230,7 @@ the row says #w("wait <time>") until then.
 
 *Ozempic* is for any pet. It takes #v("DOSE_OZEMPIC_WEIGHT_PCT") off the
 weight and #v("DOSE_OZEMPIC_FIT_PCT") off the fitness. For
-#v("DOSE_OZEMPIC_MIN") the pet is *on Ozempic*, and treats give it no mood.
+#v("DOSE_OZEMPIC_MIN") the pet is *#w("on Ozempic")*, and treats give it no mood.
 The next dose waits #v("DOSE_OZEMPIC_CD_MIN").
 
 *Rehab* is only for a dependent pet. It protects for #v("DOSE_REHAB_MIN"), and
@@ -310,6 +315,34 @@ pet. The list, top to bottom:
 #joke[#w("Imp. March") is the Imperial March, and #w("Samsung") is a phone
 maker's tune. No song feeds the pet. #w("Trololo") comes closest.]
 
+== Stats
+
+#grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
+  [
+    The Stats menu is about looking. Nothing here costs HAX or time, and
+    nothing changes the pet. It has five rows:
+    - #w("View stats"): the need bars, two pages. See @ch-needs.
+    - #w("Hint"): the pet says what it wants. See @ch-reading.
+    - #w("Diary"): the last #v("DIARY_LEN") causes. See @ch-reading.
+    - #w("Rolled stats"): the pet's three rolled traits, as bars.
+    - #w("Friends"): the pets you have met. See @ch-friends.
+  ],
+  screen("menu-stats", width: shot-m, caption: [The Stats menu.]))
+
+A hibernating pet keeps every row but #w("Friends"). Any button closes a view.
+
+== Hibernate
+
+#grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
+  [The Hibernate menu has two rows: #w("Hibernate") and #w("Defrost"). The
+  first freezes the pet and the second thaws it. A hibernating pet answers
+  every other action with #w("hibernating"). Both rows are free and instant.
+  Defrost on a pet that is not frozen is shut and says #w("no need"), and
+  Hibernate on a frozen pet says #w("hibernating").
+  @ch-offtime has the whole story: what freezes, what does not, and the
+  alarms.],
+  ice-pic())
+
 == Exercise
 
 The Exercise icon opens a menu with one row, #w("Exercise now"). It is free
@@ -350,33 +383,6 @@ still counts. Exercise also shortens a hangover by
 #tip[Check the status line first. A #w("sore") pet is close to the strain
 line, one session from a torn muscle. Relax lowers strain.]
 
-== Stats
-
-#grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
-  [
-    The Stats menu is about looking. Nothing here costs HAX or time, and
-    nothing changes the pet. It has five rows:
-    - #w("View stats"): the need bars, two pages. See @ch-needs.
-    - #w("Hint"): the pet says what it wants. See @ch-reading.
-    - #w("Diary"): the last #v("DIARY_LEN") causes. See @ch-reading.
-    - #w("Rolled stats"): the pet's three rolled traits, as bars.
-    - #w("Friends"): the pets you have met. See @ch-friends.
-  ],
-  screen("menu-stats", width: shot-m, caption: [The Stats menu.]))
-
-A hibernating pet keeps every row but #w("Friends"). Any button closes a view.
-
-== Hibernate
-
-#grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
-  [The Hibernate menu has two rows: #w("Hibernate") and #w("Defrost"). The
-  first freezes the pet and the second thaws it. A hibernating pet answers
-  every other action with #w("hibernating"). Both rows are free and instant.
-  @ch-offtime has the whole story: what freezes, what does not, and the
-  alarms.],
-  ice-pic())
-
-#pagebreak(weak: true)
 == Every refusal
 
 When a row says no, it uses one of these words.
@@ -387,9 +393,9 @@ When a row says no, it uses one of these words.
   [#w("asleep")], [Sleep on a sleeper. Also Battle, a game or #w("Only pets") on a sleeper.],
   [#w("busy")], [Another action is still running.],
   [#w("can't afford")], [Money mode: the price is more than the balance.],
-  [#w("hibernating")], [The pet is frozen. Only #w("Defrost") and the Stats views work.],
+  [#w("hibernating")], [The pet is frozen. Only #w("Defrost") and the Stats views work. Hibernate on a frozen pet says it too.],
   [#w("injured")], [Play now, Exercise or #w("Only pets") on an injured pet.],
-  [#w("no need")], [Wake up on an awake pet. Insulin without diabetes. Rehab without dependence.],
+  [#w("no need")], [Wake up on an awake pet. Defrost on a pet that is not frozen. Insulin without diabetes. Rehab without dependence.],
   [#w("not thirsty")], [Water, when hydration is over #v("WATER_REFUSE_PCT").],
   [#w("pet is gone")], [The pet has left. Rare: the badge shows no menus then.],
   [#w("still an egg")], [The egg has not hatched. Rare, for the same reason.],
@@ -400,17 +406,7 @@ When a row says no, it uses one of these words.
 *Reading the time.* #w("wait <time>") is written as #raw("45s") under a
 minute, #raw("59m") under an hour, and #raw("2h05") above that.
 
-Which rows can show a wait?
-- Aspirine: #v("DOSE_MED_CD_MIN") after a dose.
-- Insulin: until the window opens.
-- Ozempic: #v("DOSE_OZEMPIC_CD_MIN") after a dose.
-- Rehab: while the protection runs.
-- Battle and the five games: their cooldowns.
-
-The row shows the wait in place of its price. Select the row and press Fire,
-and the title bar says it in full.
-
-#pic-row((("tired", [Too tired.]), ("sleeping", [Asleep.]), ("critical", [Hurt.])))
+The row shows the wait in place of its price.
 
 #pagebreak(weak: true)
 == Every toast
