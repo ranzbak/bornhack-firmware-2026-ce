@@ -5,6 +5,7 @@
 //! the format-3 save, so a plan-2 save (zeros there) reads as demo off.
 
 use super::advance::SLOW_SCALE;
+use super::causes::Cause;
 use super::needs::{MAX, Need, P};
 use super::thresholds as t;
 use super::{Action, DrinkKind, FoodKind, GameState, MiniGame, Phase, TICKS_PER_MINUTE};
@@ -442,9 +443,25 @@ fn soft_wanted(s: &GameState) -> bool {
     }
 }
 
+/// Which kind of row picked a choice: it decides what `act` re-arms.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Row {
+    /// Insulin, rehab, the edge rows and the bedtime and boredom rows.
+    Urgent,
+    /// A soft row, after the soft delay (or the dry-out water).
+    Soft,
+    /// A whim.
+    Whim,
+}
+
 /// What the pet does now, or `None`. Pure: reads the dice without stepping
 /// them. The first row that applies and is not refused (table in the plan).
 pub fn decide(s: &GameState) -> Option<Choice> {
+    decide_row(s).map(|(c, _)| c)
+}
+
+/// `decide`, with the kind of row that chose.
+fn decide_row(s: &GameState) -> Option<(Choice, Row)> {
     if !s.demo.on
         || s.phase != Phase::Active
         || s.hibernating
@@ -458,7 +475,7 @@ pub fn decide(s: &GameState) -> Option<Choice> {
     let clock_due = d.clock_armed && d.clock_min == 0;
     if s.is_sleeping {
         let wake = clock_due || (s.fullness as i32) < l.wake_full;
-        return wake.then_some(Choice::Wake);
+        return wake.then_some((Choice::Wake, Row::Urgent));
     }
     let food = if s.weight as i32 > l.light_food {
         FoodKind::Apple
@@ -482,12 +499,12 @@ pub fn decide(s: &GameState) -> Option<Choice> {
         ),
     ];
     if let Some(c) = first(s, &rows) {
-        return Some(c);
+        return Some((c, Row::Urgent));
     }
     let delay_done = d.soft_armed && d.next_min == 0;
     if drunk(s) {
         let water = Choice::Drink(DrinkKind::Water);
-        return (delay_done && allowed(s, water)).then_some(water);
+        return (delay_done && allowed(s, water)).then_some((water, Row::Soft));
     }
     if let Some(c) = first(
         s,
@@ -496,13 +513,13 @@ pub fn decide(s: &GameState) -> Option<Choice> {
             (s.fun as i32 > l.wired_fun, Choice::Relax),
         ],
     ) {
-        return Some(c);
+        return Some((c, Row::Urgent));
     }
     if delay_done && let Some(c) = soft_pick(s) {
-        return Some(c);
+        return Some((c, Row::Soft));
     }
     if d.whim_min == 0 {
-        return whim_pick(s);
+        return whim_pick(s).map(|c| (c, Row::Whim));
     }
     None
 }
@@ -511,6 +528,166 @@ pub fn decide(s: &GameState) -> Option<Choice> {
 /// help line (Task 6 sets it).
 pub fn wake_view(s: &GameState) -> u8 {
     decide(s).is_some() as u8
+}
+
+// ---------------------------------------------------------------------------
+// Acting: the pet looks after itself
+// ---------------------------------------------------------------------------
+
+/// What the pet last did by itself, for the one-line note under it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Note {
+    Ate(FoodKind),
+    Drank(DrinkKind),
+    OneTooMany,
+    Napping,
+    OffToBed,
+    UpAndAbout,
+    Washing,
+    Played,
+    Rested,
+    Medicine,
+    Insulin,
+    Rehab,
+}
+
+impl Note {
+    /// The words (at most 21 columns).
+    pub fn text(self) -> &'static str {
+        match self {
+            Note::Ate(FoodKind::Apple) => "had an apple",
+            Note::Ate(FoodKind::Salad) => "had a salad",
+            Note::Ate(FoodKind::Pizza) => "had some pizza",
+            Note::Ate(FoodKind::Frikandel) => "had a Frikandel spec",
+            Note::Ate(FoodKind::Cake) => "had some cake",
+            Note::Drank(DrinkKind::Water) => "had some water",
+            Note::Drank(DrinkKind::Cola) => "had a cola",
+            Note::Drank(DrinkKind::Beer) => "fancied a beer",
+            Note::Drank(DrinkKind::Wine) => "had some wine",
+            Note::Drank(DrinkKind::Whiskey) => "had a whiskey",
+            Note::OneTooMany => "one too many...",
+            Note::Napping => "napping",
+            Note::OffToBed => "off to bed",
+            Note::UpAndAbout => "up and about",
+            Note::Washing => "having a wash",
+            Note::Played => "had a play",
+            Note::Rested => "had a rest",
+            Note::Medicine => "took medicine",
+            Note::Insulin => "took insulin",
+            Note::Rehab => "went to rehab",
+        }
+    }
+}
+
+/// Most acts one boundary runs. Rows 3 to 13 can all be pending at once; what
+/// is left waits for the next boundary (the next update).
+pub const MAX_ACTS_PER_BOUNDARY: u8 = 8;
+
+/// The note an act leaves.
+fn note_for(c: Choice) -> Note {
+    match c {
+        Choice::Eat(f) => Note::Ate(f),
+        Choice::Drink(d) => Note::Drank(d),
+        Choice::Sleep => Note::OffToBed,
+        Choice::Nap => Note::Napping,
+        Choice::Wake => Note::UpAndAbout,
+        Choice::Wash => Note::Washing,
+        Choice::Play | Choice::Game(..) => Note::Played,
+        Choice::Relax => Note::Rested,
+        Choice::Medicine => Note::Medicine,
+        Choice::Insulin => Note::Insulin,
+        Choice::Rehab => Note::Rehab,
+    }
+}
+
+/// The action behind a timed choice, with its food or drink.
+fn action_of(c: Choice) -> Option<(Action, Option<FoodKind>, Option<DrinkKind>)> {
+    Some(match c {
+        Choice::Eat(f) => (Action::Feed, Some(f), None),
+        Choice::Drink(d) => (Action::Drink, None, Some(d)),
+        Choice::Wash => (Action::Wash, None, None),
+        Choice::Play => (Action::Play, None, None),
+        Choice::Relax => (Action::Relax, None, None),
+        Choice::Medicine => (Action::Heal, None, None),
+        Choice::Insulin => (Action::Medicate, None, None),
+        Choice::Rehab => (Action::Rehab, None, None),
+        Choice::Sleep | Choice::Nap | Choice::Wake | Choice::Game(..) => return None,
+    })
+}
+
+/// Take `c` now, through the real starter and dose, and leave a note. The act
+/// takes no ticks: the dose lands in the same minute. It steps the dice once,
+/// plus once for each delay it draws.
+pub fn act(s: &mut GameState, c: Choice) {
+    let row = decide_row(s).filter(|&(d, _)| d == c).map(|(_, r)| r);
+    s.self_care = true;
+    // The causes this act queues, apart from what was waiting already.
+    let waiting = core::mem::take(&mut s.causes);
+    let started = match (action_of(c), c) {
+        (Some((a, food, drink)), _) => s.start_choice(a, food, drink),
+        (None, Choice::Sleep) => s.sleep(),
+        (None, Choice::Nap) => {
+            let ok = s.sleep();
+            let wait = t::DEMO_NAP_BASE_MIN() as u32 + draw(s, t::DEMO_NAP_SPREAD_MIN() as u32);
+            s.demo.clock_min = wait.min(u16::MAX as u32) as u16;
+            s.demo.clock_armed = true;
+            ok
+        }
+        (None, Choice::Wake) => s.wake(),
+        (None, Choice::Game(g, grade)) => {
+            s.award_inspiration(g, grade);
+            true
+        }
+        // `action_of` answers every other choice.
+        (None, _) => false,
+    };
+    debug_assert!(started, "{c:?} was refused");
+    if action_of(c).is_some() {
+        s.finish_action();
+    }
+    match row {
+        Some(Row::Whim) => {
+            let wait = t::DEMO_WHIM_BASE_MIN() as u32 + draw(s, t::DEMO_WHIM_SPREAD_MIN() as u32);
+            s.demo.whim_min = wait.min(u16::MAX as u32) as u16;
+        }
+        Some(Row::Soft) => {
+            s.demo.soft_armed = false;
+            s.demo.next_min = 0;
+        }
+        Some(Row::Urgent) | None => {}
+    }
+    s.demo_rng = crate::platform::xorshift32(s.demo_rng);
+    let too_many = s.causes.iter().any(|&q| q == Cause::OneTooMany);
+    let mut queue = waiting;
+    for &cause in s.causes.iter() {
+        queue.push(cause);
+    }
+    s.causes = queue;
+    let note = if too_many {
+        Note::OneTooMany
+    } else {
+        note_for(c)
+    };
+    s.note = Some((note, super::status::status_line(s)));
+    s.self_care = false;
+    #[cfg(feature = "simulator")]
+    super::sim::note_self_care();
+}
+
+/// Everything the pet does at a boundary: settle, decide, act, until nothing
+/// is left to do (at most `MAX_ACTS_PER_BOUNDARY` acts). Returns the acts.
+pub fn run(s: &mut GameState) -> u8 {
+    let mut acts = 0;
+    loop {
+        settle(s);
+        match decide(s) {
+            Some(c) if acts < MAX_ACTS_PER_BOUNDARY => {
+                act(s, c);
+                acts += 1;
+            }
+            _ => return acts,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

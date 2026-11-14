@@ -423,7 +423,7 @@ pub fn wake_up(s: &mut GameState) -> Result<(), Refusal> {
     if !s.is_sleeping {
         return Err(Refusal::NoNeed);
     }
-    super::advance::wake(s, true);
+    super::advance::wake(s, !s.self_care);
     Ok(())
 }
 

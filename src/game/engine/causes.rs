@@ -98,10 +98,12 @@ pub enum Cause {
     OnlyNumbed,
     OverRelaxed,
     WellRested,
+    /// Demo mode: the player's care helped the pet.
+    Thanks,
 }
 
 /// The causes without a payload.
-const PLAIN: [Cause; 15] = [
+const PLAIN: [Cause; 16] = [
     Cause::FoodComa,
     Cause::TreatTooSoon,
     Cause::NoTreatBuzz,
@@ -117,6 +119,7 @@ const PLAIN: [Cause; 15] = [
     Cause::OnlyNumbed,
     Cause::OverRelaxed,
     Cause::WellRested,
+    Cause::Thanks,
 ];
 
 impl Cause {
@@ -140,6 +143,7 @@ impl Cause {
             Cause::OnlyNumbed => "only numbed",
             Cause::OverRelaxed => "bored",
             Cause::WellRested => "well rested",
+            Cause::Thanks => "thanks!",
         }
     }
 
@@ -163,12 +167,13 @@ impl Cause {
             Cause::OnlyNumbed => "not sick",
             Cause::OverRelaxed => "too much relax",
             Cause::WellRested => "good sleep",
+            Cause::Thanks => "that helped",
         }
     }
 
-    /// Everything but a good night is a warning.
+    /// Everything but a good night and a thank-you is a warning.
     pub fn is_warning(self) -> bool {
-        self != Cause::WellRested
+        !matches!(self, Cause::WellRested | Cause::Thanks)
     }
 
     /// Every variant, payloads included, once.
@@ -199,6 +204,7 @@ impl Cause {
             Cause::OnlyNumbed => 12,
             Cause::OverRelaxed => 13,
             Cause::WellRested => 14,
+            Cause::Thanks => 15,
             Cause::TornMuscle(w) => TORN_BASE + w as u8,
             Cause::Strained(w) => STRAINED_BASE + w as u8,
             Cause::BadNight(u) => BAD_NIGHT_BASE + u as u8,
@@ -209,7 +215,7 @@ impl Cause {
     pub fn unpack(v: u8) -> Option<Cause> {
         let at = |base: u8| v.checked_sub(base).map(usize::from);
         match v {
-            0..=14 => PLAIN.get(v as usize).copied(),
+            0..=15 => PLAIN.get(v as usize).copied(),
             TORN_BASE..STRAINED_BASE => StrainWhy::ALL
                 .get(at(TORN_BASE)?)
                 .map(|w| Cause::TornMuscle(*w)),

@@ -9,7 +9,7 @@ use std::cell::Cell;
 
 use super::needs::P;
 use super::thresholds::{self, Mode, Thresholds};
-use super::{DrinkKind, FoodKind, GameState, MiniGame, PetKind, Phase};
+use super::{Action, DrinkKind, FoodKind, GameState, MiniGame, PetKind, Phase};
 
 /// Engine ticks per minute (1 tick = 10 s).
 const TPM: u32 = 6;
@@ -107,6 +107,17 @@ const PROBE_NEW: Probe = Probe {
 // calls a preview.
 thread_local! {
     static PROBE: Cell<Probe> = const { Cell::new(PROBE_NEW) };
+    static SELF_CARE: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Called by `demo::act`: one self-care act happened.
+pub(super) fn note_self_care() {
+    SELF_CARE.with(|c| c.set(c.get() + 1));
+}
+
+/// Self-care acts counted on this thread since it began.
+pub fn self_care_acts() -> u32 {
+    SELF_CARE.with(|c| c.get())
 }
 
 /// Called by `GameState::update` after each closed-form segment of `dt`
@@ -198,12 +209,12 @@ fn perform(s: &mut GameState, a: Act) -> bool {
     match a {
         Act::Wake => s.wake(),
         Act::Sleep => s.sleep(),
-        Act::Eat(f) => s.feed(f),
-        Act::Drink(d) => s.drink(d),
-        Act::Play => s.play(),
-        Act::Sport => s.exercise(),
-        Act::Wash => s.wash(),
-        Act::Insulin => s.medicate(),
+        Act::Eat(f) => s.start_choice(Action::Feed, Some(f), None),
+        Act::Drink(d) => s.start_choice(Action::Drink, None, Some(d)),
+        Act::Play => s.start_choice(Action::Play, None, None),
+        Act::Sport => s.start_choice(Action::Exercise, None, None),
+        Act::Wash => s.start_choice(Action::Wash, None, None),
+        Act::Insulin => s.start_choice(Action::Medicate, None, None),
         Act::Friend => {
             s.friend_boost(true);
             true

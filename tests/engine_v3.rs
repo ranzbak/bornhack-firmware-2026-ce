@@ -4653,12 +4653,12 @@ mod causes {
             assert!(!c.what().is_empty() && !c.why().is_empty());
             assert_eq!(Cause::unpack(c.pack()), Some(c));
         }
-        assert_eq!(n, 35, "every variant once");
-        assert_eq!(Cause::all().count(), 35);
+        assert_eq!(n, 36, "every variant once");
+        assert_eq!(Cause::all().count(), 36);
         let mut codes: Vec<u8> = Cause::all().map(|c| c.pack()).collect();
         codes.sort();
         codes.dedup();
-        assert_eq!(codes.len(), 35, "every code is distinct");
+        assert_eq!(codes.len(), 36, "every code is distinct");
         assert_eq!(Cause::unpack(255), None);
         assert_eq!(Cause::TornMuscle(StrainWhy::WornOut).why(), "sport: worn out");
         assert_eq!(Cause::Strained(StrainWhy::Overdone).why(), "sport: too much");

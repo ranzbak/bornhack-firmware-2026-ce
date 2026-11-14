@@ -1338,15 +1338,23 @@ mod tests {
     fn a_catch_up_across_bedtime_arms_the_bed_at_the_right_minute() {
         use crate::game::engine::thresholds as t;
         const HOUR: u32 = 60;
-        // Off from 23:00 to 08:00: the replay starts at night, tired pet.
+        // Off from 23:00 to 06:00: the replay starts at night, tired pet. Bed
+        // was due at 23:00, so the pet went to bed at once and the clock now
+        // counts to getting up (07:00 plus the spread).
         let mut s = pet();
         s.demo.on = true;
         s.energy = (60 * crate::game::engine::needs::P) as u16;
         let done = AtomicBool::new(false);
-        let (saved, boot) = (unix_at(100, 23 * HOUR), unix_at(101, 8 * HOUR));
-        assert_eq!(boot_catch_up_minutes(&mut s, &done, saved, boot, 0), Some(9 * HOUR));
+        let (saved, boot) = (unix_at(100, 23 * HOUR), unix_at(101, 6 * HOUR));
+        assert_eq!(boot_catch_up_minutes(&mut s, &done, saved, boot, 0), Some(7 * HOUR));
+        assert!(s.is_sleeping, "the pet went to bed at 23:00");
         assert!(s.demo.clock_armed);
-        assert_eq!(s.demo.clock_min, 0, "bed was due at 23:00");
+        let up = t::DEMO_UP_AT_MIN() as u32 - 6 * HOUR;
+        assert!(
+            (up..=up + t::DEMO_UP_SPREAD_MIN() as u32).contains(&(s.demo.clock_min as u32)),
+            "{} minutes to getting up",
+            s.demo.clock_min
+        );
         // The pet's own minute is the time of day at the tick base again.
         assert_eq!(s.day_min, Some(super::minute_of_day(boot)));
 

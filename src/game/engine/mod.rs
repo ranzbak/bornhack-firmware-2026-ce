@@ -298,6 +298,13 @@ pub struct GameState {
     /// The armed soft delay was drawn as the dry-out interval. Transient: a
     /// reload at worst re-arms the delay once.
     pub(crate) soft_dry: bool,
+    /// True only inside `demo::act`: the starters are the pet's own, so they
+    /// pause nobody, wake nobody grumpy and earn no thanks. Transient.
+    pub(crate) self_care: bool,
+    /// What the demo pet last did by itself, and the status line it was taken
+    /// on (the note shows while the line is unchanged). Transient; the
+    /// player's next action clears it.
+    pub note: Option<(demo::Note, status::StatusLine)>,
 
     // Diabetes — permanent once triggered by sustained overweight.
     pub diabetic: bool,
@@ -469,6 +476,8 @@ impl GameState {
             demo_rng: demo::seed_rng(seed, 0),
             day_min: None,
             soft_dry: false,
+            self_care: false,
+            note: None,
 
             diabetic: false,
             diabetes_min: 0,
@@ -593,9 +602,14 @@ impl GameState {
         self.tick_rem = (ticks % TICKS_PER_MINUTE) as u8;
         // Minutes still to step singly after a runaway target was seen.
         let mut steep = 0u32;
-        while minutes > 0 && self.phase != Phase::Gone {
-            // The demo pet's bookkeeping at the segment boundary.
-            demo::settle(self);
+        loop {
+            // The demo pet looks after itself at every boundary (and at the
+            // start, where the player or a switch may have left a choice
+            // pending). Its acts take no ticks.
+            demo::run(self);
+            if minutes == 0 || self.phase == Phase::Gone {
+                break;
+            }
             let dt = self.segment(minutes, &mut steep);
             #[cfg(feature = "simulator")]
             ADVANCE_CALLS.with(|c| c.set(c.get() + 1));
@@ -683,20 +697,54 @@ impl GameState {
         let used = delta.min(self.action_ticks_remaining as u32);
         self.action_ticks_remaining -= used as u8;
         if self.action_ticks_remaining == 0 {
-            if let Some(action) = self.active_action.take() {
-                // A refusal leaves the pet untouched. The starters already
-                // turned those away and needs do not age during an action
-                // (R23), so it only happens when the saved state changed
-                // under a running action (a reboot mid-action).
-                if let Err(_refusal) = doses::apply(self, action) {
-                    #[cfg(feature = "embassy-core")]
-                    defmt::warn!("action dose refused at animation end: {}", _refusal);
-                }
-            }
-            self.active_food = None;
-            self.active_drink = None;
+            self.finish_action();
         }
         delta - used
+    }
+
+    /// Apply the running action's dose now and end the action. The animation
+    /// end calls it; the demo pet's instant care calls it right after the
+    /// starter, so the dose lands in the same minute.
+    fn finish_action(&mut self) {
+        self.action_ticks_remaining = 0;
+        let Some(action) = self.active_action.take() else {
+            self.active_food = None;
+            self.active_drink = None;
+            return;
+        };
+        let player_in_demo = self.demo.on && !self.self_care;
+        let penalty_before = regime::mood_penalty(self);
+        let before = core::mem::take(&mut self.causes);
+        // A refusal leaves the pet untouched. The starters already turned
+        // those away and needs do not age during an action (R23), so it only
+        // happens when the saved state changed under a running action (a
+        // reboot mid-action).
+        if let Err(_refusal) = doses::apply(self, action) {
+            #[cfg(feature = "embassy-core")]
+            defmt::warn!("action dose refused at animation end: {}", _refusal);
+        }
+        let warned = self.causes.iter().any(|c| c.is_warning());
+        let helped = regime::mood_penalty(self) < penalty_before;
+        let mut queue = before;
+        for &cause in self.causes.iter() {
+            queue.push(cause);
+        }
+        // The player's care helped and nothing went wrong with it.
+        if player_in_demo && helped && !warned {
+            queue.push(causes::Cause::Thanks);
+        }
+        self.causes = queue;
+        self.active_food = None;
+        self.active_drink = None;
+    }
+
+    /// The player did something: the demo pet's policy waits and its last
+    /// note goes. The pet's own acts (`self_care`) pause nobody.
+    fn player_acted(&mut self) {
+        if self.demo.on && !self.self_care {
+            self.demo.pause_min = DEMO_PAUSE_MIN();
+            self.note = None;
+        }
     }
 }
 
@@ -730,10 +778,11 @@ impl GameState {
         {
             return false; // can't afford — action rejected
         }
-        advance::wake(self, true);
+        advance::wake(self, !self.self_care);
         if let Some(price) = price {
             self.spend_money(price);
         }
+        self.player_acted();
         self.active_action = Some(action);
         self.action_ticks_remaining = duration;
         true
@@ -851,6 +900,30 @@ impl GameState {
         )
     }
 
+    /// Start `a` through its public starter (`food` and `drink` where the
+    /// action takes one). The one place the action-to-starter match lives:
+    /// the menu's preview, the demo pet and the simulator all call it.
+    pub fn start_choice(
+        &mut self,
+        a: Action,
+        food: Option<FoodKind>,
+        drink: Option<DrinkKind>,
+    ) -> bool {
+        match a {
+            Action::Feed => food.is_some_and(|f| self.feed(f)),
+            Action::Heal => self.heal(),
+            Action::Play => self.play(),
+            Action::Exercise => self.exercise(),
+            Action::Medicate => self.medicate(),
+            Action::Ozempic => self.ozempic(),
+            Action::Drink => drink.is_some_and(|d| self.drink(d)),
+            Action::Rehab => self.rehab(),
+            Action::OnlyPets => self.only_pets(),
+            Action::Wash => self.wash(),
+            Action::Relax => self.relax(),
+        }
+    }
+
     /// Hand the queued causes to the UI and start a new queue.
     pub fn take_causes(&mut self) -> causes::CauseQueue {
         core::mem::take(&mut self.causes)
@@ -868,20 +941,7 @@ impl GameState {
     ) -> Option<causes::Cause> {
         let mut c = self.clone();
         c.causes = causes::CauseQueue::default();
-        let started = match a {
-            Action::Feed => c.feed(food?),
-            Action::Heal => c.heal(),
-            Action::Play => c.play(),
-            Action::Exercise => c.exercise(),
-            Action::Medicate => c.medicate(),
-            Action::Ozempic => c.ozempic(),
-            Action::Drink => c.drink(drink?),
-            Action::Rehab => c.rehab(),
-            Action::OnlyPets => c.only_pets(),
-            Action::Wash => c.wash(),
-            Action::Relax => c.relax(),
-        };
-        if !started {
+        if !c.start_choice(a, food, drink) {
             return None;
         }
         // The dose lands exactly as `consume_action_ticks` lands it.
@@ -953,7 +1013,11 @@ impl GameState {
 
     /// Put the pet to sleep.
     pub fn sleep(&mut self) -> bool {
-        self.sleep_refusal().is_none() && doses::fall_asleep(self).is_ok()
+        let ok = self.sleep_refusal().is_none() && doses::fall_asleep(self).is_ok();
+        if ok {
+            self.player_acted();
+        }
+        ok
     }
 
     /// Why the pet cannot be put to sleep now, or `None`. Like every other
@@ -969,7 +1033,11 @@ impl GameState {
 
     /// Wake the pet up.
     pub fn wake(&mut self) -> bool {
-        doses::wake_up(self).is_ok()
+        let ok = doses::wake_up(self).is_ok();
+        if ok {
+            self.player_acted();
+        }
+        ok
     }
 
     /// Hibernate the pet — all progression freezes.  Marks the
@@ -1004,6 +1072,7 @@ impl GameState {
         if !self.is_alive() {
             return;
         }
+        self.player_acted();
         doses::minigame(self, grade);
         match game {
             MiniGame::TicTacToe => self.cooldown_tictactoe = MINIGAME_COOLDOWN(),
@@ -1046,6 +1115,12 @@ impl GameState {
         let day = demo::MINUTES_PER_DAY as u32;
         let ago = now_tick.saturating_sub(self.last_update_tick) / TICKS_PER_MINUTE % day;
         self.day_min = local_min.map(|m| ((m as u32 % day + day - ago) % day) as u16);
+    }
+
+    /// Host test hook: the demo pet's dice.
+    #[cfg(feature = "simulator")]
+    pub fn demo_rng(&self) -> u32 {
+        self.demo_rng
     }
 
     /// Host test hook: fix the demo pet's dice (never 0).
@@ -1286,7 +1361,9 @@ impl GameState {
         let mut c = self.clone();
         // The bookkeeping `update` does at a boundary comes first, so the
         // look-ahead arms what `update` will arm. A pet with a choice waiting
-        // acts at the next tick.
+        // (a player's action or a switch left it) acts in the first update
+        // after the wake: `update` runs `demo::run` before it looks at the
+        // minutes, so one tick is enough and the wakes do not repeat.
         demo::settle(&mut c);
         if demo::decide(&c).is_some() {
             return (self.last_update_tick + 1).min(cap);
