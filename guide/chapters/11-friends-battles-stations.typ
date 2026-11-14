@@ -43,7 +43,10 @@ full, the oldest drops off. The list is empty at first, and says
 details: the friend's name and kind, #w("Met <d>d <h>h ago") and
 #w("Last seen <d>d <h>h ago"), four bars (#w("Atk"), #w("Def"), #w("Spd")
 and #w("HP")) and the record between you two, as #w("Battles: <w>W-<l>L").
-Any button goes back.
+The foot of the list says #w("Fire for details"). The details card is
+titled #w("Friend Details") and its corner says #w("Back"): any button goes
+back. If the cursor has no friend under it, the card says
+#w("No friend selected").
 
 The "ago" times do not count the time the badge was off, so a friend can
 look younger than they are.
@@ -53,7 +56,8 @@ look younger than they are.
 #versus()
 
 *Where.* #w("Battle") is the first row of the Play menu, in both money modes.
-It opens a list of your friends. The title bar shows your pet's own record,
+It opens a list of your friends. The foot of the list says
+#w("Fire to challenge"). The title bar shows your pet's own record,
 #w("Battle <w>W-<l>L"): wins, then losses. The record belongs to this pet.
 A new egg starts it at zero.
 
@@ -68,10 +72,13 @@ pet strikes first. Damage has a little luck in it. After a fixed number of
 rounds, whoever has more HP left wins.
 
 *The result.* A card with two HP bars and a banner,
-#w("YOU WON!") or #w("YOU LOST"). In money mode a win also shows
-#v("BATTLE_HAX_REWARD") and pays it. Just before the card, a short
+#w("YOU WON!") or #w("YOU LOST"). The card is titled #w("Battle Result").
+Your side is labelled #w("You") and the friend's side carries the friend's
+name, or #w("Friend") when the name is empty. In money mode a win also shows
+#w("+<n> HAX"), the reward of #v("BATTLE_HAX_REWARD"), and pays it. Just before the card, a short
 full-screen picture shows both pets standing, and then the winner and the
-loser. Any button closes the card.
+loser. The card says #w("Any button to close"), and any button does. If no
+fight has been played yet, it says #w("No result yet").
 
 *It cannot hurt the pet.* Battle HP exists only for the length of the fight.
 A loss changes the record and nothing else.
@@ -129,3 +136,6 @@ capitals. Anything else is ignored without a word.
 first tap after a boot always works. A tap too soon does nothing to the pet
 and shows a countdown in the toast corner, like #raw("wait 4:50"), minutes
 and seconds. The rests live in memory only, so a reboot clears them.
+
+#tip[Tapping a station twice in a row gains nothing. The second tap only
+shows the countdown. Go for a walk and come back.]

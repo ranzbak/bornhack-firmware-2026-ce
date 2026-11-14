@@ -22,7 +22,6 @@ GUIDE_BIN = "target/x86_64-unknown-linux-gnu/debug/guide"
 PRESETS = ("classic", "casual")
 DATA_DIR = "guide/build/data"
 WORDS_JSON = f"{DATA_DIR}/words.json"
-COVERED_GROUPS = "guide/covered-groups"
 # Inputs `--pdf-only` needs, and the stage that makes each.
 SCREENS_DIR = "guide/build/screens"
 SPRITES_DIR = "guide/build/sprites"
@@ -200,22 +199,14 @@ def query(label, commit):
     return json.loads(out)
 
 
-def check_marks(marked, words, groups):
+def check_marks(marked, words):
     """`marked`: the texts the guide wrote with `w()`. `words`: words.json's
-    entries. `groups`: the groups the guide must explain in full."""
+    entries; the guide must explain every one."""
     texts = {w["text"] for w in words}
     errors = [f"marked word not on the badge: {t}" for t in sorted(marked - texts)]
     errors += [f"unexplained {w['group']} word: {w['text']}"
-               for w in words if w["group"] in groups and w["text"] not in marked]
+               for w in words if w["text"] not in marked]
     return errors
-
-
-def covered_groups(text, words):
-    """The lines of guide/covered-groups (`text`), or every group when there
-    is no such file (`text` is None)."""
-    if text is None:
-        return {w["group"] for w in words}
-    return {line.strip() for line in text.splitlines() if line.strip()}
 
 
 def pic_pages(commit):
@@ -236,8 +227,7 @@ def marked_words(commit):
 
 def check_words(commit):
     words = json.load(open(WORDS_JSON))["words"]
-    text = open(COVERED_GROUPS).read() if os.path.exists(COVERED_GROUPS) else None
-    return check_marks(marked_words(commit), words, covered_groups(text, words))
+    return check_marks(marked_words(commit), words)
 
 
 def check(commit):
