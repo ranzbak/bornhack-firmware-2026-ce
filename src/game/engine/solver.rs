@@ -328,7 +328,8 @@ pub fn sig(s: &GameState) -> u32 {
     let health_lines = [
         lvl(needs::HEALTH_DANGER_PCT),
         lvl(t::DEMO_HEALTH_FLOOR_PCT()),
-        lvl(t::DEMO_HELP_HEALTH_PCT()),
+        // The help line is "under": `health > HELP - 1` flips at the line.
+        lvl(t::DEMO_HELP_HEALTH_PCT()) - 1,
         lvl(t::DMG_ENERGY_HEALTH_PCT()),
         lvl(t::COLLAPSE_HEALTH_FLOOR_PCT()),
         lvl(t::DEMO_MED_HEALTH_PCT()),

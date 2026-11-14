@@ -483,8 +483,10 @@ mod floors {
         a.health = pct(t::DEMO_HEALTH_FLOOR_PCT() as i32) + 1;
         b.health = pct(t::DEMO_HEALTH_FLOOR_PCT() as i32);
         assert_ne!(solver::sig(&a), solver::sig(&b));
-        a.health = pct(t::DEMO_HELP_HEALTH_PCT() as i32) + 1;
-        b.health = pct(t::DEMO_HELP_HEALTH_PCT() as i32);
+        // The help line is "under": the flip is between the line and one
+        // level below it.
+        a.health = pct(t::DEMO_HELP_HEALTH_PCT() as i32);
+        b.health = pct(t::DEMO_HELP_HEALTH_PCT() as i32) - 1;
         assert_ne!(solver::sig(&a), solver::sig(&b));
     }
 
@@ -2171,6 +2173,13 @@ mod calm {
         s.health = pct(36);
         assert!(!matches!(s.pet_line(), PetLine::Help));
         assert!(!s.pet_line().red());
+        // "Under": on the line is not under it, one level below is.
+        s.health = pct(t::DEMO_HELP_HEALTH_PCT() as i32);
+        assert!(!matches!(s.pet_line(), PetLine::Help), "on the line");
+        assert_eq!(demo::wake_view(&s) & 2, 0);
+        s.health -= 1;
+        assert_eq!(s.pet_line(), PetLine::Help, "one level under");
+        assert_eq!(demo::wake_view(&s) & 2, 2);
         // Demo off: never a help line, whatever the health.
         s.health = pct(34);
         s.demo.on = false;
