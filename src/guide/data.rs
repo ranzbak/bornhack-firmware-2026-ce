@@ -132,6 +132,27 @@ pub fn fixed() -> Vec<(&'static str, u32, Unit)> {
         ("MEDICATION_HARD_MULT", MEDICATION_HARD_MULT, Unit::Count),
         ("REHAB_HARD_MULT", REHAB_HARD_MULT, Unit::Count),
         ("CATCH_UP_MAX_MIN", CATCH_UP_MAX_MIN, Unit::Min),
+        (
+            "STATION_COOLDOWN",
+            crate::game::station::COOLDOWN_TICKS,
+            Unit::Ticks
+        ),
+        (
+            "FRIEND_BOOST_COOLDOWN",
+            crate::game::friends::FRIEND_BOOST_COOLDOWN_TICKS,
+            Unit::Ticks
+        ),
+        ("FRIENDS_MAX", crate::game::friends::FRIENDS_MAX as u32, Unit::Count),
+        (
+            "STATION_FOOD_FLOOR_PCT",
+            crate::game::engine::STATION_FOOD_FLOOR_PCT as u32,
+            Unit::Pct
+        ),
+        (
+            "STATION_BOOZE_CAP_PCT",
+            crate::game::engine::STATION_BOOZE_CAP_PCT as u32,
+            Unit::Pct
+        ),
         ("IDLE_FRAME_SECS", IDLE_FRAME_SECS as u32, Unit::Secs),
         ("MINIGAME_HAX_REWARD", MINIGAME_HAX_REWARD, Unit::Hax),
         ("BATTLE_HAX_REWARD", BATTLE_HAX_REWARD, Unit::Hax),

@@ -33,7 +33,7 @@ use super::lifecycle::{self, with_game_now};
 
 /// Cooldown between repeat applications of the *same* station effect.
 /// 30 ticks × 10 s/tick = 5 minutes.
-const COOLDOWN_TICKS: u32 = 30;
+pub const COOLDOWN_TICKS: u32 = 30;
 
 /// Last-applied tick per effect.  Sentinel `u32::MAX` means "never
 /// applied this boot" — `try_consume` checks for it explicitly and

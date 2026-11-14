@@ -112,6 +112,10 @@ pub enum Phase {
     Gone,
 }
 
+/// Level (percent) a `more food` station lifts fullness and hydration to.
+pub const STATION_FOOD_FLOOR_PCT: i32 = 60;
+/// Level (percent) a `more drugs` station lowers booze to, at most.
+pub const STATION_BOOZE_CAP_PCT: i32 = 20;
 /// HAX earned by the "Only pets" hobby (non-broke) branch.
 pub const ONLYPETS_HOBBY_REWARD: u32 = 20;
 /// Mini-game grades (0..=2) handed to `award_inspiration`: an interface of the
@@ -1511,7 +1515,7 @@ impl GameState {
     /// water>60`): fullness and hydration are raised to 60 % and never
     /// lowered, so the pet is fed but cannot be stuffed or waterlogged.
     pub fn station_food(&mut self) {
-        let floor = (60 * P) as u16;
+        let floor = (STATION_FOOD_FLOOR_PCT * P) as u16;
         self.fullness = self.fullness.max(floor);
         self.hydration = self.hydration.max(floor);
     }
@@ -1522,7 +1526,7 @@ impl GameState {
     /// Dependence and diabetes stay.
     pub fn station_drugs(&mut self) {
         self.health = self.health.max(regime::health_ceiling(self) as u16);
-        self.booze = self.booze.min((20 * P) as u16);
+        self.booze = self.booze.min((STATION_BOOZE_CAP_PCT * P) as u16);
         self.hangover_min = 0;
         self.injured_min = 0;
         self.groggy_min = 0;
