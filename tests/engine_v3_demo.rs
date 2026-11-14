@@ -2476,25 +2476,74 @@ mod balance {
         events(o.causes_per_day, d.causes_per_day, "causes");
     }
 
-    #[test]
-    #[ignore]
-    fn demo_delta_matches_oracle() {
-        type R = fn(u32, u32, &bornhack_aegg::game::engine::GameState) -> sim::Plan;
-        let routines: [(&str, R); 2] = [("nobody", sim::absent), ("helper", sim::helper)];
-        for (name, r) in routines {
-            for setup in [DEMO, ANIMATED] {
-                for seed in [1, 2, 3] {
-                    let o = run(&r, 10, Driver::Oracle, seed, setup);
-                    let d = run(&r, 10, Driver::Delta, seed, setup);
+    type Routine = fn(u32, u32, &bornhack_aegg::game::engine::GameState) -> sim::Plan;
+    const ROUTINES: [(&str, Routine); 2] = [("nobody", sim::absent), ("helper", sim::helper)];
+
+    /// Clock off: the drivers see the same pet, so they agree by the strict
+    /// reference rule (`same`).
+    fn agree_without_a_clock(days: u32, seeds: &[u64]) {
+        for (name, r) in ROUTINES {
+            for animated in [false, true] {
+                for &seed in seeds {
+                    let setup = Setup {
+                        clock: false,
+                        animated,
+                        ..DEMO
+                    };
+                    let o = run(&r, days, Driver::Oracle, seed, setup);
+                    let d = run(&r, days, Driver::Delta, seed, setup);
                     same(
                         &o,
                         &d,
-                        10,
-                        &format!("{name} animated {} seed {seed}", setup.animated),
+                        days,
+                        &format!("{name} animated {animated} seed {seed}"),
                     );
                 }
             }
         }
+    }
+
+    // Clock on: not exact. `day_min` only moves in `advance`, so it lags by the
+    // ticks an action spends, and the two drivers re-sync the clock at
+    // different moments (the oracle every minute, the delta at its wakes).
+    // `arm_clock` then reads a minute off now and then and the run takes
+    // another path (debug-runaway-report.md: no loop, no battery cost). So
+    // the drivers agree statistically per seed: neither runs away, and the
+    // self-care rate and the mood are close. Only the Delta driver has engine
+    // wakes, so only it is held to the wake bound.
+    fn agree_with_a_clock(days: u32, seeds: &[u64]) {
+        for (name, r) in ROUTINES {
+            for animated in [false, true] {
+                for &seed in seeds {
+                    let setup = Setup { animated, ..DEMO };
+                    let what = format!("{name} animated {animated} seed {seed}");
+                    let o = run(&r, days, Driver::Oracle, seed, setup);
+                    let d = run(&r, days, Driver::Delta, seed, setup);
+                    assert!(o.alive && d.alive, "{what}: alive");
+                    for (driver, x) in [("oracle", &o), ("delta", &d)] {
+                        assert!(
+                            x.self_care_per_day <= 20.0,
+                            "{what}: {driver} self-care {}",
+                            x.self_care_per_day
+                        );
+                    }
+                    assert!(d.engine_wakes_per_day <= 60.0, "{what}: wakes {d:?}");
+                    let (a, b) = (o.self_care_per_day, d.self_care_per_day);
+                    assert!(
+                        (a - b).abs() <= 0.1 * a.max(b),
+                        "{what}: self-care oracle {a} vs delta {b}"
+                    );
+                    near(o.avg_mood_pct, d.avg_mood_pct, 3, &format!("{what}: mood"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn demo_delta_matches_oracle() {
+        agree_without_a_clock(10, &[1, 2, 3]);
+        agree_with_a_clock(10, &[1, 2, 3]);
     }
 
     /// Previews and look-aheads run on clones; their causes are not the pet's.
