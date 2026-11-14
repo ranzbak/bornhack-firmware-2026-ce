@@ -335,8 +335,8 @@ A hibernating pet keeps every row but #w("Friends"). Any button closes a view.
 
 #grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
   [The Hibernate menu has two rows: #w("Hibernate") and #w("Defrost"). The
-  first freezes the pet and the second thaws it. A hibernating pet answers
-  every other action with #w("hibernating"). Both rows are free and instant.
+  first freezes the pet and the second thaws it. While the pet is frozen, only the
+  Stats and Hibernate icons open. The other icons do nothing. Both rows are free and instant.
   Defrost on a pet that is not frozen is shut and says #w("no need"), and
   Hibernate on a frozen pet says #w("hibernating").
   @ch-offtime has the whole story: what freezes, what does not, and the
@@ -436,8 +436,6 @@ The row shows the wait in place of its price.
   [#w("nice game!")], [A mini-game win or draw.],
   [#w("+happy")], [A known friend met again. See @ch-friends.],
   [#w("new friend!")], [A new friend met. See @ch-friends.],
-  [#w("won a battle!")], [A Battle was won. See @ch-friends.],
-  [#w("lost a battle")], [A Battle was lost. See @ch-friends.],
   [#w("Food bonus!")], [A food station was tapped. See @ch-friends.],
   [#w("Heal bonus!")], [A medic station was tapped.],
   [#w("Sleep bonus!")], [A rest station was tapped.],
@@ -450,5 +448,7 @@ Two more things are called a toast:
 A station tapped too soon shows a countdown, such as #raw("wait 1:30"), in
 minutes and seconds. See @ch-friends.
 
-Two toasts exist in the game's list that nothing raises today: #w("+inspired")
-and #w("Inspire bonus!"). You will not meet them.
+Four toasts exist in the game's list that nothing raises today:
+#w("+inspired"), #w("Inspire bonus!"), #w("won a battle!") and
+#w("lost a battle"). You will not meet them. A Battle shows its result card
+instead (@ch-friends).
