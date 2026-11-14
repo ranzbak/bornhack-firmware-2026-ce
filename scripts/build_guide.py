@@ -15,7 +15,10 @@ import sys
 
 ROOT = ""
 OUT_PDF = "guide/out/bornpets-guide.pdf"
-STAGES = ()  # Tasks 2 to 4 add: data, words, screens, sprites
+STAGES = ("data",)  # Tasks 3 and 4 add: words, screens, sprites
+GUIDE_BIN = "target/x86_64-unknown-linux-gnu/debug/guide"
+PRESETS = ("classic", "casual")
+_built = False
 SKIP_PREFIXES = ("//", "#let", "#import", "#set", "#show", "#include")
 DIGITS_OK = re.compile(r"//\s*digits-ok:\s*\S")
 
@@ -86,11 +89,36 @@ def check_typst():
                  f"CARGO_BUILD_JOBS=2 taskset -c 2,3 cargo install typst-cli --locked --version {want} -j 2")
 
 
+def build_guide_bin():
+    """Build the host-only `guide` bin once per run."""
+    global _built
+    if _built:
+        return
+    jobs = os.environ.get("CARGO_BUILD_JOBS", "2")
+    subprocess.run(["cargo", "build", "--features", "simulator", "--bin", "guide",
+                    "-j", jobs], check=True)
+    if not os.path.exists(GUIDE_BIN):
+        sys.exit(f"guide: cargo built the bin but {GUIDE_BIN} is missing; "
+                 "check the target directory in .cargo/config.toml")
+    _built = True
+
+
+def stage_data():
+    build_guide_bin()
+    shutil.rmtree("guide/build/data", ignore_errors=True)
+    os.makedirs("guide/build/data")
+    for preset in PRESETS:
+        subprocess.run([GUIDE_BIN, "data", "--preset", preset,
+                        "--out", f"guide/build/data/{preset}.json"], check=True)
+
+
 def build_inputs(stages):
-    """Tasks 2 to 4 add the stages data, words, screens and sprites."""
+    """Tasks 3 and 4 add the stages words, screens and sprites."""
     for s in stages:
         if s not in STAGES:
             sys.exit(f"guide: unknown stage {s!r}")
+    if "data" in stages:
+        stage_data()
 
 
 def compile_pdf(commit):

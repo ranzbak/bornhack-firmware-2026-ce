@@ -102,6 +102,8 @@ pub mod cfg_text;
 pub mod display_flush;
 #[cfg(feature = "heapless")]
 pub mod evict_table;
+#[cfg(feature = "simulator")]
+pub mod guide;
 pub mod hex;
 pub mod menu;
 pub mod lut_file;

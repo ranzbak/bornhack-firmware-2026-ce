@@ -195,7 +195,7 @@ pub fn can_use_station() -> bool {
 }
 
 /// Longest boot catch-up, in minutes (12 h).
-const CATCH_UP_MAX_MIN: u32 = 720;
+pub const CATCH_UP_MAX_MIN: u32 = 720;
 
 /// Minutes the pet catches up on boot: the wall-clock gap since the save,
 /// capped at 12 h. 0 when either time is unknown (0) or the clock ran back.

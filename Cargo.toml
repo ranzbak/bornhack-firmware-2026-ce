@@ -253,6 +253,11 @@ required-features = ["simulator"]
 
 
 [[bin]]
+name = "guide"
+path = "src/bin/guide.rs"
+required-features = ["simulator"]
+
+[[bin]]
 name = "simulate_game"
 path = "src/bin/simulate_game.rs"
 required-features = ["simulator"]

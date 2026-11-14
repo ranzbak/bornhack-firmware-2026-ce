@@ -48,6 +48,11 @@ macro_rules! thresholds_table {
                     _ => None,
                 }
             }
+
+            /// Every table field name, in table order (host only; the
+            /// player's guide dumps them).
+            #[cfg(any(test, feature = "simulator"))]
+            pub const FIELDS: &'static [&'static str] = &[ $( stringify!($name), )* ];
         }
 
         $(
@@ -1642,18 +1647,26 @@ pub fn validate(t: &Thresholds, preset: &Thresholds) -> Thresholds {
 }
 
 #[cfg(any(test, feature = "simulator"))]
-pub use template::cfg_template;
+pub use template::{badge_preset, cfg_template};
 
 /// Host-only: needs `alloc`, which the badge build does not have.
 #[cfg(any(test, feature = "simulator"))]
 mod template {
     extern crate alloc;
-    use super::{BORNPETS_CFG_KEYS, Thresholds};
+    use super::{BORNPETS_CFG_KEYS, Mode, Thresholds};
     use alloc::string::String;
     use core::fmt::Write;
 
     const BADGE_HATCHING_TICKS: u32 = 6;
     const HEAD: &str = "# BornPets v3 balance. Uncomment a line to change it. The old firmware keeps using BORNPETS.CFG.";
+
+    /// A mode's preset as the badge runs it: the simulator build hatches in
+    /// 1 tick, the badge in 6 (both presets).
+    pub fn badge_preset(mode: Mode) -> Thresholds {
+        let mut t = mode.preset();
+        t.HATCHING_TICKS = BADGE_HATCHING_TICKS as u16;
+        t
+    }
 
     /// Exact text of `assets/to-badge/BPETS_V3.CFG`: every key as a
     /// comment with its Classic value and the Casual value, no active rows.
@@ -1661,14 +1674,8 @@ mod template {
         let mut out = String::from(HEAD);
         out.push('\n');
         for (key, _) in BORNPETS_CFG_KEYS {
-            let mut classic = Thresholds::CLASSIC.value_of(key).expect("key is a field");
-            let mut casual = Thresholds::CASUAL.value_of(key).expect("key is a field");
-            if *key == "HATCHING_TICKS" {
-                // The simulator build hatches in 1 tick; the file is for the
-                // badge, which hatches in 6 (both presets).
-                classic = BADGE_HATCHING_TICKS;
-                casual = BADGE_HATCHING_TICKS;
-            }
+            let classic = badge_preset(Mode::Classic).value_of(key).expect("key is a field");
+            let casual = badge_preset(Mode::Casual).value_of(key).expect("key is a field");
             let _ = writeln!(out, "# {key}={classic}   # Casual {casual}");
         }
         out
