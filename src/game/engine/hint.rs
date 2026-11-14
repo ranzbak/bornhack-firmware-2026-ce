@@ -11,6 +11,8 @@
 use super::GameState;
 use super::Phase;
 use super::doses::Reason;
+use super::needs;
+use super::thresholds::CEILING_FIT_STEP3_PCT;
 use super::status::{Word, status_line};
 
 /// Something the player can do for the pet, as the hint names it.
@@ -41,6 +43,9 @@ pub enum Subject {
     Egg,
     Gone,
     Hibernating,
+    /// A demo pet with nothing to say that is not fit: it asks for exercise,
+    /// which it never takes by itself.
+    Stiff,
 }
 
 /// The second line.
@@ -103,6 +108,7 @@ pub fn subject_line(subject: Subject) -> &'static str {
         Subject::Egg => "*wobble*",
         Subject::Gone => "...",
         Subject::Hibernating => "Brrr, frozen!",
+        Subject::Stiff => "I feel stiff.",
     }
 }
 
@@ -136,6 +142,7 @@ pub fn remedies(subject: Subject) -> &'static [Remedy] {
         },
         Subject::WornOut => &[Sleep],
         Subject::Hibernating => &[Defrost],
+        Subject::Stiff => &[Exercise],
         Subject::Egg | Subject::Gone => &[],
     }
 }
@@ -206,6 +213,12 @@ fn subject(s: &GameState) -> Subject {
     // Worn out speaks over any info word, except an asleep pet's "Zzz...".
     if s.deprived && !s.is_sleeping && first.is_info() {
         Subject::WornOut
+    } else if s.demo.on
+        && !s.is_sleeping
+        && first.is_info()
+        && (s.fitness as i32) < CEILING_FIT_STEP3_PCT() as i32 * needs::P
+    {
+        Subject::Stiff
     } else {
         Subject::Word(first)
     }

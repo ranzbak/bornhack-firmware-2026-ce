@@ -1974,7 +1974,7 @@ static SETTINGS_ITEMS: [MenuItem; SETTINGS_ITEMS_LEN] = [
     },
 ];
 
-static BORNAGOTCHI_ITEMS: [MenuItem; 7] = [
+static BORNAGOTCHI_ITEMS: [MenuItem; 9] = [
     MenuItem {
         label: || "< Back",
         kind: MenuItemKind::Back,
@@ -1994,6 +1994,14 @@ static BORNAGOTCHI_ITEMS: [MenuItem; 7] = [
             inc: action_game_mode_next,
             dec: action_game_mode_next,
         },
+    },
+    MenuItem {
+        label: label_demo_mode,
+        kind: MenuItemKind::Action(action_demo_toggle),
+    },
+    MenuItem {
+        label: label_demo_care,
+        kind: MenuItemKind::Action(action_demo_care_toggle),
     },
     MenuItem {
         label: || "",
@@ -2023,6 +2031,43 @@ static BORNAGOTCHI_ITEMS: [MenuItem; 7] = [
         }),
     },
 ];
+
+fn label_demo_mode() -> &'static str {
+    #[cfg(feature = "game")]
+    {
+        crate::game::lifecycle::demo_menu_label()
+    }
+    #[cfg(not(feature = "game"))]
+    {
+        "Demo: no pet"
+    }
+}
+
+/// A refused toggle changes nothing; the label already says why.
+fn action_demo_toggle() {
+    #[cfg(feature = "game")]
+    {
+        let _ = crate::game::lifecycle::toggle_demo();
+    }
+}
+
+fn label_demo_care() -> &'static str {
+    #[cfg(feature = "game")]
+    {
+        crate::game::lifecycle::demo_care_label()
+    }
+    #[cfg(not(feature = "game"))]
+    {
+        "Demo care: instant"
+    }
+}
+
+fn action_demo_care_toggle() {
+    #[cfg(feature = "game")]
+    {
+        crate::game::lifecycle::toggle_demo_care();
+    }
+}
 
 fn fmt_game_mode(buf: &mut heapless::String<24>) {
     use core::fmt::Write;
@@ -2831,5 +2876,70 @@ mod tests {
         let items = [action()];
         assert_eq!(first_selectable(&items), Some(0));
         assert_eq!(last_selectable(&items), Some(0));
+    }
+
+    /// The game settings menu has the two demo rows between Mode and Reset
+    /// Pet, and every label they can show fits a menu row: `MENU_W` less
+    /// the 1 px border each side, in 7 px columns (the rows are drawn
+    /// centred, with no stepper arrows).
+    #[cfg(feature = "game")]
+    #[test]
+    fn game_settings_has_the_demo_rows() {
+        use crate::game::engine::{GameState, PetKind, Phase};
+        use crate::game::lifecycle::set_state_for_test;
+        const ROW_COLS: usize = (MENU_W as usize - 2) / 7;
+        assert_eq!(ROW_COLS, 20);
+        assert_eq!(BORNAGOTCHI_ITEMS.len(), 9);
+        assert!(matches!(
+            BORNAGOTCHI_ITEMS[3].kind,
+            MenuItemKind::ValueStepper { .. }
+        ));
+        assert!(matches!(BORNAGOTCHI_ITEMS[4].kind, MenuItemKind::Action(_)));
+        assert!(matches!(BORNAGOTCHI_ITEMS[5].kind, MenuItemKind::Action(_)));
+        assert!(matches!(BORNAGOTCHI_ITEMS[6].kind, MenuItemKind::Separator));
+        assert_eq!((BORNAGOTCHI_ITEMS[7].label)(), "Reset Pet");
+
+        let _guard = crate::game::lock_test_state();
+        let mut seen = std::collections::BTreeSet::new();
+        let mut states: Vec<Option<GameState>> = vec![None];
+        states.push(Some(GameState::new_egg(7, PetKind(0))));
+        for health in [30, 60] {
+            for demo in [false, true] {
+                for animated in [false, true] {
+                    let mut s = GameState::new_egg(7, PetKind(0));
+                    s.phase = Phase::Active;
+                    s.health = (health * 655) as u16;
+                    s.demo.on = demo;
+                    s.demo.animated = animated;
+                    states.push(Some(s));
+                }
+            }
+        }
+        let mut frozen = GameState::new_egg(7, PetKind(0));
+        frozen.phase = Phase::Active;
+        frozen.hibernating = true;
+        states.push(Some(frozen));
+        let mut gone = GameState::new_egg(7, PetKind(0));
+        gone.phase = Phase::Gone;
+        states.push(Some(gone));
+        for st in states {
+            set_state_for_test(st);
+            for row in [4, 5] {
+                let l = (BORNAGOTCHI_ITEMS[row].label)();
+                assert!(l.len() <= ROW_COLS, "{l:?} is {} columns", l.len());
+                seen.insert(l);
+            }
+        }
+        set_state_for_test(None);
+        for l in [
+            "Demo mode: on",
+            "Demo mode: off",
+            "Demo: fix me first",
+            "Demo: no pet",
+            "Demo care: instant",
+            "Demo care: animated",
+        ] {
+            assert!(seen.contains(l), "{l:?} never shown");
+        }
     }
 }

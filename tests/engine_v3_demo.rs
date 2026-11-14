@@ -2194,3 +2194,77 @@ mod calm {
         assert!(Note::OneTooMany.text().ends_with("..."));
     }
 }
+
+mod hint {
+    use super::policy::{pct, quiet};
+    use bornhack_aegg::game::engine::doses::{Reason, Refusal};
+    use bornhack_aegg::game::engine::FoodKind;
+    use bornhack_aegg::game::engine::hint::{Ask, Remedy, Subject, hint, subject_line};
+    use bornhack_aegg::game::engine::status::Word;
+
+    #[test]
+    fn a_stiff_demo_pet_asks_for_exercise() {
+        let mut s = quiet();
+        s.fitness = pct(50);
+        let h = hint(&s);
+        assert_eq!(h.subject, Subject::Stiff);
+        assert_eq!(h.ask, Ask::Do(Remedy::Exercise));
+        // Demo off, the same pet is just content.
+        s.demo.on = false;
+        assert!(matches!(hint(&s).subject, Subject::Word(w) if w.is_info()));
+        // A fit demo pet has nothing to ask.
+        s.demo.on = true;
+        s.fitness = pct(80);
+        assert!(matches!(hint(&s).subject, Subject::Word(w) if w.is_info()));
+    }
+
+    /// C15: the plan's "never refused" assert is true by construction. The
+    /// hint pins what it must: a refused remedy says why instead of asking.
+    /// Injury is named by the status line (a problem word), so an injured
+    /// pet is never stiff; it asks for medicine, and the exercise it must not
+    /// be asked for is refused as `Injured`.
+    #[test]
+    fn an_injured_demo_pet_is_not_asked_to_exercise() {
+        let mut s = quiet();
+        s.fitness = pct(50);
+        s.injured_min = 100;
+        assert_eq!(
+            s.remedy_reason(Remedy::Exercise),
+            Some(Reason::Refused(Refusal::Injured))
+        );
+        let h = hint(&s);
+        assert_ne!(h.subject, Subject::Stiff);
+        assert_eq!(h.subject, Subject::Word(Word::Injured));
+        assert_eq!(h.ask, Ask::Do(Remedy::Medicine));
+    }
+
+    #[test]
+    fn a_stiff_demo_pet_in_the_middle_of_an_action_says_it_is_busy() {
+        let mut s = quiet();
+        s.fitness = pct(50);
+        assert!(s.feed(FoodKind::Apple));
+        let h = hint(&s);
+        assert_eq!(h.subject, Subject::Stiff);
+        assert_eq!(h.ask, Ask::Refused(Reason::Busy));
+        assert_eq!(h.lines().1.as_str(), "but busy");
+    }
+
+    #[test]
+    fn a_broke_stiff_demo_pet_still_asks_for_exercise_and_food() {
+        // Demo hides the prices, so money never refuses a hint.
+        let mut s = quiet();
+        s.money_enabled = true;
+        s.money = 0;
+        s.fitness = pct(50);
+        assert_eq!(hint(&s).ask, Ask::Do(Remedy::Exercise));
+        s.fitness = pct(60);
+        s.fullness = pct(20);
+        assert_eq!(hint(&s).ask, Ask::Do(Remedy::Feed));
+    }
+
+    #[test]
+    fn stiff_fits() {
+        assert_eq!(subject_line(Subject::Stiff), "I feel stiff.");
+        assert!(subject_line(Subject::Stiff).len() <= 18);
+    }
+}

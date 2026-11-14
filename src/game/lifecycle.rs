@@ -488,10 +488,58 @@ pub fn is_demo() -> bool {
     state.is_some_and(|s| s.is_demo())
 }
 
+/// Switch demo mode: the new state, or why it cannot be switched. Catches
+/// the pet up first, like any player event; the engine saves at once.
+pub fn toggle_demo() -> Result<bool, super::engine::doses::Reason> {
+    let Some(s) = (unsafe { (*GAME.get()).as_mut() }) else {
+        return Err(super::engine::doses::Reason::Gone);
+    };
+    event_at(s, now_tick(), |_| {});
+    let on = !s.is_demo();
+    s.set_demo(on)?;
+    Ok(on)
+}
+
+/// The demo row of the game settings menu. The refusal is the engine's, so
+/// the label says why the press would do nothing.
+pub fn demo_menu_label() -> &'static str {
+    use super::engine::doses::{Reason, Refusal};
+    let state = unsafe { (*GAME.get()).as_ref() };
+    match state.map(|s| (s.is_demo(), s.demo_refusal())) {
+        None => "Demo: no pet",
+        Some((true, _)) => "Demo mode: on",
+        Some((false, None)) => "Demo mode: off",
+        Some((false, Some(Reason::Refused(Refusal::FixMeFirst)))) => "Demo: fix me first",
+        Some((false, Some(Reason::Hibernating))) => "Demo: frozen",
+        Some((false, Some(_))) => "Demo: no pet",
+    }
+}
+
+/// Flip the demo pet's care between instant and animated (it works while demo
+/// is off too). Returns whether care is now animated; false without a pet.
+pub fn toggle_demo_care() -> bool {
+    let Some(s) = (unsafe { (*GAME.get()).as_mut() }) else {
+        return false;
+    };
+    let animated = !s.demo.animated;
+    s.set_demo_care(animated);
+    animated
+}
+
+/// The care row of the game settings menu.
+pub fn demo_care_label() -> &'static str {
+    let state = unsafe { (*GAME.get()).as_ref() };
+    if state.is_some_and(|s| s.demo.animated) {
+        "Demo care: animated"
+    } else {
+        "Demo care: instant"
+    }
+}
+
 /// Install (or clear) the game state for a test. The caller holds
 /// `game::lock_test_state`.
 #[cfg(test)]
-pub(super) fn set_state_for_test(state: Option<GameState>) {
+pub(crate) fn set_state_for_test(state: Option<GameState>) {
     unsafe {
         *GAME.get() = state;
     }
@@ -1574,5 +1622,54 @@ mod tests {
         let age = egg.age_ticks;
         assert!(!apply_boot_catch_up(&mut egg, &done, b, 1000 + 3600, 0));
         assert_eq!(egg.age_ticks, age);
+    }
+    use super::{demo_care_label, demo_menu_label, is_demo, set_state_for_test, toggle_demo, toggle_demo_care};
+    use crate::game::engine::doses::{Reason, Refusal};
+
+    #[test]
+    fn the_toggle_says_why() {
+        let _guard = crate::game::lock_test_state();
+        let mut s = pet();
+        s.health = (30 * P) as u16;
+        set_state_for_test(Some(s));
+        assert_eq!(toggle_demo(), Err(Reason::Refused(Refusal::FixMeFirst)));
+        assert_eq!(demo_menu_label(), "Demo: fix me first");
+        assert!(!is_demo(), "a refused toggle changes nothing");
+        let mut s = pet();
+        s.health = (60 * P) as u16;
+        set_state_for_test(Some(s));
+        assert_eq!(demo_menu_label(), "Demo mode: off");
+        assert_eq!(toggle_demo(), Ok(true));
+        assert_eq!(demo_menu_label(), "Demo mode: on");
+        assert!(is_demo());
+        assert_eq!(toggle_demo(), Ok(false));
+        assert_eq!(demo_menu_label(), "Demo mode: off");
+        // An egg, a pet that left and no pet at all have no demo to switch.
+        set_state_for_test(Some(GameState::new_egg(7, PetKind(0))));
+        assert_eq!(demo_menu_label(), "Demo: no pet");
+        assert_eq!(toggle_demo(), Err(Reason::Egg));
+        set_state_for_test(None);
+        assert_eq!(demo_menu_label(), "Demo: no pet");
+        assert!(toggle_demo().is_err());
+    }
+
+    #[test]
+    fn care_defaults_to_instant() {
+        let _guard = crate::game::lock_test_state();
+        set_state_for_test(Some(pet()));
+        assert_eq!(demo_care_label(), "Demo care: instant");
+        assert!(toggle_demo_care());
+        assert_eq!(demo_care_label(), "Demo care: animated");
+        let bytes = unsafe { (*super::GAME.get()).as_ref() }.unwrap().to_bytes();
+        let back = GameState::from_bytes(&bytes).unwrap();
+        assert!(back.demo.animated);
+        set_state_for_test(Some(back));
+        assert_eq!(demo_care_label(), "Demo care: animated");
+        assert!(!toggle_demo_care());
+        assert_eq!(demo_care_label(), "Demo care: instant");
+        // The row is there without a pet, at its default, and does nothing.
+        set_state_for_test(None);
+        assert_eq!(demo_care_label(), "Demo care: instant");
+        assert!(!toggle_demo_care());
     }
 }

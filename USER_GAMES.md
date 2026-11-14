@@ -31,6 +31,17 @@ The **status line** under the pet names the one or two things that need you most
 
 If you're putting the badge away for more than a few hours, open the action menu and **Hibernate**. Stats freeze until you wake the pet. Forget to hibernate before storing the badge and the pet decays — by the time you find it again it may have starved.
 
+### Demo mode
+
+Demo mode turns the pet into a desk companion that looks after itself. It eats, drinks, washes, sleeps, plays and takes its medicine and insulin on its own, and it says what it did in a short note under the pet ("had an apple", "off to bed"). Its condition wanders but it never gets bad enough to leave, and it never exercises: that stays your job, so a demo pet that gets unfit says "I feel stiff." in the hint. It follows the badge clock for bedtime, or its own rhythm while the clock is not set. Demo pets keep a small black **D** under the battery bar on the game screen. HAX is paused while demo is on (hidden, not lost) and comes back when you turn demo off.
+
+You can step in at any time. After you act, the pet leaves its care to you for 30 minutes and thanks you ("thanks!") when your action helped. When its health drops to 35 % it shows "could use a hand" instead of a note. Demo is silent: no buzzer.
+
+Both switches are in **Main -> Bornagotchi**, under **Mode**:
+
+- **Demo mode: on / off** turns it on or off. A pet in poor health (under 40 %) cannot start it and the row says "Demo: fix me first"; an egg or a pet that left shows "Demo: no pet".
+- **Demo care: instant / animated** picks how the pet looks after itself. Instant (the default) applies the care at once and leaves a note. Animated plays the real eat, drink and wash animations; it costs more screen refreshes, so it drains the battery faster. It is saved per pet and can be set before turning demo on.
+
 ## Game modes
 
 Two built-in difficulty presets, picked via **Main → Bornagotchi → Mode**:

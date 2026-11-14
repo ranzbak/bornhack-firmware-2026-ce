@@ -1349,6 +1349,18 @@ impl GameState {
         self.demo.demo_min as u64 * SELF_RAISED_DIV as u64 > age_min
     }
 
+    /// Why demo mode cannot be turned on now. A running action is `Busy`,
+    /// which does not block it.
+    pub fn demo_refusal(&self) -> Option<doses::Reason> {
+        match self.cannot_act() {
+            None | Some(doses::Reason::Busy) => {}
+            Some(why) => return Some(why),
+        }
+        (self.phase == Phase::Leaving
+            || (self.health as i32) < DEMO_ON_HEALTH_PCT() as i32 * needs::P)
+            .then_some(doses::Reason::Refused(doses::Refusal::FixMeFirst))
+    }
+
     /// Turn demo mode on or off. On needs a living pet in fair shape; a
     /// running action does not block it. Off always works and keeps only the
     /// lifetime, the care mode and whose action is running.
@@ -1360,14 +1372,8 @@ impl GameState {
             ..demo::Demo::default()
         };
         if on {
-            match self.cannot_act() {
-                None | Some(doses::Reason::Busy) => {}
-                Some(why) => return Err(why),
-            }
-            if self.phase == Phase::Leaving
-                || (self.health as i32) < DEMO_ON_HEALTH_PCT() as i32 * needs::P
-            {
-                return Err(doses::Reason::Refused(doses::Refusal::FixMeFirst));
+            if let Some(why) = self.demo_refusal() {
+                return Err(why);
             }
             self.demo = demo::Demo {
                 on: true,
