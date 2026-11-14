@@ -28,6 +28,9 @@
           mkShell rec {
             packages = [
               gnumake
+              # scripts/build_guide.py needs the typst version in guide/typst-version
+              typst
+              python3
             ];
 
             buildInputs = [

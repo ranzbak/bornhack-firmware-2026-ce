@@ -664,6 +664,8 @@ make fw-watch        # Watch only (no game, no mesh)
 
 All print flash and RAM usage after building. Release builds use full LTO and `opt-level = "z"` for minimum binary size.
 
+`make guide` builds the player's guide PDF into `guide/out/`.
+
 ### Flash firmware
 
 Connect a debug probe (J-Link, ST-Link, or CMSIS-DAP) to the badge SWD header, then:

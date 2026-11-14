@@ -14,3 +14,8 @@ MERGE_NOTES.md
 firmware/*
 !firmware/.gitkeep
 !firmware/README.md
+
+# Player's guide build output (scripts/build_guide.py)
+/guide/build/
+/guide/out/
+!/guide/fonts/*.txt
