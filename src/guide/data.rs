@@ -104,6 +104,13 @@ pub fn fixed() -> Vec<(&'static str, u32, Unit)> {
         p("SORE_PCT", n::SORE_PCT),
         p("HAPPY_MOOD_PCT", n::HAPPY_MOOD_PCT),
         (
+            "WATER_REFUSE_PCT",
+            doses::WATER_REFUSE_PCT as u32,
+            Unit::Pct
+        ),
+        ("WATER_CAP_PCT", doses::WATER_CAP_PCT as u32, Unit::Pct),
+        ("WASH_REFUSE_PCT", doses::WASH_REFUSE_PCT as u32, Unit::Pct),
+        (
             "SECOND_WORD_UNDER_PCT",
             (SECOND_WORD_UNDER / P) as u32,
             Unit::Pct

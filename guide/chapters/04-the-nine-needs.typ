@@ -10,15 +10,15 @@ Your pet has nine needs: fullness, water, energy, fun, dirt, booze, weight,
 fitness and strain. Each is a level from empty to full. Each has a *comfort
 band*, a stretch where the pet is fine.
 
-#grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
-  [
+#block[
     - *Inside the band*, nothing happens. The pet is calm.
     - *Outside it*, the need pulls the pet's mood down. The further out, the
       harder the pull. The status line may name the problem.
     - *Far outside*, the pet's health pays, and some words turn red.
     - *On the edge itself* still counts as inside. Only past the edge hurts.
-  ],
-  hero-pic("idle"))
+]
+
+#pic-row((("idle", [In the band.]), ("hungry", [Past an edge.]), ("sick", [Far past it.])))
 
 The needs move by themselves, minute by minute. Feeding, drinking, playing
 and the rest are *doses* that push a level up or down in one go.
@@ -28,21 +28,20 @@ stats view that shows them all.
 
 == The nine at a glance
 
+Classic is the guide's number. Casual moves each edge a few points.
+
 #dose-table((auto, auto, 1fr, 1fr),
   table.header([*Need*], [*Stats view*], [*Classic*], [*Casual*]),
   ..edge-row("Full", [#w("Full")], "band", "FULL_LO_PCT", hi: "FULL_HI_PCT"),
   ..edge-row("Water", [#w("Water")], "band", "WATER_LO_PCT", hi: "WATER_HI_PCT"),
   ..edge-row("Energy", [#w("Energy")], "from", "ENERGY_LO_PCT"),
   ..edge-row("Fun", [#w("Fun")], "band", "FUN_LO_PCT", hi: "FUN_HI_PCT"),
-  ..edge-row("Dirt", [#w("Clean"), reversed], "upto", "DIRT_HI_PCT"),
+  ..clean-row(),
   ..edge-row("Booze", [#w("Booze")], "upto", "BOOZE_HI_PCT"),
   ..edge-row("Weight", [#w("Weight")], "band", "WEIGHT_LO_PCT", hi: "WEIGHT_HI_PCT"),
   ..edge-row("Fitness", [#w("Fit")], "from", "FIT_LO_PCT"),
   ..edge-row("Strain", [not shown], "upto", "STRAIN_INJ_PCT"),
 )
-
-Classic is the guide's number. Casual moves every edge by a few points. The
-appendix has the rest of the numbers.
 
 #pagebreak(weak: true)
 == How to read the bars
@@ -120,8 +119,8 @@ last treat is more than #v("DOSE_JUNK_MIN") old, and none at all on Ozempic.
 *Past the edges.*
 - Under #v("FULL_LO_PCT") the pet is #w("peckish"). Under #v("HUNGRY_PCT") it
   is #w("hungry"). Each point under pulls a point and a half off the mood.
-- Under #v("NEED_DANGER_LO_PCT") it is #w("starving"). The status line turns
-  red, and health drains. A belly under #v("UNSETTLED_FULL_LO_PCT") already
+- Under #v("NEED_DANGER_LO_PCT") it is #w("starving") and the status line
+  turns red. Under #v("DMG_NEED_LOW_PCT") health drains. A belly under #v("UNSETTLED_FULL_LO_PCT") already
   spoils the night's sleep.
 - Over #v("FULL_HI_PCT") it is #w("stuffed"). Each point over pulls a point
   off the mood, and a belly over #v("UNSETTLED_FULL_HI_PCT") also spoils the
@@ -149,8 +148,8 @@ belly's.
     #dose-pct("Play", "water") and exercise #dose-pct("Exercise", "water").
 
     *Up.* Give it a drink. Water gives up to #v("DOSE_WATER_MAX_PCT"), but
-    never fills past a fixed cap. A pet that is nearly full of water says
-    #w("not thirsty") and turns the glass down.
+    never fills past #v("WATER_CAP_PCT"). A pet with water over
+    #v("WATER_REFUSE_PCT") says #w("not thirsty") and turns the glass down.
   ],
   hero-pic("drinking"))
 
@@ -172,7 +171,8 @@ Plain water does more than wet the pet. It lowers booze by
 *Past the edges.*
 - Under #v("WATER_LO_PCT") the pet is #w("thirsty"). Each point under pulls a
   point and a half off the mood.
-- Under #v("NEED_DANGER_LO_PCT") it is #w("parched"): red, and health drains.
+- Under #v("NEED_DANGER_LO_PCT") it is #w("parched") and the line turns red.
+  Under #v("DMG_NEED_LOW_PCT") health drains.
   Under #v("UNSETTLED_WATER_LO_PCT") the sleep is already poor.
 - Over #v("WATER_HI_PCT") it is #w("waterlogged"). Each point over pulls a
   point off the mood. Over #v("UNSETTLED_WATER_HI_PCT") the sleep suffers too,
@@ -217,8 +217,9 @@ explains #w("worn out").
 - Under #v("ENERGY_LO_PCT") the pet is #w("sleepy"), but only while it is
   awake. A sleeping pet has no mood pull from this. Each point under pulls a
   point and a half off the mood.
-- Under #v("EXHAUSTED_PCT") it is #w("exhausted"). The buzzer sounds, and
-  while the pet is awake its health drains. The drain stops once health is
+- Under #v("EXHAUSTED_PCT") it is #w("exhausted"). The buzzer sounds. The
+  status line does not turn red; the red zone on the bar is the damage zone.
+  Under #v("DMG_ENERGY_PCT"), while the pet is awake, health drains. The drain stops once health is
   down to #v("DMG_ENERGY_HEALTH_PCT"): lack of sleep alone does not finish
   a pet.
 - A tired pet gets double fun from play, takes harder drinks, and strains
@@ -293,8 +294,8 @@ the same need as *Clean*, upside down: a pet at #clean-line() clean is at
     #dose-pct("Play", "dirt") and exercise adds #dose-pct("Exercise", "dirt").
 
     *Down.* Wash. One wash takes off #dose-pct("Wash", "dirt") and does
-    nothing else. A pet that is clean already says #w("already clean"), and
-    the wash does not happen.
+    nothing else. A pet with dirt under #v("WASH_REFUSE_PCT") says
+    #w("already clean"), and the wash does not happen.
   ],
   hero-pic("sick"))
 

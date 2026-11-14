@@ -20,7 +20,7 @@
 
 // Zone labels. The second line says where the zone is, strict edges first:
 // "under" and "over" exclude the edge, "from" and "to" include it.
-#let _two(name, line) = [#name #linebreak() #text(size: 5.5pt, line)]
+#let _two(name, line) = if line == none { name } else [#name #linebreak() #text(size: 6.5pt, line)]
 #let under(key, preset: classic) = "under " + v(key, preset: preset)
 #let over(key, preset: classic) = "over " + v(key, preset: preset)
 #let from(key, preset: classic) = "from " + v(key, preset: preset)
@@ -32,7 +32,7 @@
 // A zone under 8 points wide has no room for the unit: "over 95", not "over 95 %".
 #let _zone(a, b, name, kind, line, preset) = {
   let (lo, hi) = (_n(a, preset), _n(b, preset))
-  (lo, hi, _two(name, if hi - lo < 8 { line.replace(" %", "") } else { line }), kind)
+  (lo, hi, _two(name, if hi - lo < 10 { none } else { line }), kind)
 }
 
 // The band bar of one need. Cream is comfort, hatched is a mood pull, red is
@@ -138,3 +138,9 @@
 
 // A table with a header row, for the dose tables.
 #let dose-table(cols, ..cells) = table(columns: cols, stroke: 0.5pt + ink, inset: 3.5pt, align: left, ..cells)
+
+// The Dirt row of the glance table, seen from the Clean side: Clean is 100 minus dirt.
+#let clean-row() = {
+  let cell(preset) = "from " + clean-at("DIRT_HI_PCT", preset: preset)
+  ("Dirt", [#w("Clean"), reversed], cell(classic), cell(casual))
+}
