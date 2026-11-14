@@ -707,7 +707,9 @@ pub(super) fn note_own_act(s: &mut GameState, action: Action, queued: &CauseQueu
     s.note = note.map(|n| (n, super::status::status_line(s)));
 }
 
-/// Start `c` through its starter; a timed one is left running (see `act_row`).
+/// Start `c` through its starter. A timed one is finished at once in instant
+/// care and left running in animated care (it ends out of the engine-time
+/// stream, see `GameState::action_end_tick`).
 fn act_start(s: &mut GameState, c: Choice) -> bool {
     let started = match (action_of(c), c) {
         (Some((a, food, drink)), _) => s.start_choice(a, food, drink),
@@ -744,6 +746,12 @@ fn act_start(s: &mut GameState, c: Choice) -> bool {
 /// asserts; `thresholds::validate` keeps the lines from making one.
 pub fn run(s: &mut GameState) -> u8 {
     let (acts, capped) = run_capped(s);
+    // Limit: the cap counts acts within one call. In animated care the first
+    // timed act leaves an action running, so `run_capped` returns there, and
+    // the update loop calls `run` again with a fresh count. A cycle made only
+    // of timed acts is therefore not caught here; it would repeat back to
+    // back (each act takes at least two ticks), so the loop still ends.
+    // Instant care runs every act in the same call, so the cap catches it.
     debug_assert!(
         !capped,
         "the demo policy cycles: {acts} acts and more to do"
