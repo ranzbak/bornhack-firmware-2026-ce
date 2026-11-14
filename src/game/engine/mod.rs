@@ -13,6 +13,7 @@
 pub mod advance;
 pub mod anim_files;
 pub mod causes;
+pub mod demo;
 pub mod debug;
 pub mod doses;
 pub mod drink;
@@ -285,6 +286,12 @@ pub struct GameState {
     /// Wall-clock unix time of the last save, 0 when unknown (clock unset).
     pub saved_unix: u32,
 
+    /// Demo mode (plan 3), saved in bytes 149..160.
+    pub demo: demo::Demo,
+    /// The demo pet's dice. Transient: `new_egg` seeds it from `seed`,
+    /// `from_bytes` derives it from the age and generation; never 0.
+    pub(crate) demo_rng: demo::Dice,
+
     // Diabetes — permanent once triggered by sustained overweight.
     pub diabetic: bool,
     /// Minutes spent overweight; once it reaches the onset time `diabetic`
@@ -451,6 +458,8 @@ impl GameState {
             care_good_min: 0,
             care_awake_min: 0,
             saved_unix: 0,
+            demo: demo::Demo::default(),
+            demo_rng: demo::seed_rng(seed, 0),
 
             diabetic: false,
             diabetes_min: 0,
@@ -704,7 +713,7 @@ impl GameState {
         {
             return false;
         }
-        let price = price.filter(|_| self.money_enabled);
+        let price = price.filter(|_| self.money_live());
         if let Some(price) = price
             && !self.can_afford(price)
         {
@@ -992,7 +1001,7 @@ impl GameState {
             MiniGame::Nim => self.cooldown_nim = MINIGAME_COOLDOWN(),
             MiniGame::BornJeweled => self.cooldown_bornjeweled = MINIGAME_COOLDOWN(),
         }
-        if self.money_enabled {
+        if self.money_live() {
             self.add_money(MINIGAME_HAX_REWARD);
         }
     }
@@ -1070,7 +1079,7 @@ impl GameState {
         use hint::Remedy;
         let priced = |a: Action, food: Option<FoodKind>, drink: Option<DrinkKind>| {
             let price = doses::price(a, food, drink, self.hard_mode)?;
-            (self.money_enabled && !self.can_afford(price)).then_some(doses::Reason::CantAfford)
+            (self.money_live() && !self.can_afford(price)).then_some(doses::Reason::CantAfford)
         };
         let gate = |a: Action, drink: Option<DrinkKind>| {
             self.refusal_for(a, drink)
@@ -1135,6 +1144,54 @@ impl GameState {
             Remedy::Rehab => self.preview(Action::Rehab, None, None),
             Remedy::Game | Remedy::Defrost => None,
         }
+    }
+
+    /// Whether demo mode is on.
+    pub fn is_demo(&self) -> bool {
+        self.demo.on
+    }
+
+    /// HAX is live: the pet has money and demo mode is not freezing it.
+    pub fn money_live(&self) -> bool {
+        self.money_enabled && !self.demo.on
+    }
+
+    /// A quarter or more of the pet's life was lived in demo mode.
+    pub fn self_raised(&self) -> bool {
+        let age_min = (self.age_ticks / TICKS_PER_MINUTE) as u64;
+        self.demo.demo_min as u64 * SELF_RAISED_DIV as u64 > age_min
+    }
+
+    /// Turn demo mode on or off. On needs a living pet in fair shape; a
+    /// running action does not block it. Off always works and keeps only the
+    /// lifetime, the care mode and whose action is running.
+    pub fn set_demo(&mut self, on: bool) -> Result<(), doses::Reason> {
+        let keep = demo::Demo {
+            demo_min: self.demo.demo_min,
+            animated: self.demo.animated,
+            pet_action: self.demo.pet_action,
+            ..demo::Demo::default()
+        };
+        if on {
+            match self.cannot_act() {
+                None | Some(doses::Reason::Busy) => {}
+                Some(why) => return Err(why),
+            }
+            if self.phase == Phase::Leaving
+                || (self.health as i32) < DEMO_ON_HEALTH_PCT() as i32 * needs::P
+            {
+                return Err(doses::Reason::Refused(doses::Refusal::FixMeFirst));
+            }
+            self.demo = demo::Demo {
+                on: true,
+                whim_min: DEMO_WHIM_BASE_MIN(),
+                ..keep
+            };
+        } else {
+            self.demo = keep;
+        }
+        self.request_save();
+        Ok(())
     }
 
     /// The reasons that stop every action alike.
@@ -1275,6 +1332,10 @@ pub struct PetStats {
     /// Whether Hard (US) prices are in effect. Only meaningful when
     /// `money_enabled` is true — see `GameState::hard_mode`.
     pub hard_mode: bool,
+    /// Demo mode is on (HAX frozen).
+    pub demo: bool,
+    /// A quarter or more of the pet's life was lived in demo.
+    pub self_raised: bool,
 
     /// Currently active action (if any).
     pub active_action: Option<Action>,
@@ -1437,8 +1498,10 @@ impl GameState {
             losses: self.losses,
 
             money: self.money,
-            money_enabled: self.money_enabled,
+            money_enabled: self.money_live(),
             hard_mode: self.hard_mode,
+            demo: self.demo.on,
+            self_raised: self.self_raised(),
 
             active_action: self.active_action,
             action_ticks_remaining: self.action_ticks_remaining,
@@ -1559,7 +1622,7 @@ impl GameState {
             self.losses = self.losses.saturating_add(1);
         }
         self.cooldown_battle = BATTLE_COOLDOWN();
-        if won && self.money_enabled {
+        if won && self.money_live() {
             self.add_money(BATTLE_HAX_REWARD);
         }
     }
@@ -1570,6 +1633,9 @@ impl GameState {
     /// pet name / hibernate, since a HAX balance is worth protecting from
     /// an unlucky reboot right after being earned.
     pub fn add_money(&mut self, delta: u32) {
+        if self.demo.on {
+            return;
+        }
         self.money = self.money.saturating_add(delta);
         self.request_save();
     }
@@ -1608,6 +1674,10 @@ impl GameState {
 pub const SAVE_FORMAT_VERSION: u8 = 3;
 
 /// Serialized size of a format-3 GameState in bytes.
+/// Demo minutes times this must exceed the age for `self_raised`
+/// (a quarter of the life).
+const SELF_RAISED_DIV: u32 = 4;
+
 pub const SAVE_SIZE: usize = 177;
 
 /// Size of a format-2 save, read only by the upgrade path.
@@ -1826,6 +1896,10 @@ impl GameState {
         w.u8(self.active_food.map_or(NONE_BYTE, food_to_u8));
         w.u8(self.active_drink.map_or(NONE_BYTE, drink_to_u8));
         w.u32(self.saved_unix);
+        debug_assert_eq!(w.i, demo::BLOCK_AT);
+        let mut block = [0u8; demo::BLOCK_LEN];
+        self.demo.write(&mut block);
+        b[demo::BLOCK_AT..demo::BLOCK_AT + demo::BLOCK_LEN].copy_from_slice(&block);
         b
     }
 
@@ -1884,6 +1958,10 @@ impl GameState {
         s.active_food = food_from_u8(r.u8());
         s.active_drink = drink_from_u8(r.u8());
         s.saved_unix = r.u32();
+        if let Ok(block) = b[demo::BLOCK_AT..demo::BLOCK_AT + demo::BLOCK_LEN].try_into() {
+            s.demo = demo::Demo::read(block);
+        }
+        s.demo_rng = demo::seed_rng(s.age_ticks as u64, s.generation as u64);
         Some(s)
     }
 

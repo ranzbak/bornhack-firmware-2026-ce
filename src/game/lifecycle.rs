@@ -982,7 +982,7 @@ pub fn money() -> u32 {
 pub fn money_enabled() -> bool {
     let state = unsafe { (*GAME.get()).as_ref() };
     match state {
-        Some(s) => s.money_enabled,
+        Some(s) => s.money_live(),
         None => false,
     }
 }

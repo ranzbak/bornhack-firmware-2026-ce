@@ -3261,6 +3261,13 @@ mod oracle {
 #[test]
 fn template_parses_to_classic_with_no_edits() {
     let template = cfg_template();
+    if std::env::var_os("BPETS_REGEN").is_some() {
+        std::fs::write(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/to-badge/BPETS_V3.CFG"),
+            &template,
+        )
+        .unwrap();
+    }
     assert_eq!(
         template,
         include_str!("../assets/to-badge/BPETS_V3.CFG"),

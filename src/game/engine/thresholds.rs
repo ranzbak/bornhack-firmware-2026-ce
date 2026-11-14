@@ -326,6 +326,58 @@ thresholds_table! {
     DOSE_WORK_MOOD_PCT: u8,
     DOSE_FRIEND_BIG_FUN_PCT: u8,
     DOSE_FRIEND_SMALL_FUN_PCT: u8,
+    DEMO_FIT_FLOOR_PCT: u8,
+    DEMO_HEALTH_FLOOR_PCT: u8,
+    DEMO_HELP_HEALTH_PCT: u8,
+    DEMO_ON_HEALTH_PCT: u8,
+    DEMO_MED_HEALTH_PCT: u8,
+    DEMO_WAKE_FULL_PCT: u8,
+    DEMO_EDGE_FULL_PCT: u8,
+    DEMO_EDGE_WATER_PCT: u8,
+    DEMO_EDGE_ENERGY_PCT: u8,
+    DEMO_EDGE_BOOZE_PCT: u8,
+    DEMO_SOFT_WATER_PCT: u8,
+    DEMO_SOFT_FULL_PCT: u8,
+    DEMO_SOFT_ENERGY_PCT: u8,
+    DEMO_SOFT_DIRT_PCT: u8,
+    DEMO_SOFT_FUN_PCT: u8,
+    DEMO_PLAY_ENERGY_PCT: u8,
+    DEMO_WIRED_FUN_PCT: u8,
+    DEMO_RISE_ENERGY_PCT: u8,
+    DEMO_NAP_ENERGY_PCT: u8,
+    DEMO_NAP_FUN_PCT: u8,
+    DEMO_WHIM_BOOZE_LO_PCT: u8,
+    DEMO_WHIM_BOOZE_HI_PCT: u8,
+    DEMO_WHIM_BEER_LO_PCT: u8,
+    DEMO_WHIM_BEER_HI_PCT: u8,
+    DEMO_BEER_STOP_MIN: u16,
+    DEMO_LIGHT_FOOD_PCT: u8,
+    DEMO_RICH_FOOD_PCT: u8,
+    DEMO_REACT_BASE_MIN: u16,
+    DEMO_REACT_SPREAD_MIN: u16,
+    DEMO_DRY_BASE_MIN: u16,
+    DEMO_DRY_SPREAD_MIN: u16,
+    DEMO_WHIM_BASE_MIN: u16,
+    DEMO_WHIM_SPREAD_MIN: u16,
+    DEMO_LAZY_MIN: u16,
+    DEMO_LAZY_MAX_PCT: u8,
+    DEMO_NAP_BASE_MIN: u16,
+    DEMO_NAP_SPREAD_MIN: u16,
+    DEMO_EDGE_NAP_MIN: u16,
+    DEMO_RISE_BASE_MIN: u16,
+    DEMO_RISE_SPREAD_MIN: u16,
+    DEMO_BED_AT_MIN: u16,
+    DEMO_BED_SPREAD_MIN: u16,
+    DEMO_UP_AT_MIN: u16,
+    DEMO_UP_SPREAD_MIN: u16,
+    DEMO_PAUSE_MIN: u8,
+    DEMO_PICK_APPLE_PCT: u8,
+    DEMO_PICK_SALAD_PCT: u8,
+    DEMO_PICK_PIZZA_PCT: u8,
+    DEMO_PICK_FRIK_PCT: u8,
+    DEMO_PICK_WATER_PCT: u8,
+    DEMO_PICK_COLA_PCT: u8,
+    DEMO_PICK_GAME_PCT: u8,
 }
 
 // ---------------------------------------------------------------------------
@@ -603,6 +655,58 @@ impl Thresholds {
         DOSE_WORK_MOOD_PCT: 5,
         DOSE_FRIEND_BIG_FUN_PCT: 15,
         DOSE_FRIEND_SMALL_FUN_PCT: 5,
+        DEMO_FIT_FLOOR_PCT: 45,
+        DEMO_HEALTH_FLOOR_PCT: 25,
+        DEMO_HELP_HEALTH_PCT: 35,
+        DEMO_ON_HEALTH_PCT: 40,
+        DEMO_MED_HEALTH_PCT: 45,
+        DEMO_WAKE_FULL_PCT: 18,
+        DEMO_EDGE_FULL_PCT: 20,
+        DEMO_EDGE_WATER_PCT: 22,
+        DEMO_EDGE_ENERGY_PCT: 12,
+        DEMO_EDGE_BOOZE_PCT: 55,
+        DEMO_SOFT_WATER_PCT: 48,
+        DEMO_SOFT_FULL_PCT: 36,
+        DEMO_SOFT_ENERGY_PCT: 27,
+        DEMO_SOFT_DIRT_PCT: 60,
+        DEMO_SOFT_FUN_PCT: 27,
+        DEMO_PLAY_ENERGY_PCT: 25,
+        DEMO_WIRED_FUN_PCT: 78,
+        DEMO_RISE_ENERGY_PCT: 97,
+        DEMO_NAP_ENERGY_PCT: 55,
+        DEMO_NAP_FUN_PCT: 45,
+        DEMO_WHIM_BOOZE_LO_PCT: 15,
+        DEMO_WHIM_BOOZE_HI_PCT: 45,
+        DEMO_WHIM_BEER_LO_PCT: 50,
+        DEMO_WHIM_BEER_HI_PCT: 35,
+        DEMO_BEER_STOP_MIN: 300,
+        DEMO_LIGHT_FOOD_PCT: 56,
+        DEMO_RICH_FOOD_PCT: 42,
+        DEMO_REACT_BASE_MIN: 10,
+        DEMO_REACT_SPREAD_MIN: 20,
+        DEMO_DRY_BASE_MIN: 20,
+        DEMO_DRY_SPREAD_MIN: 40,
+        DEMO_WHIM_BASE_MIN: 180,
+        DEMO_WHIM_SPREAD_MIN: 600,
+        DEMO_LAZY_MIN: 360,
+        DEMO_LAZY_MAX_PCT: 15,
+        DEMO_NAP_BASE_MIN: 40,
+        DEMO_NAP_SPREAD_MIN: 60,
+        DEMO_EDGE_NAP_MIN: 120,
+        DEMO_RISE_BASE_MIN: 10,
+        DEMO_RISE_SPREAD_MIN: 110,
+        DEMO_BED_AT_MIN: 1320,
+        DEMO_BED_SPREAD_MIN: 90,
+        DEMO_UP_AT_MIN: 420,
+        DEMO_UP_SPREAD_MIN: 90,
+        DEMO_PAUSE_MIN: 30,
+        DEMO_PICK_APPLE_PCT: 40,
+        DEMO_PICK_SALAD_PCT: 15,
+        DEMO_PICK_PIZZA_PCT: 25,
+        DEMO_PICK_FRIK_PCT: 12,
+        DEMO_PICK_WATER_PCT: 70,
+        DEMO_PICK_COLA_PCT: 20,
+        DEMO_PICK_GAME_PCT: 30,
     };
 
     /// Half-speed decay, doubled lifetimes, more generous action relief.
@@ -877,6 +981,58 @@ impl Thresholds {
         DOSE_WORK_MOOD_PCT: 5,
         DOSE_FRIEND_BIG_FUN_PCT: 15,
         DOSE_FRIEND_SMALL_FUN_PCT: 5,
+        DEMO_FIT_FLOOR_PCT: 40,
+        DEMO_HEALTH_FLOOR_PCT: 25,
+        DEMO_HELP_HEALTH_PCT: 35,
+        DEMO_ON_HEALTH_PCT: 40,
+        DEMO_MED_HEALTH_PCT: 45,
+        DEMO_WAKE_FULL_PCT: 18,
+        DEMO_EDGE_FULL_PCT: 20,
+        DEMO_EDGE_WATER_PCT: 22,
+        DEMO_EDGE_ENERGY_PCT: 12,
+        DEMO_EDGE_BOOZE_PCT: 55,
+        DEMO_SOFT_WATER_PCT: 43,
+        DEMO_SOFT_FULL_PCT: 31,
+        DEMO_SOFT_ENERGY_PCT: 22,
+        DEMO_SOFT_DIRT_PCT: 65,
+        DEMO_SOFT_FUN_PCT: 22,
+        DEMO_PLAY_ENERGY_PCT: 25,
+        DEMO_WIRED_FUN_PCT: 83,
+        DEMO_RISE_ENERGY_PCT: 97,
+        DEMO_NAP_ENERGY_PCT: 55,
+        DEMO_NAP_FUN_PCT: 45,
+        DEMO_WHIM_BOOZE_LO_PCT: 15,
+        DEMO_WHIM_BOOZE_HI_PCT: 45,
+        DEMO_WHIM_BEER_LO_PCT: 50,
+        DEMO_WHIM_BEER_HI_PCT: 35,
+        DEMO_BEER_STOP_MIN: 300,
+        DEMO_LIGHT_FOOD_PCT: 56,
+        DEMO_RICH_FOOD_PCT: 42,
+        DEMO_REACT_BASE_MIN: 10,
+        DEMO_REACT_SPREAD_MIN: 20,
+        DEMO_DRY_BASE_MIN: 20,
+        DEMO_DRY_SPREAD_MIN: 40,
+        DEMO_WHIM_BASE_MIN: 180,
+        DEMO_WHIM_SPREAD_MIN: 600,
+        DEMO_LAZY_MIN: 360,
+        DEMO_LAZY_MAX_PCT: 15,
+        DEMO_NAP_BASE_MIN: 40,
+        DEMO_NAP_SPREAD_MIN: 60,
+        DEMO_EDGE_NAP_MIN: 120,
+        DEMO_RISE_BASE_MIN: 10,
+        DEMO_RISE_SPREAD_MIN: 110,
+        DEMO_BED_AT_MIN: 1320,
+        DEMO_BED_SPREAD_MIN: 90,
+        DEMO_UP_AT_MIN: 420,
+        DEMO_UP_SPREAD_MIN: 90,
+        DEMO_PAUSE_MIN: 30,
+        DEMO_PICK_APPLE_PCT: 40,
+        DEMO_PICK_SALAD_PCT: 15,
+        DEMO_PICK_PIZZA_PCT: 25,
+        DEMO_PICK_FRIK_PCT: 12,
+        DEMO_PICK_WATER_PCT: 70,
+        DEMO_PICK_COLA_PCT: 20,
+        DEMO_PICK_GAME_PCT: 30,
     };
 }
 
@@ -1585,8 +1741,172 @@ pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
     }),
     ("DOSE_FRIEND_SMALL_FUN_PCT", |t, v| {
         t.DOSE_FRIEND_SMALL_FUN_PCT = v.min(100) as u8
+    }),    ("DEMO_FIT_FLOOR_PCT", |t, v| {
+        t.DEMO_FIT_FLOOR_PCT = clamp_pct(v)
+    }),
+    ("DEMO_HEALTH_FLOOR_PCT", |t, v| {
+        t.DEMO_HEALTH_FLOOR_PCT = clamp_pct(v)
+    }),
+    ("DEMO_HELP_HEALTH_PCT", |t, v| {
+        t.DEMO_HELP_HEALTH_PCT = clamp_pct(v)
+    }),
+    ("DEMO_ON_HEALTH_PCT", |t, v| {
+        t.DEMO_ON_HEALTH_PCT = clamp_pct(v)
+    }),
+    ("DEMO_MED_HEALTH_PCT", |t, v| {
+        t.DEMO_MED_HEALTH_PCT = clamp_pct(v)
+    }),
+    ("DEMO_WAKE_FULL_PCT", |t, v| {
+        t.DEMO_WAKE_FULL_PCT = clamp_pct(v)
+    }),
+    ("DEMO_EDGE_FULL_PCT", |t, v| {
+        t.DEMO_EDGE_FULL_PCT = clamp_pct(v)
+    }),
+    ("DEMO_EDGE_WATER_PCT", |t, v| {
+        t.DEMO_EDGE_WATER_PCT = clamp_pct(v)
+    }),
+    ("DEMO_EDGE_ENERGY_PCT", |t, v| {
+        t.DEMO_EDGE_ENERGY_PCT = clamp_pct(v)
+    }),
+    ("DEMO_EDGE_BOOZE_PCT", |t, v| {
+        t.DEMO_EDGE_BOOZE_PCT = clamp_pct(v)
+    }),
+    ("DEMO_SOFT_WATER_PCT", |t, v| {
+        t.DEMO_SOFT_WATER_PCT = clamp_pct(v)
+    }),
+    ("DEMO_SOFT_FULL_PCT", |t, v| {
+        t.DEMO_SOFT_FULL_PCT = clamp_pct(v)
+    }),
+    ("DEMO_SOFT_ENERGY_PCT", |t, v| {
+        t.DEMO_SOFT_ENERGY_PCT = clamp_pct(v)
+    }),
+    ("DEMO_SOFT_DIRT_PCT", |t, v| {
+        t.DEMO_SOFT_DIRT_PCT = clamp_pct(v)
+    }),
+    ("DEMO_SOFT_FUN_PCT", |t, v| {
+        t.DEMO_SOFT_FUN_PCT = clamp_pct(v)
+    }),
+    ("DEMO_PLAY_ENERGY_PCT", |t, v| {
+        t.DEMO_PLAY_ENERGY_PCT = clamp_pct(v)
+    }),
+    ("DEMO_WIRED_FUN_PCT", |t, v| {
+        t.DEMO_WIRED_FUN_PCT = clamp_pct(v)
+    }),
+    ("DEMO_RISE_ENERGY_PCT", |t, v| {
+        t.DEMO_RISE_ENERGY_PCT = clamp_pct(v)
+    }),
+    ("DEMO_NAP_ENERGY_PCT", |t, v| {
+        t.DEMO_NAP_ENERGY_PCT = clamp_pct(v)
+    }),
+    ("DEMO_NAP_FUN_PCT", |t, v| {
+        t.DEMO_NAP_FUN_PCT = clamp_pct(v)
+    }),
+    ("DEMO_WHIM_BOOZE_LO_PCT", |t, v| {
+        t.DEMO_WHIM_BOOZE_LO_PCT = clamp_pct(v)
+    }),
+    ("DEMO_WHIM_BOOZE_HI_PCT", |t, v| {
+        t.DEMO_WHIM_BOOZE_HI_PCT = clamp_pct(v)
+    }),
+    ("DEMO_WHIM_BEER_LO_PCT", |t, v| {
+        t.DEMO_WHIM_BEER_LO_PCT = clamp_pct(v)
+    }),
+    ("DEMO_WHIM_BEER_HI_PCT", |t, v| {
+        t.DEMO_WHIM_BEER_HI_PCT = clamp_pct(v)
+    }),
+    ("DEMO_BEER_STOP_MIN", |t, v| {
+        t.DEMO_BEER_STOP_MIN = clamp_u16(v)
+    }),
+    ("DEMO_LIGHT_FOOD_PCT", |t, v| {
+        t.DEMO_LIGHT_FOOD_PCT = clamp_pct(v)
+    }),
+    ("DEMO_RICH_FOOD_PCT", |t, v| {
+        t.DEMO_RICH_FOOD_PCT = clamp_pct(v)
+    }),
+    ("DEMO_REACT_BASE_MIN", |t, v| {
+        t.DEMO_REACT_BASE_MIN = clamp_u16(v)
+    }),
+    ("DEMO_REACT_SPREAD_MIN", |t, v| {
+        t.DEMO_REACT_SPREAD_MIN = clamp_u16(v).max(1)
+    }),
+    ("DEMO_DRY_BASE_MIN", |t, v| {
+        t.DEMO_DRY_BASE_MIN = clamp_u16(v)
+    }),
+    ("DEMO_DRY_SPREAD_MIN", |t, v| {
+        t.DEMO_DRY_SPREAD_MIN = clamp_u16(v).max(1)
+    }),
+    ("DEMO_WHIM_BASE_MIN", |t, v| {
+        t.DEMO_WHIM_BASE_MIN = clamp_u16(v)
+    }),
+    ("DEMO_WHIM_SPREAD_MIN", |t, v| {
+        t.DEMO_WHIM_SPREAD_MIN = clamp_u16(v).max(1)
+    }),
+    ("DEMO_LAZY_MIN", |t, v| {
+        t.DEMO_LAZY_MIN = clamp_u16(v).max(1)
+    }),
+    ("DEMO_LAZY_MAX_PCT", |t, v| {
+        t.DEMO_LAZY_MAX_PCT = v.clamp(1, LAZY_MAX as u32) as u8
+    }),
+    ("DEMO_NAP_BASE_MIN", |t, v| {
+        t.DEMO_NAP_BASE_MIN = clamp_u16(v)
+    }),
+    ("DEMO_NAP_SPREAD_MIN", |t, v| {
+        t.DEMO_NAP_SPREAD_MIN = clamp_u16(v).max(1)
+    }),
+    ("DEMO_EDGE_NAP_MIN", |t, v| {
+        t.DEMO_EDGE_NAP_MIN = clamp_u16(v)
+    }),
+    ("DEMO_RISE_BASE_MIN", |t, v| {
+        t.DEMO_RISE_BASE_MIN = clamp_u16(v)
+    }),
+    ("DEMO_RISE_SPREAD_MIN", |t, v| {
+        t.DEMO_RISE_SPREAD_MIN = clamp_u16(v).max(1)
+    }),
+    ("DEMO_BED_AT_MIN", |t, v| {
+        t.DEMO_BED_AT_MIN = clamp_u16(v).min(DAY_LAST_MIN)
+    }),
+    ("DEMO_BED_SPREAD_MIN", |t, v| {
+        t.DEMO_BED_SPREAD_MIN = clamp_u16(v).clamp(1, DAY_SPREAD_MAX_MIN)
+    }),
+    ("DEMO_UP_AT_MIN", |t, v| {
+        t.DEMO_UP_AT_MIN = clamp_u16(v).min(DAY_LAST_MIN)
+    }),
+    ("DEMO_UP_SPREAD_MIN", |t, v| {
+        t.DEMO_UP_SPREAD_MIN = clamp_u16(v).clamp(1, DAY_SPREAD_MAX_MIN)
+    }),
+    ("DEMO_PAUSE_MIN", |t, v| {
+        t.DEMO_PAUSE_MIN = v.min(255) as u8
+    }),
+    ("DEMO_PICK_APPLE_PCT", |t, v| {
+        t.DEMO_PICK_APPLE_PCT = v.min(100) as u8
+    }),
+    ("DEMO_PICK_SALAD_PCT", |t, v| {
+        t.DEMO_PICK_SALAD_PCT = v.min(100) as u8
+    }),
+    ("DEMO_PICK_PIZZA_PCT", |t, v| {
+        t.DEMO_PICK_PIZZA_PCT = v.min(100) as u8
+    }),
+    ("DEMO_PICK_FRIK_PCT", |t, v| {
+        t.DEMO_PICK_FRIK_PCT = v.min(100) as u8
+    }),
+    ("DEMO_PICK_WATER_PCT", |t, v| {
+        t.DEMO_PICK_WATER_PCT = v.min(100) as u8
+    }),
+    ("DEMO_PICK_COLA_PCT", |t, v| {
+        t.DEMO_PICK_COLA_PCT = v.min(100) as u8
+    }),
+    ("DEMO_PICK_GAME_PCT", |t, v| {
+        t.DEMO_PICK_GAME_PCT = v.min(100) as u8
     }),
 ];
+
+/// Last minute of the day, the most a bedtime or getting-up line can be.
+const DAY_LAST_MIN: u16 = super::demo::MINUTES_PER_DAY - 1;
+/// The widest bedtime or getting-up window (ten hours).
+const DAY_SPREAD_MAX_MIN: u16 = 600;
+/// Largest temperament the demo block holds.
+const LAZY_MAX: u8 = super::demo::LAZY_MAX;
+/// The demo soft delay and dry-out interval are saved in one byte.
+const BYTE_MAX_MIN: u16 = u8::MAX as u16;
 
 #[inline]
 fn clamp_u16(v: u32) -> u16 {
@@ -1637,6 +1957,47 @@ pub fn validate(t: &Thresholds, preset: &Thresholds) -> Thresholds {
     if r.DIABETES_WEIGHT_LO_PCT >= r.DIABETES_WEIGHT_HI_PCT {
         r.DIABETES_WEIGHT_LO_PCT = preset.DIABETES_WEIGHT_LO_PCT;
         r.DIABETES_WEIGHT_HI_PCT = preset.DIABETES_WEIGHT_HI_PCT;
+    }
+    // Demo (plan 3). Food and drink draws that add up over 100 % fall back.
+    if r.DEMO_PICK_APPLE_PCT as u16
+        + r.DEMO_PICK_SALAD_PCT as u16
+        + r.DEMO_PICK_PIZZA_PCT as u16
+        + r.DEMO_PICK_FRIK_PCT as u16
+        > 100
+    {
+        r.DEMO_PICK_APPLE_PCT = preset.DEMO_PICK_APPLE_PCT;
+        r.DEMO_PICK_SALAD_PCT = preset.DEMO_PICK_SALAD_PCT;
+        r.DEMO_PICK_PIZZA_PCT = preset.DEMO_PICK_PIZZA_PCT;
+        r.DEMO_PICK_FRIK_PCT = preset.DEMO_PICK_FRIK_PCT;
+    }
+    if r.DEMO_PICK_WATER_PCT as u16 + r.DEMO_PICK_COLA_PCT as u16 > 100 {
+        r.DEMO_PICK_WATER_PCT = preset.DEMO_PICK_WATER_PCT;
+        r.DEMO_PICK_COLA_PCT = preset.DEMO_PICK_COLA_PCT;
+    }
+    if !(r.DEMO_HEALTH_FLOOR_PCT < r.DEMO_HELP_HEALTH_PCT
+        && r.DEMO_HELP_HEALTH_PCT < r.DEMO_ON_HEALTH_PCT
+        && r.DEMO_HELP_HEALTH_PCT <= r.DEMO_MED_HEALTH_PCT)
+    {
+        r.DEMO_HEALTH_FLOOR_PCT = preset.DEMO_HEALTH_FLOOR_PCT;
+        r.DEMO_HELP_HEALTH_PCT = preset.DEMO_HELP_HEALTH_PCT;
+        r.DEMO_ON_HEALTH_PCT = preset.DEMO_ON_HEALTH_PCT;
+        r.DEMO_MED_HEALTH_PCT = preset.DEMO_MED_HEALTH_PCT;
+    }
+    if r.DEMO_RICH_FOOD_PCT >= r.DEMO_LIGHT_FOOD_PCT {
+        r.DEMO_RICH_FOOD_PCT = preset.DEMO_RICH_FOOD_PCT;
+        r.DEMO_LIGHT_FOOD_PCT = preset.DEMO_LIGHT_FOOD_PCT;
+    }
+    // A base plus its spread must fit the field it is stored in: the soft
+    // delay and the dry-out interval are one saved byte, the rest a u16.
+    for (base, spread, max) in [
+        (&mut r.DEMO_REACT_BASE_MIN, &mut r.DEMO_REACT_SPREAD_MIN, BYTE_MAX_MIN),
+        (&mut r.DEMO_DRY_BASE_MIN, &mut r.DEMO_DRY_SPREAD_MIN, BYTE_MAX_MIN),
+        (&mut r.DEMO_WHIM_BASE_MIN, &mut r.DEMO_WHIM_SPREAD_MIN, u16::MAX),
+        (&mut r.DEMO_NAP_BASE_MIN, &mut r.DEMO_NAP_SPREAD_MIN, u16::MAX),
+        (&mut r.DEMO_RISE_BASE_MIN, &mut r.DEMO_RISE_SPREAD_MIN, u16::MAX),
+    ] {
+        *base = (*base).min(max - 1);
+        *spread = (*spread).min(max - *base).max(1);
     }
     r
 }

@@ -21,6 +21,8 @@ pub enum Refusal {
     Asleep,
     NoNeed,
     Tired,
+    /// Demo mode needs a pet in fair shape first.
+    FixMeFirst,
 }
 
 /// Why a menu row is disabled or an action was turned away.
@@ -49,6 +51,7 @@ impl Refusal {
             Refusal::Asleep => "asleep",
             Refusal::NoNeed => "no need",
             Refusal::Tired => "too tired",
+            Refusal::FixMeFirst => "fix me first",
         }
     }
 }
@@ -83,6 +86,7 @@ impl Reason {
             Reason::Refused(Refusal::Asleep) => (3, 0),
             Reason::Refused(Refusal::NoNeed) => (4, 0),
             Reason::Refused(Refusal::Tired) => (5, 0),
+            Reason::Refused(Refusal::FixMeFirst) => (12, 0),
             Reason::Wait(secs) => (6, secs),
             Reason::CantAfford => (7, 0),
             Reason::Busy => (8, 0),
@@ -107,6 +111,7 @@ impl Reason {
             9 => Reason::Hibernating,
             10 => Reason::Egg,
             11 => Reason::Gone,
+            12 => Reason::Refused(Refusal::FixMeFirst),
             _ => Reason::Refused(Refusal::NoNeed),
         }
     }
@@ -382,7 +387,7 @@ fn work(s: &mut GameState) {
     bump(&mut s.energy, -lvl(t::DOSE_WORK_ENERGY_PCT()));
     bump(&mut s.fun, lvl(t::DOSE_WORK_FUN_PCT()));
     bump(&mut s.mood, -lvl(t::DOSE_WORK_MOOD_PCT()));
-    if s.money_enabled {
+    if s.money_live() {
         s.add_money(super::ONLYPETS_HOBBY_REWARD);
     }
 }
