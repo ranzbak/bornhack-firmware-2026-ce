@@ -2268,3 +2268,267 @@ mod hint {
         assert!(subject_line(Subject::Stiff).len() <= 18);
     }
 }
+
+/// Long balance runs of the demo pet (spec 18.3, tuned in plan 3). The long
+/// ones are `#[ignore]`d: CI runs them with `--include-ignored` (Task 9).
+mod balance {
+    use bornhack_aegg::game::engine::sim::{self, Driver, Outcome, Setup};
+
+    const SEEDS: [u64; 5] = [1, 2, 3, 4, 5];
+    const DEMO: Setup = Setup {
+        demo: true,
+        clock: true,
+        animated: false,
+    };
+    const ANIMATED: Setup = Setup {
+        animated: true,
+        ..DEMO
+    };
+
+    fn run(
+        routine: &dyn Fn(u32, u32, &bornhack_aegg::game::engine::GameState) -> sim::Plan,
+        days: u32,
+        driver: Driver,
+        seed: u64,
+        setup: Setup,
+    ) -> Outcome {
+        sim::run_with(routine, days, driver, seed, setup).outcome
+    }
+
+    /// The bounds every unattended 30-day demo pet keeps, clock or not.
+    fn healthy(o: &Outcome, what: &str) {
+        assert!(o.alive && !o.ever_leaving, "{what}: left: {o:?}");
+        assert!(o.min_health_pct >= 40, "{what}: min health {o:?}");
+        assert!(o.max_weight_pct <= 70, "{what}: max weight {o:?}");
+        assert!(
+            (38..=66).contains(&o.end_weight_pct),
+            "{what}: end weight {o:?}"
+        );
+        assert!(!o.diabetic, "{what}: diabetic {o:?}");
+        assert!(o.engine_wakes_per_day <= 60.0, "{what}: wakes {o:?}");
+    }
+
+    /// The full set for a clock run; `refresh_cap` is per care mode.
+    fn alone(o: &Outcome, refresh_cap: f32, what: &str) {
+        healthy(o, what);
+        assert!((50..=80).contains(&o.avg_mood_pct), "{what}: mood {o:?}");
+        assert!(o.miserable_pct <= 2, "{what}: miserable {o:?}");
+        assert!(o.thriving_pct >= 5, "{what}: thriving {o:?}");
+        assert!(o.min_fitness_pct >= 45, "{what}: min fitness {o:?}");
+        assert!(
+            (10.0..=20.0).contains(&o.self_care_per_day),
+            "{what}: self-care {o:?}"
+        );
+        assert!(
+            o.refreshes_per_day <= refresh_cap,
+            "{what}: refreshes {o:?}"
+        );
+        assert!(o.causes_per_day <= 6.0, "{what}: causes {o:?}");
+        assert!(o.night_asleep_pct >= 85, "{what}: night asleep {o:?}");
+        assert!(o.day_asleep_pct <= 20, "{what}: day asleep {o:?}");
+    }
+
+    #[test]
+    #[ignore]
+    fn demo_alone_for_30_days() {
+        for seed in SEEDS {
+            let o = run(&sim::absent, 30, Driver::Delta, seed, DEMO);
+            eprintln!("instant seed {seed}: {o:?}");
+            alone(&o, 60.0, &format!("instant seed {seed}"));
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn animated_demo_alone_for_30_days() {
+        for seed in SEEDS {
+            let i = run(&sim::absent, 30, Driver::Delta, seed, DEMO);
+            let a = run(&sim::absent, 30, Driver::Delta, seed, ANIMATED);
+            eprintln!(
+                "seed {seed}: refreshes/day instant {:.1}, animated {:.1}",
+                i.refreshes_per_day, a.refreshes_per_day
+            );
+            eprintln!("animated seed {seed}: {a:?}");
+            alone(&a, 220.0, &format!("animated seed {seed}"));
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn demo_without_a_clock_for_30_days() {
+        let setup = Setup {
+            clock: false,
+            ..DEMO
+        };
+        for seed in SEEDS {
+            let o = run(&sim::absent, 30, Driver::Delta, seed, setup);
+            eprintln!("no clock seed {seed}: {o:?}");
+            healthy(&o, &format!("no clock seed {seed}"));
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn demo_with_a_helper_for_30_days() {
+        for seed in SEEDS {
+            let nobody = run(&sim::absent, 30, Driver::Delta, seed, DEMO);
+            let helped = run(&sim::helper, 30, Driver::Delta, seed, DEMO);
+            eprintln!("helper seed {seed}: {helped:?}");
+            assert!(
+                helped.alive && !helped.ever_leaving,
+                "seed {seed}: {helped:?}"
+            );
+            assert!(
+                helped.avg_mood_pct >= nobody.avg_mood_pct,
+                "seed {seed}: helper {} < nobody {}",
+                helped.avg_mood_pct,
+                nobody.avg_mood_pct
+            );
+            assert!(helped.max_weight_pct <= 70, "seed {seed}: {helped:?}");
+        }
+    }
+
+    fn near(a: u8, b: u8, tol: u8, what: &str) {
+        assert!(a.abs_diff(b) <= tol, "{what}: oracle {a} vs delta {b}");
+    }
+
+    fn near_f(a: f32, b: f32, tol: f32, what: &str) {
+        assert!((a - b).abs() <= tol, "{what}: oracle {a} vs delta {b}");
+    }
+
+    /// Delta and Oracle agree as in `oracle::delta_matches_oracle_all_routines`:
+    /// the discrete facts equal, the integrated figures within a point or two.
+    /// `Outcome` has f32 fields, so there is no `PartialEq` to lean on.
+    fn same(o: &Outcome, d: &Outcome, what: &str) {
+        assert_eq!(o.alive, d.alive, "{what}: alive");
+        assert_eq!(o.ever_leaving, d.ever_leaving, "{what}: leaving");
+        assert_eq!(o.diabetic, d.diabetic, "{what}: diabetic");
+        near(o.avg_mood_pct, d.avg_mood_pct, 1, &format!("{what}: mood"));
+        near(
+            o.end_health_pct,
+            d.end_health_pct,
+            2,
+            &format!("{what}: end health"),
+        );
+        near(
+            o.min_health_pct,
+            d.min_health_pct,
+            2,
+            &format!("{what}: min health"),
+        );
+        near(
+            o.end_fitness_pct,
+            d.end_fitness_pct,
+            2,
+            &format!("{what}: end fitness"),
+        );
+        near(
+            o.min_fitness_pct,
+            d.min_fitness_pct,
+            2,
+            &format!("{what}: min fitness"),
+        );
+        near(
+            o.end_weight_pct,
+            d.end_weight_pct,
+            2,
+            &format!("{what}: end weight"),
+        );
+        near(
+            o.max_weight_pct,
+            d.max_weight_pct,
+            2,
+            &format!("{what}: max weight"),
+        );
+        let shares = |x: &Outcome| {
+            [
+                x.thriving_pct,
+                x.fine_pct,
+                x.off_pct,
+                x.poorly_pct,
+                x.miserable_pct,
+            ]
+        };
+        for (i, (a, b)) in shares(o).into_iter().zip(shares(d)).enumerate() {
+            near(a, b, 2, &format!("{what}: mood band {i}"));
+        }
+        near(
+            o.night_asleep_pct,
+            d.night_asleep_pct,
+            3,
+            &format!("{what}: night asleep"),
+        );
+        near(
+            o.day_asleep_pct,
+            d.day_asleep_pct,
+            3,
+            &format!("{what}: day asleep"),
+        );
+        near_f(
+            o.self_care_per_day,
+            d.self_care_per_day,
+            1.0,
+            &format!("{what}: self-care"),
+        );
+        near_f(
+            o.causes_per_day,
+            d.causes_per_day,
+            1.0,
+            &format!("{what}: causes"),
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn demo_delta_matches_oracle() {
+        type R = fn(u32, u32, &bornhack_aegg::game::engine::GameState) -> sim::Plan;
+        let routines: [(&str, R); 2] = [("nobody", sim::absent), ("helper", sim::helper)];
+        for (name, r) in routines {
+            for setup in [DEMO, ANIMATED] {
+                for seed in [1, 2, 3] {
+                    let o = run(&r, 10, Driver::Oracle, seed, setup);
+                    let d = run(&r, 10, Driver::Delta, seed, setup);
+                    same(
+                        &o,
+                        &d,
+                        &format!("{name} animated {} seed {seed}", setup.animated),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn demo_smoke_two_days() {
+        let instant = run(&sim::absent, 2, Driver::Delta, 1, DEMO);
+        let animated = run(&sim::absent, 2, Driver::Delta, 1, ANIMATED);
+        for (name, o) in [("instant", &instant), ("animated", &animated)] {
+            eprintln!(
+                "smoke {name}: self-care {:.1}/day, refreshes {:.1}/day, wakes {:.1}/day, \
+                 mood {} thriving {} fine {} off {} poorly {} miserable {} \
+                 night asleep {} day asleep {} causes {:.1}/day",
+                o.self_care_per_day,
+                o.refreshes_per_day,
+                o.engine_wakes_per_day,
+                o.avg_mood_pct,
+                o.thriving_pct,
+                o.fine_pct,
+                o.off_pct,
+                o.poorly_pct,
+                o.miserable_pct,
+                o.night_asleep_pct,
+                o.day_asleep_pct,
+                o.causes_per_day,
+            );
+            assert!(o.alive, "{name}: {o:?}");
+            assert!(!o.ever_leaving, "{name}: {o:?}");
+            assert!(o.self_care_per_day > 0.0, "{name}: {o:?}");
+        }
+        assert!(
+            animated.refreshes_per_day > instant.refreshes_per_day,
+            "animated {} vs instant {}",
+            animated.refreshes_per_day,
+            instant.refreshes_per_day
+        );
+    }
+}

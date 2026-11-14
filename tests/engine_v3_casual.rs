@@ -57,3 +57,18 @@ fn casual_bands_move_the_ticks() {
     let body = bars(Page::Body, &st);
     assert_eq!(body[1].lo, Some(38));
 }
+
+#[test]
+fn casual_demo_alone_for_10_days() {
+    install_casual();
+    let setup = sim::Setup {
+        demo: true,
+        clock: true,
+        animated: false,
+    };
+    let o = sim::run_with(&sim::absent, 10, Driver::Delta, 1, setup).outcome;
+    println!("casual demo alone: {o:?}");
+    assert!(o.alive && !o.ever_leaving, "{o:?}");
+    assert!(o.min_fitness_pct >= 40, "{o:?}");
+    assert!(o.max_weight_pct <= 70, "{o:?}");
+}

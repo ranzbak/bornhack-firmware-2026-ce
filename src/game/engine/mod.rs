@@ -629,10 +629,10 @@ impl GameState {
             #[cfg(feature = "simulator")]
             ADVANCE_CALLS.with(|c| c.set(c.get() + 1));
             #[cfg(feature = "simulator")]
-            let (mood_before, health_before) = (self.mood, self.health);
+            let before = sim::Snap::of(self);
             advance::advance(self, dt);
             #[cfg(feature = "simulator")]
-            sim::note_segment(mood_before, self.mood, health_before, self.health, dt);
+            sim::note_segment(before, sim::Snap::of(self), dt);
             ticks -= dt * TICKS_PER_MINUTE;
         }
         // Gone partway through the gap: the pet lived only the time it was
@@ -711,6 +711,8 @@ impl GameState {
     /// Returns remaining delta after action ticks are consumed.
     fn consume_action_ticks(&mut self, delta: u32) -> u32 {
         let used = delta.min(self.action_ticks_remaining as u32);
+        #[cfg(feature = "simulator")]
+        sim::note_action_ticks(used);
         self.action_ticks_remaining -= used as u8;
         if self.action_ticks_remaining == 0 {
             self.finish_action();

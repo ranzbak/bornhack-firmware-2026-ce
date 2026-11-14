@@ -243,6 +243,12 @@ pub struct CauseQueue(Deque<Cause, CAUSE_QUEUE>);
 impl CauseQueue {
     /// Queue a cause; when full the oldest is dropped.
     pub fn push(&mut self, c: Cause) {
+        #[cfg(feature = "simulator")]
+        super::sim::note_cause();
+        self.keep(c);
+    }
+
+    fn keep(&mut self, c: Cause) {
         if self.0.is_full() {
             self.0.pop_front();
         }
@@ -256,7 +262,7 @@ impl CauseQueue {
     /// Queue every cause of `other`, in order.
     pub fn extend_from(&mut self, other: &CauseQueue) {
         for &c in other.iter() {
-            self.push(c);
+            self.keep(c); // already counted when `other` queued it
         }
     }
 

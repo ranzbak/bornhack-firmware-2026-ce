@@ -10,6 +10,7 @@ use std::cell::Cell;
 use super::needs::P;
 use super::thresholds::{self, Mode, Thresholds};
 use super::{Action, DrinkKind, FoodKind, GameState, MiniGame, PetKind, Phase};
+use crate::game::pacing;
 
 /// Engine ticks per minute (1 tick = 10 s).
 const TPM: u32 = 6;
@@ -71,6 +72,44 @@ pub struct Outcome {
     /// Delta driver only (the oracle has no engine wakes): wake-ups that came
     /// from `next_wake_tick`, not from routine events or the day-end sample.
     pub engine_wakes_per_day: f32,
+    /// Time shares of the mood bands (thriving 80+, fine 60 to 79, off 40 to
+    /// 59, poorly 20 to 39, miserable below 20), whole percent.
+    pub thriving_pct: u8,
+    pub fine_pct: u8,
+    pub off_pct: u8,
+    pub poorly_pct: u8,
+    pub miserable_pct: u8,
+    /// The pet's own acts (`demo::act`) a day.
+    pub self_care_per_day: f32,
+    /// Causes the engine queued a day (each one is a toast).
+    pub causes_per_day: f32,
+    pub max_weight_pct: u8,
+    pub min_fitness_pct: u8,
+    /// Share of 00:00..06:00 spent asleep (clock runs only, else 0).
+    pub night_asleep_pct: u8,
+    /// Share of 10:00..20:00 spent asleep (clock runs only, else 0).
+    pub day_asleep_pct: u8,
+    /// The pet was in `Leaving` (or `Gone`) at some point.
+    pub ever_leaving: bool,
+    /// Diabetic at the end of the run.
+    pub diabetic: bool,
+    /// E-paper refreshes a day, Delta driver only (it needs the wake
+    /// count): one per engine wake, plus the frames of every action, paced
+    /// at the fastest the waiter allows (`MIN_FRAME_SECS`). An upper bound:
+    /// the real count also stops at the sprite's frame count, which the
+    /// simulator does not load. Idle frames are not counted.
+    pub refreshes_per_day: f32,
+}
+
+/// How a run starts. `run_full` is `run_with` and `Setup::default()`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Setup {
+    /// Demo mode on (the pet looks after itself).
+    pub demo: bool,
+    /// The wall clock is set: `day_min` starts at 08:00 and follows the run.
+    pub clock: bool,
+    /// The pet's own care is animated (else instant with a note).
+    pub animated: bool,
 }
 
 /// An `Outcome` plus the cost of the `next_wake_tick` calls the delta
@@ -94,13 +133,94 @@ struct Probe {
     mood_sum2: i64,
     minutes: u64,
     min_health: u16,
+    /// Minutes in each mood band, miserable first.
+    band_min: [f64; 5],
+    max_weight: u16,
+    min_fitness: u16,
+    /// Minutes of the night window (00:00..06:00) and of those asleep.
+    night_min: u64,
+    night_asleep: u64,
+    /// The same for the day window (10:00..20:00).
+    day_min: u64,
+    day_asleep: u64,
+    leaving: bool,
+    /// Causes queued, and action ticks run, since the run began.
+    causes: u32,
+    action_ticks: u64,
 }
 
 const PROBE_NEW: Probe = Probe {
     mood_sum2: 0,
     minutes: 0,
     min_health: u16::MAX,
+    band_min: [0.0; 5],
+    max_weight: 0,
+    min_fitness: u16::MAX,
+    night_min: 0,
+    night_asleep: 0,
+    day_min: 0,
+    day_asleep: 0,
+    leaving: false,
+    causes: 0,
+    action_ticks: 0,
 };
+
+/// The figures `note_segment` reads off the pet at one end of a segment.
+#[derive(Clone, Copy)]
+pub(super) struct Snap {
+    mood: u16,
+    health: u16,
+    weight: u16,
+    fitness: u16,
+    sleeping: bool,
+    day_min: Option<u16>,
+    phase: Phase,
+}
+
+impl Snap {
+    pub(super) fn of(s: &GameState) -> Self {
+        Snap {
+            mood: s.mood,
+            health: s.health,
+            weight: s.weight,
+            fitness: s.fitness,
+            sleeping: s.is_sleeping,
+            day_min: s.day_min,
+            phase: s.phase,
+        }
+    }
+}
+
+/// Minutes of `[start, start + dt)` (a minute of the day, wrapping) that fall
+/// in the daily window `[lo, hi)`.
+fn window_overlap(start: u32, dt: u32, lo: u32, hi: u32) -> u32 {
+    let end = start + dt;
+    (0..=end / 1440)
+        .map(|k| {
+            let (a, b) = (lo + 1440 * k, hi + 1440 * k);
+            end.min(b).saturating_sub(start.max(a))
+        })
+        .sum()
+}
+
+/// Minutes a mood moving linearly from `m0` to `m1` over `dt` minutes spends
+/// in each band, miserable first.
+fn band_minutes(m0: u16, m1: u16, dt: u32) -> [f64; 5] {
+    let line = |pct: i32| (pct * PCT) as f64;
+    let edges = [f64::MIN, line(20), line(40), line(60), line(80), f64::MAX];
+    let (a, b) = (m0 as f64, m1 as f64);
+    let mut out = [0.0; 5];
+    for (i, w) in edges.windows(2).enumerate() {
+        let frac = if a == b {
+            (a >= w[0] && a < w[1]) as u8 as f64
+        } else {
+            let (ta, tb) = ((w[0] - a) / (b - a), (w[1] - a) / (b - a));
+            (ta.max(tb).min(1.0) - ta.min(tb).max(0.0)).max(0.0)
+        };
+        out[i] = frac * dt as f64;
+    }
+    out
+}
 
 // Like `ADVANCE_CALLS`, this records every advanced minute, previews on clones
 // included. Only `run_full` resets and reads it, and nothing inside a run
@@ -120,20 +240,55 @@ pub fn self_care_acts() -> u32 {
     SELF_CARE.with(|c| c.get())
 }
 
-/// Called by `GameState::update` after each closed-form segment of `dt`
-/// minutes: mood and health are linear inside one, so ends are enough.
-pub(super) fn note_segment(
-    mood_before: u16,
-    mood_after: u16,
-    health_before: u16,
-    health_after: u16,
-    dt: u32,
-) {
+/// Called by `CauseQueue::push`: the engine queued one cause.
+pub(super) fn note_cause() {
     PROBE.with(|p| {
         let mut v = p.get();
-        v.mood_sum2 += (mood_before as i64 + mood_after as i64) * dt as i64;
+        v.causes += 1;
+        p.set(v);
+    });
+}
+
+/// Called when a running action spends `ticks` (the player's, or the pet's
+/// own animated one). Instant care spends none.
+pub(super) fn note_action_ticks(ticks: u32) {
+    PROBE.with(|p| {
+        let mut v = p.get();
+        v.action_ticks += ticks as u64;
+        p.set(v);
+    });
+}
+
+/// Called by `GameState::update` after each closed-form segment of `dt`
+/// minutes: everything measured is linear inside one, so ends are enough.
+/// Sleep and the window shares go by the state at the segment's start (the
+/// solver ends a segment where either changes).
+pub(super) fn note_segment(before: Snap, after: Snap, dt: u32) {
+    PROBE.with(|p| {
+        let mut v = p.get();
+        v.mood_sum2 += (before.mood as i64 + after.mood as i64) * dt as i64;
         v.minutes += dt as u64;
-        v.min_health = v.min_health.min(health_before).min(health_after);
+        v.min_health = v.min_health.min(before.health).min(after.health);
+        for (acc, m) in v
+            .band_min
+            .iter_mut()
+            .zip(band_minutes(before.mood, after.mood, dt))
+        {
+            *acc += m;
+        }
+        v.max_weight = v.max_weight.max(before.weight).max(after.weight);
+        v.min_fitness = v.min_fitness.min(before.fitness).min(after.fitness);
+        v.leaving |= matches!(after.phase, Phase::Leaving | Phase::Gone);
+        if let Some(start) = before.day_min {
+            let night = window_overlap(start as u32, dt, 0, 360) as u64;
+            let day = window_overlap(start as u32, dt, 600, 1200) as u64;
+            v.night_min += night;
+            v.day_min += day;
+            if before.sleeping {
+                v.night_asleep += night;
+                v.day_asleep += day;
+            }
+        }
         p.set(v);
     });
 }
@@ -251,7 +406,13 @@ fn play_plan(s: &mut GameState, plan: &Plan, injuries: &mut u16) {
 
 /// `run_routine` with a seed, plus the wake-cost figures.
 pub fn run_full(routine: Routine, days: u32, driver: Driver, seed: u64) -> Run {
+    run_with(routine, days, driver, seed, Setup::default())
+}
+
+/// `run_full` with a `Setup`: demo mode, the clock, the care mode.
+pub fn run_with(routine: Routine, days: u32, driver: Driver, seed: u64, setup: Setup) -> Run {
     PROBE.with(|p| p.set(PROBE_NEW));
+    let care_before = self_care_acts();
     let probes = Probes::new();
     let mut s = GameState::new_egg(seed, PetKind::DEFAULT);
     // The routines never earn HAX; with the gate on they would starve.
@@ -259,6 +420,13 @@ pub fn run_full(routine: Routine, days: u32, driver: Driver, seed: u64) -> Run {
     // The egg hatches and the pet is fresh at 08:00 on day 0, as in the
     // prototype (hatching ticks past the countdown age nothing).
     s.update(START_MINUTE * TPM);
+    if setup.clock {
+        s.sync_clock(s.last_update_tick, Some(START_MINUTE as u16));
+    }
+    s.set_demo_care(setup.animated);
+    if setup.demo {
+        s.set_demo(true).expect("a fresh pet takes demo mode");
+    }
 
     let (mut injuries, mut wakes) = (0u16, 0u32);
     let (mut queries, mut calls_total, mut calls_max) = (0u32, 0u64, 0u32);
@@ -313,6 +481,11 @@ pub fn run_full(routine: Routine, days: u32, driver: Driver, seed: u64) -> Run {
                 }
             }
         }
+        if setup.clock {
+            // The badge re-reads its wall clock at its wakes; the run does it
+            // once a day, at the same tick for both drivers.
+            s.sync_clock(day_end, Some(0));
+        }
         if s.phase == Phase::Gone {
             break 'days;
         }
@@ -327,6 +500,21 @@ pub fn run_full(routine: Routine, days: u32, driver: Driver, seed: u64) -> Run {
     } else {
         (probe.mood_sum2 / (2 * probe.minutes as i64) / PCT as i64) as u8
     };
+    let band_total: f64 = probe.band_min.iter().sum();
+    let share = |i: usize| {
+        if band_total > 0.0 {
+            (probe.band_min[i] / band_total * 100.0).round() as u8
+        } else {
+            0
+        }
+    };
+    let window_pct = |asleep: u64, total: u64| {
+        if total == 0 {
+            0
+        } else {
+            (asleep as f64 / total as f64 * 100.0).round() as u8
+        }
+    };
     Run {
         outcome: Outcome {
             alive: s.phase != Phase::Gone,
@@ -339,6 +527,23 @@ pub fn run_full(routine: Routine, days: u32, driver: Driver, seed: u64) -> Run {
             end_weight_pct: pct(s.weight),
             injuries,
             engine_wakes_per_day: wakes as f32 / days_run,
+            thriving_pct: share(4),
+            fine_pct: share(3),
+            off_pct: share(2),
+            poorly_pct: share(1),
+            miserable_pct: share(0),
+            self_care_per_day: (self_care_acts() - care_before) as f32 / days_run,
+            causes_per_day: probe.causes as f32 / days_run,
+            max_weight_pct: pct(probe.max_weight.max(s.weight)),
+            min_fitness_pct: pct(probe.min_fitness.min(s.fitness)),
+            night_asleep_pct: window_pct(probe.night_asleep, probe.night_min),
+            day_asleep_pct: window_pct(probe.day_asleep, probe.day_min),
+            ever_leaving: probe.leaving || matches!(s.phase, Phase::Leaving | Phase::Gone),
+            diabetic: s.diabetic,
+            refreshes_per_day: (wakes as f64
+                + probe.action_ticks as f64 * pacing::SECS_PER_TICK as f64
+                    / pacing::MIN_FRAME_SECS as f64) as f32
+                / days_run,
         },
         wake_queries: queries,
         wake_calls_total: calls_total,
@@ -605,4 +810,16 @@ pub fn once_a_day(_d: u32, m: u32, s: &GameState) -> Plan {
 /// Never looks at the pet.
 pub fn absent(_d: u32, _m: u32, _s: &GameState) -> Plan {
     Plan::new()
+}
+
+/// A helper who looks in once a day, at 18:00: an apple, a glass of water, a
+/// run and a wash. A demo pet never exercises by itself; this is the part
+/// only a player can do.
+pub fn helper(_d: u32, m: u32, _s: &GameState) -> Plan {
+    use Act::*;
+    if at(m, 18, 0) {
+        plan(&[Eat(FoodKind::Apple), Drink(DrinkKind::Water), Sport, Wash])
+    } else {
+        Plan::new()
+    }
 }
