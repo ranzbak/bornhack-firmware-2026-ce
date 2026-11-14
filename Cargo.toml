@@ -252,6 +252,16 @@ path = "src/bin/simulator.rs"
 required-features = ["simulator"]
 
 
+[[test]]
+name = "guide_data"
+path = "tests/guide_data.rs"
+required-features = ["simulator"]
+
+[[test]]
+name = "guide_data_casual"
+path = "tests/guide_data_casual.rs"
+required-features = ["simulator"]
+
 [[bin]]
 name = "guide"
 path = "src/bin/guide.rs"

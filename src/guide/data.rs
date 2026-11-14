@@ -3,7 +3,6 @@
 //! does it), because the engine reads its bands from the installed table.
 
 extern crate alloc;
-use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 

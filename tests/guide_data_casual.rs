@@ -18,6 +18,9 @@ fn casual_values_match_the_preset() {
             continue;
         }
         let v = Thresholds::CASUAL.value_of(k).unwrap();
-        assert!(out.contains(&format!("\"{k}\":{v}")), "{k} should be {v}");
+        assert!(
+            out.contains(&format!("\"{k}\":{v},")) || out.contains(&format!("\"{k}\":{v}}}")),
+            "{k} should be {v}"
+        );
     }
 }

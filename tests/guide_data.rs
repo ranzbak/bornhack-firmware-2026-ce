@@ -2,9 +2,7 @@
 //! threshold table installs once.
 use bornhack_aegg::game::engine::doses::price;
 use bornhack_aegg::game::engine::sim;
-use bornhack_aegg::game::engine::thresholds::{
-    BORNPETS_CFG_KEYS, Mode, Thresholds, badge_preset,
-};
+use bornhack_aegg::game::engine::thresholds::{BORNPETS_CFG_KEYS, Mode, Thresholds, badge_preset};
 use bornhack_aegg::game::engine::{Action, FoodKind};
 use bornhack_aegg::guide::data::{self, dump, fixed, unit_of};
 use bornhack_aegg::guide::json::J;
@@ -32,7 +30,10 @@ fn every_field_has_a_unit() {
     }
     let fixed_keys: Vec<_> = fixed().iter().map(|(k, _, _)| *k).collect();
     for k in &fixed_keys {
-        assert!(!Thresholds::FIELDS.contains(k), "{k} is both fixed and a field");
+        assert!(
+            !Thresholds::FIELDS.contains(k),
+            "{k} is both fixed and a field"
+        );
     }
     let mut sorted = fixed_keys.clone();
     sorted.sort();
@@ -56,7 +57,10 @@ fn values_match_the_presets() {
             continue;
         }
         let v = Thresholds::CLASSIC.value_of(k).unwrap();
-        assert!(out.contains(&format!("\"{k}\":{v}")), "{k} should be {v}");
+        assert!(
+            out.contains(&format!("\"{k}\":{v},")) || out.contains(&format!("\"{k}\":{v}}}")),
+            "{k} should be {v}"
+        );
     }
 }
 
@@ -90,14 +94,38 @@ fn the_reference_pet_gets_peckish_then_sleeps_and_wakes() {
     let peckish = u.iter().find(|(k, _)| *k == "peckish").unwrap().1;
     let m = peckish.expect("peckish within three days");
     assert!(m > 0 && m < 4320);
-    assert!(data::night_min().is_some());
+    assert_eq!(peckish, Some(243));
+    assert_eq!(data::night_min(), Some(672));
+    // Same numbers straight from the engine.
+    use bornhack_aegg::game::engine::{GameState, PetKind, Phase, debug::DebugPoke, needs};
+    let mut s = GameState::new_egg(1, PetKind(0));
+    s.phase = Phase::Active;
+    s.hatching_countdown = 0;
+    s.is_sleeping = false;
+    s.debug_poke(DebugPoke::Comfort).unwrap();
+    let mut first = None;
+    for m in 1..=4320u32 {
+        s.catch_up(1);
+        if first.is_none() && (s.fullness as i32) < needs::full_lo() {
+            first = Some(m);
+        }
+    }
+    assert_eq!(first, peckish);
 }
 
 #[test]
 fn doses_report_effects_or_reasons() {
     install();
     let d = data::doses();
-    let find = |k: &str| d.iter().find(|(n, _)| *n == k).unwrap().1.as_ref().unwrap().clone();
+    let find = |k: &str| {
+        d.iter()
+            .find(|(n, _)| *n == k)
+            .unwrap()
+            .1
+            .as_ref()
+            .unwrap()
+            .clone()
+    };
     let has = |v: &[(&str, i32)], f: &str| v.iter().find(|(n, _)| *n == f).map(|(_, x)| *x);
     assert!(has(&find("Salad"), "full").unwrap() > 0);
     assert!(has(&find("Wash"), "dirt").unwrap() < 0);
