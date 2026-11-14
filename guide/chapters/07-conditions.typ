@@ -57,7 +57,8 @@ The toast is #w("groggy") with #w("overslept"). A pet left alone wakes by
 itself after #v("OVERSLEEP_WAKE_MIN") of oversleeping, which is past that
 line, so it wakes groggy. (A rest at a magic place is the exception: it wipes the count, see @ch-friends.) It also wakes after #v("SELF_WAKE_MIN") of sleep in
 all. A worn-out pet is full sooner, so it oversleeps sooner. Being awake with energy under #v("OVERSLEEP_RESET_PCT")
-wipes the count.
+wipes the count, and so does going to bed under that line. A rested pet that
+goes back to bed keeps its count.
 
 *What it does.* The mood target loses #v("MOOD_PEN_GROGGY_PCT"). As the first word it buzzes.
 
