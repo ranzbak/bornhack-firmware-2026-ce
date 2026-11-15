@@ -62,6 +62,7 @@ const WITH: &[(&str, &str)] = &[
     ("demo-help", "demo-note"),
     ("gone", "leaving"),
     ("asleep", "menu-rest"),
+    ("station-wait", "station-fix"),
 ];
 
 /// Shots that must show one given pet, as `(shot, pet prefix)`. None needs it
@@ -441,6 +442,17 @@ fn note_hung_over() {
     HUNG_OVER.store(has, Ordering::Relaxed);
 }
 
+fn tap_station() {
+    crate::game::station::apply(b"fix s=food1 full>60 water>60", true);
+}
+
+fn station_toast_is_too_soon() -> bool {
+    matches!(
+        crate::game::last_station_toast_for_test(),
+        Some((crate::game::StationToast::TooSoon(_), _))
+    )
+}
+
 fn menu_is(kind: ModalKind) -> bool {
     modal::open_kind() == kind
 }
@@ -671,6 +683,15 @@ pub static SHOTS: &[Shot] = &[
     shot!("floor", [Do(content), Do(very_dirty)], || {
         bg().is_some_and(|b| b.floor as usize == FLOOR_ITEMS)
     }),
+    // A magic place, once and twice in a row.
+    shot!("station-fix", [Do(content), Do(tap_station)], || {
+        toast_is(Toast::Station)
+    }),
+    shot!(
+        "station-wait",
+        [Do(content), Do(tap_station), Do(tap_station)],
+        || toast_is(Toast::Station) && station_toast_is_too_soon()
+    ),
     // An old badge: PETS.CFG still lists the Jellyfish, its sprites are gone.
     shot!(
         "to-the-realm",

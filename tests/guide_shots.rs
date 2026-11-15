@@ -112,3 +112,33 @@ fn every_shot_is_drawn_at_noon_unless_it_says_night() {
     let (_, day) = shot_png("day", "day");
     assert_eq!(day, na, "day is a copy of content at noon");
 }
+
+#[test]
+fn the_station_tables_come_from_code() {
+    let dir = out_dir("stations_data");
+    let file = dir.join("classic.json");
+    let o = guide(&["data", "--preset", "classic", "--out", file.to_str().unwrap()]);
+    assert!(o.status.success(), "guide data failed: {}", String::from_utf8_lossy(&o.stderr));
+    let json = std::fs::read_to_string(&file).unwrap();
+    let presets = include_str!("../scripts/station_presets.txt");
+    let rows: Vec<(&str, &str)> = presets
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(|l| l.split_once('|').unwrap())
+        .collect();
+    assert_eq!(rows.len(), 8);
+    for (place, fix) in &rows {
+        let row = format!("{{\"place\":\"{place}\",\"fix\":\"{fix}\"}}");
+        assert!(json.contains(&row), "preset {place} missing from the data");
+    }
+    for (phrase, fix) in bornhack_aegg::game::engine::fix::ALIASES {
+        let row = format!("{{\"phrase\":\"{phrase}\",\"fix\":\"{fix}\"}}");
+        assert!(json.contains(&row), "alias {phrase} missing from the data");
+    }
+    for key in ["STATION_MOOD_PCT", "STATION_CD_MIN", "STATION_COOLDOWN_SLOTS"] {
+        assert!(json.contains(&format!("\"{key}\":")), "{key} missing");
+    }
+    for key in ["STATION_COOLDOWN\"", "STATION_FOOD_FLOOR_PCT", "STATION_BOOZE_CAP_PCT"] {
+        assert!(!json.contains(key), "{key} should be gone");
+    }
+}

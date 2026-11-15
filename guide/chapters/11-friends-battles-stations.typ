@@ -220,35 +220,65 @@ shows #w("no demo pets") against a demo pet.
 
 == Stations: the magic places
 
-At events there are *stations*: a food stand, a medic and a rest corner.
-Hold the back of the badge to the station's reader for a moment. The
-reader sends a short signed phrase. The badge checks the signature, and
-only then does the pet get its treat. A phone with a random NFC app
-cannot do it. It has no key.
+#grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
+  [
+At events there are *stations*, the magic places: a food stand, a medic, a
+rest corner and more. Each has a reader. Hold the back of the badge to the
+reader for a moment. The reader sends a short signed message. The badge
+checks the signature, and only then does the pet get its fix. A phone with a
+random NFC app cannot do it. It has no key.
+  ],
+  screen("station-fix", width: shot-s, caption: [A fix.]))
 
-The badge ignores the tap unless it has a pet that has not gone. An egg
-counts. A frozen pet counts too. The phrase is matched whatever its
-capitals. Anything else is ignored without a word.
+The badge reads the message, not the place's name. A station can say what it
+fixes. These are the ready-made places:
 
-#tbl((auto, 1fr, auto),
-  table.header([*Phrase*], [*What the pet gets*], [*Toast*]),
-  [#raw("more food")],
-  [Fullness and water lifted to #v("STATION_FOOD_FLOOR_PCT"), never lowered.],
-  [#w("Food bonus!")],
-  [#raw("more drugs")],
-  [Health up to the pet's own ceiling. Booze down to at most
-   #v("STATION_BOOZE_CAP_PCT"). Hangover, injury and groggy cleared.
-   Dependence and diabetes stay.],
-  [#w("Heal bonus!")],
-  [#raw("sleep like a bear")],
-  [Energy full. Groggy and worn out cleared. The next waking forgets any
-   oversleeping, so it cannot be groggy. It does not put the pet to sleep.],
-  [#w("Sleep bonus!")],
+#station-presets()
+
+The old readers' phrases still work. The badge treats each one as the
+message beside it:
+
+#station-aliases()
+
+*What a fix can do.* Needs move only as far as the safe side of each danger
+line. Food and water stay between #v("DMG_NEED_LOW_PCT") and
+#v("DMG_NEED_HIGH_PCT"). Energy stays from #v("DMG_ENERGY_PCT"). Dirt goes
+up to #v("DMG_DIRT_PCT"), booze up to #v("BOOZE_DANGER_PCT"), strain up to
+#v("STRAIN_INJ_PCT"). Weight stays between #v("DMG_WEIGHT_LOW_PCT") and
+#v("DMG_WEIGHT_HIGH_PCT"). Fitness never goes past #v("STATION_FIT_CAP_PCT"),
+because real fitness is trained. Health goes up to the pet's own ceiling and
+never under #v("HEALTH_DANGER_PCT"). A need that is already past a line is
+only ever helped. Every fix adds #v("STATION_MOOD_PCT") mood.
+
+*Conditions.* A station can clear a condition. The clinic is rare and can
+clear dependence and diabetes. It is a reset, not a cure for a lifestyle.
+
+*The nap tent.* A station that fills energy means the next sleep cannot end
+groggy.
+
+#grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
+  [
+*The rest.* Each place rests for #v("STATION_CD_MIN"), or longer when it
+asks, up to #v("STATION_CD_MAX_MIN"). The badge remembers
+#v("STATION_COOLDOWN_SLOTS") places, so two different places work back to
+back. A reboot clears the rests.
+  ],
+  screen("station-wait", width: shot-s, caption: [Too soon.]))
+
+*Who can use one.* An egg counts. A frozen pet counts and stays frozen. A
+sleeping pet is not woken. A demo pet says #w("thanks!") and its own care
+waits #v("DEMO_PAUSE_MIN"). In hard mode a fix is free.
+
+An answer shows as a toast:
+
+#tbl((auto, 1fr),
+  table.header([*Toast*], [*What it says*]),
+  [#w("Magic fix!")], [The fix worked. The second line is #w("at <station>").],
+  [#w("thanks!")], [The second line for a demo pet.],
+  [#w("Covered by") #w("magic, not insurance")], [Hard mode: the fix costs nothing.],
+  [#w("Too soon!") #w("again in <time>")], [The place is resting. The time says how long.],
+  [#w("Unknown magic") #w("badge can't read it")], [The message is not one the badge knows.],
+  [#w("pet is gone")], [There is no pet to fix.],
 )
 
 #station-row()
-
-*The cooldown.* Each phrase rests for #v("STATION_COOLDOWN"). The first tap
-after a boot always works. A tap too soon does nothing to the pet. It shows a
-countdown in the toast corner, like #raw("wait 4:50"). A reboot clears the
-rests.

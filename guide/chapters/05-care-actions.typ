@@ -568,17 +568,14 @@ The row shows the wait in place of its price.
   [#w("good try!")], [A mini-game loss.],
   [#w("+happy")], [A known friend met again. See @ch-friends.],
   [#w("new friend!")], [A new friend met. See @ch-friends.],
-  [#w("Food bonus!")], [A food station was tapped. See @ch-friends.],
+  [#w("Magic fix!")], [A station fixed the pet. See @ch-friends.],
   [#w("won a battle!") #w("lost a battle")], [A fight you only heard of.],
-  [#w("Heal bonus!")], [A medic station was tapped.],
-  [#w("Sleep bonus!")], [A rest station was tapped.],
 )
 
 Two more things are called a toast:
 - A *reason toast*: the words of the refusal list, when you press a shut row.
 - A *cause toast*: two lines, what went wrong and why, as in @ch-reading.
 
-A station tapped too soon shows a countdown, such as #raw("wait 1:30"), in
-minutes and seconds. See @ch-friends.
+A station toast has two lines, like a cause toast. See @ch-friends.
 
-Nothing raises #w("+inspired") or #w("Inspire bonus!") yet.
+Nothing raises #w("+inspired") yet.

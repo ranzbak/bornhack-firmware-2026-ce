@@ -441,7 +441,7 @@ pub fn show_station(t: StationToast, id: &[u8]) {
 }
 
 /// The last station toast shown.
-#[cfg(test)]
+#[cfg(any(test, feature = "simulator"))]
 pub(crate) fn last_station_toast_for_test() -> Option<(StationToast, heapless::Vec<u8, 8>)> {
     Some(STATION_TOAST.with(|s| s.clone()))
 }

@@ -157,6 +157,11 @@ pub fn fixed() -> Vec<(&'static str, u32, Unit)> {
             Unit::Count
         ),
         ("IDLE_FRAME_SECS", IDLE_FRAME_SECS as u32, Unit::Secs),
+        (
+            "STATION_COOLDOWN_SLOTS",
+            crate::game::station::COOLDOWN_SLOTS as u32,
+            Unit::Count
+        ),
         ("MINIGAME_HAX_REWARD", MINIGAME_HAX_REWARD, Unit::Hax),
         ("MINIGAME_HAX_DRAW", MINIGAME_HAX_DRAW, Unit::Hax),
         ("MINIGAME_HAX_LOSS", MINIGAME_HAX_LOSS, Unit::Hax),
@@ -357,6 +362,34 @@ fn price_obj(hard: bool) -> J {
     obj(prices(hard).into_iter().map(|(k, p)| (k, opt(p))).collect())
 }
 
+/// The magic places: the old phrases and the ready-made presets.
+fn stations() -> J {
+    let aliases = crate::game::engine::fix::ALIASES
+        .iter()
+        .map(|(phrase, fix)| {
+            obj(alloc::vec![
+                ("phrase", J::Str(phrase.to_string())),
+                ("fix", J::Str(fix.to_string()))
+            ])
+        })
+        .collect();
+    let presets = include_str!("../../scripts/station_presets.txt")
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .filter_map(|l| l.split_once('|'))
+        .map(|(place, fix)| {
+            obj(alloc::vec![
+                ("place", J::Str(place.to_string())),
+                ("fix", J::Str(fix.to_string()))
+            ])
+        })
+        .collect();
+    obj(alloc::vec![
+        ("aliases", J::Arr(aliases)),
+        ("presets", J::Arr(presets))
+    ])
+}
+
 /// The whole dump for one preset. Installs the badge's preset for this
 /// process first (a no-op after the first call).
 pub fn dump(mode: Mode) -> J {
@@ -404,5 +437,6 @@ pub fn dump(mode: Mode) -> J {
         ),
         ("night_min", opt(night_min())),
         ("doses", obj(doses)),
+        ("stations", stations()),
     ])
 }

@@ -110,3 +110,21 @@
     text(size: 8pt, i.at(1)),
   )),
 )
+
+// The ready-made places, from the badge's own preset list.
+#let station-presets() = [#set par(justify: false); #tbl((auto, 1fr),
+  table.header([*Place*], [*What the reader sends*]),
+  ..classic.at("stations").at("presets").map(p => (
+    [#p.at("place")],
+    [#raw(p.at("fix"))],
+  )).flatten(),
+)]
+
+// The old phrases and the message each one stands for.
+#let station-aliases() = [#set par(justify: false); #tbl((auto, 1fr),
+  table.header([*Old phrase*], [*Same as*]),
+  ..classic.at("stations").at("aliases").map(a => (
+    [#raw(a.at("phrase"))],
+    [#raw(a.at("fix"))],
+  )).flatten(),
+)]
