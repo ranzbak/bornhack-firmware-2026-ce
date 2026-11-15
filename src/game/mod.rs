@@ -118,6 +118,9 @@ pub enum Toast {
     Cause = 30,
     /// Finished and lost a mini-game — still pays (see `GameState::award_inspiration`).
     MinigameTry = 31,
+    /// A station tap's answer: two lines from `STATION_TOAST` (see `show_station`).
+    /// Discriminant 9 is `StationFood` until the old station toasts go.
+    Station = 32,
 }
 
 impl Toast {
@@ -154,6 +157,7 @@ impl Toast {
             29 => Self::DebugInfo,
             30 => Self::Cause,
             31 => Self::MinigameTry,
+            32 => Self::Station,
             _ => Self::None,
         }
     }
@@ -194,8 +198,9 @@ impl Toast {
             Toast::Reason => "",
             // Dynamic — handled in the renderer.
             Toast::DebugInfo => "",
-            // Two lines, drawn by `draw_cause_toast`.
+            // Two lines, drawn by `draw_two_line_toast`.
             Toast::Cause => "",
+            Toast::Station => "",
         }
     }
 }
@@ -384,26 +389,94 @@ fn raise_toast(toast: Toast) {
     TOAST.start();
 }
 
-/// The cause toast: what went wrong (bold red, on the HAX row), then why
+/// A two-line toast: what (bold red, on the HAX row), then why
 /// (red, one row lower, clear of the balance).
-fn draw_cause_toast<D>(display: &mut D) -> Result<(), D::Error>
+fn draw_two_line_toast<D>(display: &mut D, what: &str, why: &str) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = crate::TriColor>,
 {
-    let Some(cause) = engine::causes::Cause::unpack(CAUSE_CODE.load(Ordering::Relaxed)) else {
-        return Ok(());
-    };
     let style = crate::ui::TOP_LEFT;
     let second = TOAST_POS + Point::new(0, TOAST_LINE_DY);
     for (text, at, ink) in [
-        (cause.what(), TOAST_POS, crate::ui::TEXT_BOLD_RED),
-        (cause.why(), second, crate::ui::TEXT_RED),
+        (what, TOAST_POS, crate::ui::TEXT_BOLD_RED),
+        (why, second, crate::ui::TEXT_RED),
     ] {
         let pad = Point::new(STATUS_BACKING_PAD / 2, 0);
         draw_backing(display, at - pad, backing_width(text))?;
         crate::ui::draw_text(display, text, at, ink, style)?;
     }
     Ok(())
+}
+
+/// What a station tap answered with (see [`show_station`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StationToast {
+    Fixed,
+    Thanks,
+    Covered,
+    /// Seconds left on the cooldown.
+    TooSoon(u32),
+    Unknown,
+}
+
+/// The toast `show_station` stored: kind and station id (at most 8 bytes).
+static STATION_TOAST: crate::sync::SharedCell<(StationToast, heapless::Vec<u8, 8>)> =
+    crate::sync::SharedCell::new((StationToast::Unknown, heapless::Vec::new()));
+
+/// The two lines of a station toast (line 1 at most 13 columns, line 2 at most
+/// 21). `id` fills "at <id>"; `TooSoon` formats its wait with `doses::fmt_wait`.
+pub fn station_lines(t: StationToast, id: &[u8]) -> (&'static str, heapless::String<24>) {
+    let mut why: heapless::String<24> = heapless::String::new();
+    let what = match t {
+        StationToast::Fixed => {
+            let _ = why.push_str("at ");
+            for &b in id {
+                let _ = why.push(if b.is_ascii_graphic() { b as char } else { '?' });
+            }
+            "Magic fix!"
+        }
+        StationToast::Thanks => {
+            let _ = why.push_str("thanks!");
+            "Magic fix!"
+        }
+        StationToast::Covered => {
+            let _ = why.push_str("magic, not insurance");
+            "Covered by"
+        }
+        StationToast::TooSoon(secs) => {
+            let _ = why.push_str("again in ");
+            let _ = why.push_str(engine::doses::fmt_wait(secs).as_str());
+            "Too soon!"
+        }
+        StationToast::Unknown => {
+            let _ = why.push_str("badge can't read it");
+            "Unknown magic"
+        }
+    };
+    (what, why)
+}
+
+/// Show a station answer; wakes the display loop like `show_toast`.
+pub fn show_station(t: StationToast, id: &[u8]) {
+    let mut v: heapless::Vec<u8, 8> = heapless::Vec::new();
+    let _ = v.extend_from_slice(&id[..id.len().min(8)]);
+    STATION_TOAST.with_mut(|s| *s = (t, v));
+    show_toast(Toast::Station);
+}
+
+/// The last station toast shown.
+#[cfg(test)]
+pub(crate) fn last_station_toast_for_test() -> Option<(StationToast, heapless::Vec<u8, 8>)> {
+    Some(STATION_TOAST.with(|s| s.clone()))
+}
+
+/// Put the game screen in front, closing the views that would hide its toasts
+/// or swallow its buttons: Friends, Diary and Traits.
+pub fn bring_game_forward() {
+    friends_view::close();
+    diary_view::close();
+    traits_view::close();
+    crate::DISPLAY_STATE.with_mut(|s| s.set_active_screen(crate::SCREEN_GAME));
 }
 
 /// The diabetes alert: two bold lines and a red hint.
@@ -434,6 +507,19 @@ pub fn screen_words() -> std::vec::Vec<(&'static str, &'static str)> {
         if !text.is_empty() {
             out.push((if toast == Toast::DebugCheat { "debug" } else { "toasts" }, text));
         }
+    }
+    for text in [
+        "Magic fix!",
+        "at <station>",
+        "thanks!",
+        "Covered by",
+        "magic, not insurance",
+        "Too soon!",
+        "again in <time>",
+        "Unknown magic",
+        "badge can't read it",
+    ] {
+        out.push(("toasts", text));
     }
     for line in ALERT_DIABETES.into_iter().chain(ALERT_ALCOHOL) {
         out.push(("screen", line));
@@ -836,7 +922,15 @@ where
             toast.message()
         };
         if let Toast::Cause = toast {
-            draw_cause_toast(display)?;
+            if let Some(cause) =
+                engine::causes::Cause::unpack(CAUSE_CODE.load(Ordering::Relaxed))
+            {
+                draw_two_line_toast(display, cause.what(), cause.why())?;
+            }
+        } else if let Toast::Station = toast {
+            let (t, id) = STATION_TOAST.with(|s| s.clone());
+            let (what, why) = station_lines(t, &id);
+            draw_two_line_toast(display, what, why.as_str())?;
         } else if !msg.is_empty() {
             
             
@@ -1038,6 +1132,7 @@ where
         );
         Text::with_text_style(time_str.as_str(), Point::new(76, 100), font, centered)
             .draw(display)?;
+        draw_toast(display)?;
         return Ok(());
     }
 
@@ -1068,6 +1163,7 @@ where
             .draw(display)?;
         Text::with_text_style(GONE_PROMPT[1], Point::new(76, prompt_ys[1]), font_red, centered)
             .draw(display)?;
+        draw_toast(display)?;
         return Ok(());
     }
 
@@ -1504,7 +1600,7 @@ mod tests {
         super::CAUSE_CODE.store(cause.pack(), core::sync::atomic::Ordering::Relaxed);
         let mut c = Canvas::new();
         c.fill(BLACK);
-        super::draw_cause_toast(&mut c).unwrap();
+        super::draw_two_line_toast(&mut c, cause.what(), cause.why()).unwrap();
         for (text, y) in [
             (cause.what(), super::TOAST_POS.y),
             (cause.why(), super::TOAST_POS.y + super::TOAST_LINE_DY),
@@ -1598,6 +1694,152 @@ mod tests {
             .bounding_box();
             assert!(why_box.intersection(&hax_box).is_zero_sized(), "{cause:?}");
             assert!(why_box.bottom_right().unwrap().x <= 150, "{cause:?}");
+        }
+    }
+
+    #[test]
+    fn station_lines_say_what_happened() {
+        use super::{StationToast as T, station_lines};
+        for (t, id, one, two) in [
+            (T::Fixed, &b"food1"[..], "Magic fix!", "at food1"),
+            (T::Thanks, b"", "Magic fix!", "thanks!"),
+            (T::Covered, b"", "Covered by", "magic, not insurance"),
+            (T::TooSoon(290), b"", "Too soon!", "again in 4m"),
+            (T::TooSoon(14_340), b"", "Too soon!", "again in 3h59"),
+            (T::TooSoon(86_400), b"", "Too soon!", "again in 24h00"),
+            (T::Unknown, b"", "Unknown magic", "badge can't read it"),
+        ] {
+            let (a, b) = station_lines(t, id);
+            assert_eq!((a, b.as_str()), (one, two), "{t:?}");
+        }
+    }
+
+    fn every_station_toast() -> [super::StationToast; 5] {
+        use super::StationToast as T;
+        [T::Fixed, T::Thanks, T::Covered, T::TooSoon(86_400), T::Unknown]
+    }
+
+    #[test]
+    fn station_toasts_clear_the_hax_balance() {
+        use embedded_graphics::prelude::*;
+        use embedded_graphics::text::Text;
+        let mut hax: heapless::String<12> = heapless::String::new();
+        core::fmt::Write::write_fmt(&mut hax, format_args!("{} H", 999_999)).unwrap();
+        let hax_box = Text::with_text_style(
+            hax.as_str(),
+            super::HAX_POS,
+            crate::ui::TEXT_BOLD_BLACK,
+            crate::ui::TOP_RIGHT,
+        )
+        .bounding_box();
+        for t in every_station_toast() {
+            let (one, two) = super::station_lines(t, b"abcdefgh");
+            assert!(one.chars().count() <= 13, "{t:?}: {one}");
+            assert!(two.chars().count() <= 21, "{t:?}: {two}");
+            let one_box = Text::with_text_style(
+                one,
+                super::TOAST_POS,
+                crate::ui::TEXT_BOLD_RED,
+                crate::ui::TOP_LEFT,
+            )
+            .bounding_box();
+            assert!(one_box.intersection(&hax_box).is_zero_sized(), "{t:?}");
+            let two_box = Text::with_text_style(
+                two.as_str(),
+                super::TOAST_POS + Point::new(0, super::TOAST_LINE_DY),
+                crate::ui::TEXT_RED,
+                crate::ui::TOP_LEFT,
+            )
+            .bounding_box();
+            assert!(two_box.intersection(&hax_box).is_zero_sized(), "{t:?}");
+            assert!(two_box.bottom_right().unwrap().x <= 150, "{t:?}");
+        }
+    }
+
+    #[test]
+    fn the_station_toast_sits_on_white() {
+        let _guard = super::lock_test_state();
+        super::show_station(super::StationToast::Fixed, b"spa1");
+        let (one, two) = super::station_lines(super::StationToast::Fixed, b"spa1");
+        let mut c = Canvas::new();
+        c.fill(BLACK);
+        super::draw_toast(&mut c).unwrap();
+        for (text, y) in [
+            (one, super::TOAST_POS.y),
+            (two.as_str(), super::TOAST_POS.y + super::TOAST_LINE_DY),
+        ] {
+            let w = text.chars().count() as i32 * super::STATUS_CHAR_W + super::STATUS_BACKING_PAD;
+            let x0 = super::TOAST_POS.x - super::STATUS_BACKING_PAD / 2;
+            let h = super::STATUS_LINE_H;
+            for x in x0..x0 + w {
+                assert_eq!(c.get(x, y), crate::WHITE, "{text}: backing top at x={x}");
+            }
+            // A descender ("g") may reach the bottom row, so check the padding columns.
+            for x in [x0, x0 + w - 1] {
+                assert_eq!(c.get(x, y + h - 1), crate::WHITE, "{text}: backing bottom at x={x}");
+            }
+            assert_eq!(c.get(x0 + w, y + 5), BLACK, "{text}: no wider");
+        }
+        super::TOAST.clear();
+    }
+
+    #[test]
+    fn station_toasts_show_on_the_egg_and_gone_screens() {
+        use crate::game::engine::{GameState, PetKind, Phase};
+        let _guard = super::lock_test_state();
+        let _clear = ClearPet;
+        let nav = crate::game::nav::get_nav();
+        let draw = || {
+            let mut c = Canvas::new();
+            super::draw_screen_game(&mut c, nav).unwrap();
+            c
+        };
+        let mut egg = GameState::new_egg(7, PetKind(0));
+        egg.phase = Phase::Hatching;
+        let mut gone = GameState::new_egg(7, PetKind(0));
+        gone.phase = Phase::Gone;
+
+        super::TOAST.clear();
+        crate::game::lifecycle::set_state_for_test(Some(egg));
+        assert!(!draw().any(rows(36, 62), RED), "egg, no toast");
+        super::show_station(super::StationToast::Fixed, b"food1");
+        assert!(draw().any(rows(36, 62), RED), "egg, fix toast");
+        super::TOAST.clear();
+
+        crate::game::lifecycle::set_state_for_test(Some(gone));
+        assert!(!draw().any(rows(36, 48), RED), "gone, no toast");
+        super::show_reason(crate::game::engine::doses::Reason::Gone);
+        assert!(draw().any(rows(36, 48), RED), "gone, reason toast");
+        super::TOAST.clear();
+    }
+
+    #[test]
+    fn a_tap_brings_the_game_forward() {
+        let _guard = super::lock_test_state();
+        super::friends_view::open();
+        super::diary_view::open();
+        crate::DISPLAY_STATE.with_mut(|s| s.set_active_screen(crate::SCREEN_MAIN));
+        super::bring_game_forward();
+        assert!(!super::friends_view::is_active());
+        assert!(!super::diary_view::is_active());
+        assert_eq!(crate::DISPLAY_STATE.with(|s| s.active_screen()), crate::SCREEN_GAME);
+    }
+
+    #[test]
+    fn screen_words_list_the_station_toasts() {
+        let words = super::screen_words();
+        for text in [
+            "Magic fix!",
+            "at <station>",
+            "thanks!",
+            "Covered by",
+            "magic, not insurance",
+            "Too soon!",
+            "again in <time>",
+            "Unknown magic",
+            "badge can't read it",
+        ] {
+            assert!(words.contains(&("toasts", text)), "{text}");
         }
     }
 

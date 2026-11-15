@@ -480,10 +480,7 @@ pub fn open_pre_battle() {
     // screen in front and close the views that would cover or swallow the
     // buttons (like an NFC bonus, which also jumps to the game screen).
     if super::battle_link::view().is_some_and(|p| p.role == Role::Target) {
-        super::friends_view::close();
-        super::diary_view::close();
-        super::traits_view::close();
-        crate::DISPLAY_STATE.with_mut(|s| s.set_active_screen(crate::SCREEN_GAME));
+        super::bring_game_forward();
     }
     // The guard runs from the first show only: a later change of the same
     // screen (the numbers arrive) does not restart it.
