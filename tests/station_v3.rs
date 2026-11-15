@@ -514,3 +514,111 @@ mod apply {
         assert_eq!((v.STATION_CD_MIN, v.STATION_CD_MAX_MIN), (5, 1440));
     }
 }
+
+/// Spec 19.6, 13.5: stations in the simulator. The 30-day runs are
+/// `#[ignore]`d and run on CI (`--include-ignored`).
+mod sim {
+    use bornhack_aegg::game::engine::GameState;
+    use bornhack_aegg::game::engine::sim::{self, Act, Driver, Outcome, Plan, Setup};
+
+    const CLOCK: Setup = Setup {
+        demo: false,
+        clock: true,
+        animated: false,
+        money: false,
+    };
+
+    fn run(r: impl Fn(u32, u32, &GameState) -> Plan, driver: Driver) -> Outcome {
+        let o = sim::run_with(&r, 30, driver, 1, CLOCK).outcome;
+        eprintln!("{driver:?}: {o:?}");
+        o
+    }
+
+    fn both(r: impl Fn(u32, u32, &GameState) -> Plan + Copy) -> [Outcome; 2] {
+        [run(r, Driver::Oracle), run(r, Driver::Delta)]
+    }
+
+    fn egg() -> GameState {
+        GameState::new_egg(0, bornhack_aegg::game::engine::PetKind::DEFAULT)
+    }
+
+    #[test]
+    fn the_stations_come_at_fifteen_hundred_after_the_base_plan() {
+        let s = egg();
+        let r = sim::with_stations(&sim::once_a_day);
+        assert!(r(0, 14 * 60 + 59, &s).is_empty());
+        let p = r(0, 15 * 60, &s);
+        assert_eq!(p.len(), 3);
+        assert!(p.iter().all(|a| matches!(a, Act::Station(_))));
+        assert!(r(0, 15 * 60 + 1, &s).is_empty());
+        assert_eq!(r(0, 12 * 60, &s).len(), sim::once_a_day(0, 12 * 60, &s).len());
+        assert_eq!(sim::stations_only(0, 15 * 60, &s).len(), 3);
+        assert!(sim::stations_only(0, 12 * 60, &s).is_empty());
+    }
+
+    #[test]
+    #[ignore]
+    fn balanced_with_stations_thrives() {
+        for o in both(&sim::with_stations(&sim::balanced)) {
+            assert!(o.alive);
+            assert!(o.avg_mood_pct >= 90, "mood {}", o.avg_mood_pct);
+            assert!(o.end_health_pct >= 95, "health {}", o.end_health_pct);
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn party_with_stations_survives() {
+        for o in both(&sim::with_stations(&sim::party)) {
+            assert!(o.alive);
+            assert!(o.end_health_pct >= 55, "health {}", o.end_health_pct);
+            assert!(!o.diabetic);
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn stations_alone_do_not_replace_care() {
+        for o in both(&sim::stations_only) {
+            assert!(!o.alive);
+            assert!((5.0..=12.0).contains(&o.days), "days {}", o.days);
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn once_a_day_lives_longer_with_stations() {
+        let with = sim::with_stations(&sim::once_a_day);
+        for driver in [Driver::Oracle, Driver::Delta] {
+            let w = run(&with, driver);
+            let wo = run(sim::once_a_day, driver);
+            assert!(w.days > wo.days + 5.0, "{} against {}", w.days, wo.days);
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn delta_matches_the_oracle_with_stations() {
+        let balanced = sim::with_stations(&sim::balanced);
+        let party = sim::with_stations(&sim::party);
+        let once = sim::with_stations(&sim::once_a_day);
+        let routines: [(&str, &dyn Fn(u32, u32, &GameState) -> Plan); 4] = [
+            ("balanced", &balanced),
+            ("party", &party),
+            ("once_a_day", &once),
+            ("stations_only", &sim::stations_only),
+        ];
+        let close = |a: u8, b: u8| (a as i32 - b as i32).abs() <= 2;
+        for (name, r) in routines {
+            let o = sim::run_with(r, 30, Driver::Oracle, 1, CLOCK).outcome;
+            let d = sim::run_with(r, 30, Driver::Delta, 1, CLOCK).outcome;
+            eprintln!("{name} oracle: {o:?}");
+            eprintln!("{name} delta:  {d:?}");
+            assert_eq!(o.alive, d.alive, "{name}");
+            assert!(close(o.avg_mood_pct, d.avg_mood_pct), "{name} mood");
+            assert!(close(o.end_health_pct, d.end_health_pct), "{name} health");
+            assert!(close(o.end_fitness_pct, d.end_fitness_pct), "{name} fitness");
+            assert!(close(o.end_weight_pct, d.end_weight_pct), "{name} weight");
+        }
+    }
+}

@@ -9,6 +9,7 @@ use std::cell::Cell;
 
 use super::causes::{Cause, StrainWhy};
 use super::combat::{self, Body, derive};
+use super::fix;
 use super::needs::P;
 use super::thresholds::{self, Mode, Thresholds};
 use super::{Action, DrinkKind, FoodKind, Fought, GameState, MiniGame, PetKind, Phase};
@@ -57,6 +58,10 @@ pub enum Act {
     /// costs land, the prize is paid, and the seed comes from the clock and
     /// the run's seed.
     Battle,
+    /// Tap an NFC station: its signed text, parsed and applied. The
+    /// firmware's RAM cooldown table is not modelled; the routines tap a
+    /// station once a day, far beyond any cooldown.
+    Station(&'static [u8]),
 }
 
 /// What a routine returns for one minute: at most eight steps.
@@ -438,7 +443,7 @@ pub fn install_preset(values: Thresholds, mode: Mode, custom: bool) -> bool {
 // Runner
 // ---------------------------------------------------------------------------
 
-type Routine<'a> = &'a dyn Fn(u32, u32, &GameState) -> Plan;
+pub type Routine<'a> = &'a dyn Fn(u32, u32, &GameState) -> Plan;
 
 /// Run `routine` for `days` days against a fresh egg (`DEFAULT_SEED`).
 pub fn run_routine(routine: Routine, days: u32, driver: Driver) -> Outcome {
@@ -498,6 +503,11 @@ fn perform(s: &mut GameState, a: Act, seed: u64) -> bool {
             true
         }
         Act::Battle => battle(s, seed),
+        Act::Station(t) => {
+            let fix = fix::parse_text(t).unwrap().unwrap();
+            s.station_fix(&fix);
+            true
+        }
         Act::Mini(g) => {
             if s.game_refusal(MiniGame::TicTacToe).is_some() {
                 return false;
@@ -1040,6 +1050,37 @@ pub fn once_a_day(_d: u32, m: u32, s: &GameState) -> Plan {
         Plan::new()
     };
     habits(p, s, false)
+}
+
+/// The three alias stations (spec 19.6).
+const STATIONS: [&[u8]; 3] = [b"more food", b"more drugs", b"sleep like a bear"];
+
+/// The three alias stations once a day at 15:00 (19.6), after `base`'s own
+/// plan for that minute (the plan holds at most 8 steps). If `base` already
+/// used all 8 steps at 15:00, the stations come at 15:01 instead.
+pub fn with_stations(base: Routine<'_>) -> impl Fn(u32, u32, &GameState) -> Plan + '_ {
+    move |d, m, s| {
+        let mut p = base(d, m, s);
+        let room = |p: &Plan| p.capacity() - p.len() >= STATIONS.len();
+        let tap = if at(m, 15, 0) {
+            room(&p)
+        } else if at(m, 15, 1) {
+            !room(&base(d, m - 1, s))
+        } else {
+            false
+        };
+        if tap {
+            for t in STATIONS {
+                let _ = p.push(Act::Station(t));
+            }
+        }
+        p
+    }
+}
+
+/// Only the stations, nothing else.
+pub fn stations_only(d: u32, m: u32, s: &GameState) -> Plan {
+    with_stations(&absent)(d, m, s)
 }
 
 /// Never looks at the pet.
