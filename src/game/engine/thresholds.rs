@@ -440,6 +440,11 @@ thresholds_table! {
     FLOOR_CAN_DIRT_PCT: u8,
     FLOOR_SOCK_DIRT_PCT: u8,
     FLOOR_PIZZA_DIRT_PCT: u8,
+    // NFC stations (plan 4)
+    STATION_MOOD_PCT: u8,
+    STATION_FIT_CAP_PCT: u8,
+    STATION_CD_MIN: u16,
+    STATION_CD_MAX_MIN: u16,
 }
 
 // ---------------------------------------------------------------------------
@@ -824,6 +829,11 @@ impl Thresholds {
         FLOOR_CAN_DIRT_PCT: 70,
         FLOOR_SOCK_DIRT_PCT: 85,
         FLOOR_PIZZA_DIRT_PCT: 95,
+        // NFC stations (plan 4)
+        STATION_MOOD_PCT: 5,
+        STATION_FIT_CAP_PCT: 60,
+        STATION_CD_MIN: 5,
+        STATION_CD_MAX_MIN: 1440,
     };
 
     /// Half-speed decay, doubled lifetimes, more generous action relief.
@@ -1205,6 +1215,11 @@ impl Thresholds {
         FLOOR_CAN_DIRT_PCT: 70,
         FLOOR_SOCK_DIRT_PCT: 85,
         FLOOR_PIZZA_DIRT_PCT: 95,
+        // NFC stations (plan 4)
+        STATION_MOOD_PCT: 5,
+        STATION_FIT_CAP_PCT: 60,
+        STATION_CD_MIN: 5,
+        STATION_CD_MAX_MIN: 1440,
     };
 }
 
@@ -2140,7 +2155,19 @@ pub const BORNPETS_CFG_KEYS: &[(&str, Setter)] = &[
     ("FLOOR_PIZZA_DIRT_PCT", |t, v| {
         t.FLOOR_PIZZA_DIRT_PCT = clamp_pct(v)
     }),
+    // NFC stations (plan 4)
+    ("STATION_MOOD_PCT", |t, v| t.STATION_MOOD_PCT = v.min(100) as u8),
+    ("STATION_FIT_CAP_PCT", |t, v| t.STATION_FIT_CAP_PCT = clamp_pct(v)),
+    ("STATION_CD_MIN", |t, v| {
+        t.STATION_CD_MIN = clamp_u16(v).clamp(1, CD_LIMIT_MIN)
+    }),
+    ("STATION_CD_MAX_MIN", |t, v| {
+        t.STATION_CD_MAX_MIN = clamp_u16(v).clamp(1, CD_LIMIT_MIN)
+    }),
 ];
+
+/// The longest a station cooldown can be: one day.
+const CD_LIMIT_MIN: u16 = super::demo::MINUTES_PER_DAY;
 
 /// Last minute of the day, the most a bedtime or getting-up line can be.
 const DAY_LAST_MIN: u16 = super::demo::MINUTES_PER_DAY - 1;
@@ -2286,6 +2313,11 @@ pub fn validate(t: &Thresholds, preset: &Thresholds) -> Thresholds {
     if r.BG_NIGHT_FROM_MIN == r.BG_NIGHT_TO_MIN {
         r.BG_NIGHT_FROM_MIN = preset.BG_NIGHT_FROM_MIN;
         r.BG_NIGHT_TO_MIN = preset.BG_NIGHT_TO_MIN;
+    }
+    // NFC stations (plan 4): the default cooldown is the shortest, the cap the longest.
+    if r.STATION_CD_MIN > r.STATION_CD_MAX_MIN {
+        r.STATION_CD_MIN = preset.STATION_CD_MIN;
+        r.STATION_CD_MAX_MIN = preset.STATION_CD_MAX_MIN;
     }
     r
 }

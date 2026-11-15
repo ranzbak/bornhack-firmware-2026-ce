@@ -116,10 +116,6 @@ pub enum Phase {
     Gone,
 }
 
-/// Level (percent) a `more food` station lifts fullness and hydration to.
-pub const STATION_FOOD_FLOOR_PCT: i32 = 60;
-/// Level (percent) a `more drugs` station lowers booze to, at most.
-pub const STATION_BOOZE_CAP_PCT: i32 = 20;
 /// HAX earned by the "Only pets" hobby (non-broke) branch.
 pub const ONLYPETS_HOBBY_REWARD: u32 = 20;
 /// Mini-game grades (0..=2) handed to `award_inspiration`: an interface of the
@@ -1929,36 +1925,13 @@ impl GameState {
         self.save_pending = true;
     }
 
-    /// Old station phrase `more food` (design 19.3, `fix s=food full>60
-    /// water>60`): fullness and hydration are raised to 60 % and never
-    /// lowered, so the pet is fed but cannot be stuffed or waterlogged.
-    pub fn station_food(&mut self) {
-        let floor = (STATION_FOOD_FLOOR_PCT * P) as u16;
-        self.fullness = self.fullness.max(floor);
-        self.hydration = self.hydration.max(floor);
-    }
-
-    /// Old station phrase `more drugs` (19.3, `fix s=drugs health>100
-    /// booze<20 clear=hangover,injury,groggy`): health up to the pet's own
-    /// ceiling, booze down to 20 % at most, three ailments cleared.
-    /// Dependence and diabetes stay.
-    pub fn station_drugs(&mut self) {
-        self.health = self.health.max(regime::health_ceiling(self) as u16);
-        self.booze = self.booze.min((STATION_BOOZE_CAP_PCT * P) as u16);
-        self.hangover_min = 0;
-        self.injured_min = 0;
-        self.groggy_min = 0;
-    }
-
-    /// Old station phrase `sleep like a bear` (19.3, `fix s=rest energy>100
-    /// clear=groggy,deprived`): energy full, groggy and deprived cleared.
-    /// It does not put the pet to sleep. 19.4: it also suppresses the groggy
-    /// check of the next sleep.
-    pub fn station_rest(&mut self) {
-        self.energy = MAX as u16;
-        self.groggy_min = 0;
-        self.deprived = false;
-        self.no_groggy = true;
+    /// A station fix (spec 19.4): `fix::apply`, then `player_acted()` (the demo
+    /// pause and note). Returns true when the demo pet thanks the player: demo on,
+    /// awake, not hibernating.
+    pub fn station_fix(&mut self, fix: &fix::Fix) -> bool {
+        fix::apply(self, fix);
+        self.player_acted();
+        self.demo.on && !self.is_sleeping && !self.hibernating
     }
 
     /// Meeting (or spending time with) a mesh friend over the SHDW channel —

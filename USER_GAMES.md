@@ -434,6 +434,10 @@ Known keys (everything else is silently ignored, so you don't have to keep your 
 | `FLOOR_CAN_DIRT_PCT` | 70 | 70 |
 | `FLOOR_SOCK_DIRT_PCT` | 85 | 85 |
 | `FLOOR_PIZZA_DIRT_PCT` | 95 | 95 |
+| `STATION_MOOD_PCT` | 5 | 5 |
+| `STATION_FIT_CAP_PCT` | 60 | 60 |
+| `STATION_CD_MIN` | 5 | 5 |
+| `STATION_CD_MAX_MIN` | 1440 | 1440 |
 
 Stat scale: `655 ≈ 1 %`, `65535 = 100 %`. Time scale: `1 tick = 10 seconds` (so 360 ticks = 1 hour). Values are clamped to sensible ranges. If a pair of band edges ends up in the wrong order, that pair falls back to the preset. The five `FLOOR_*_DIRT_PCT` lines must rise in order, and `BG_NIGHT_FROM_MIN` and `BG_NIGHT_TO_MIN` must differ: if not, all five floor lines (or both night minutes) fall back to the preset together. Unknown keys are logged and skipped.
 

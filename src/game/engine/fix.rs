@@ -4,6 +4,11 @@
 
 use heapless::Vec;
 
+use super::GameState;
+use super::needs::{self, MAX, P};
+use super::regime;
+use super::thresholds as th;
+
 /// Longest station text in bytes (spec 19.2).
 pub const FIX_MAX_LEN: usize = 96;
 /// Longest station id in bytes.
@@ -344,4 +349,89 @@ pub fn parse_text(text: &[u8]) -> Result<Option<Fix>, Reject> {
             if is_fix { Err(Reject::Unreadable) } else { Ok(None) }
         }
     }
+}
+
+/// A percent as a level; 100 is `MAX`.
+fn lvl(pct: u8) -> i32 {
+    if pct >= 100 { MAX } else { pct as i32 * P }
+}
+
+/// The levels a station may move `t` between, `[lo, hi]` (level units). The edges are the
+/// pet's health-damage lines, so landing on an edge is safe (`regime::health_damage` uses
+/// strict comparisons).
+pub fn safe_range(s: &GameState, t: Target) -> (i32, i32) {
+    match t {
+        Target::Full | Target::Water => (lvl(th::DMG_NEED_LOW_PCT()), lvl(th::DMG_NEED_HIGH_PCT())),
+        Target::Energy => (lvl(th::DMG_ENERGY_PCT()), MAX),
+        Target::Fun => (0, MAX),
+        Target::Dirt => (0, lvl(th::DMG_DIRT_PCT())),
+        Target::Booze => (0, needs::booze_danger()),
+        Target::Strain => (0, needs::strain_inj()),
+        Target::Fit => (0, lvl(th::STATION_FIT_CAP_PCT())),
+        Target::Weight => (lvl(th::DMG_WEIGHT_LOW_PCT()), lvl(th::DMG_WEIGHT_HIGH_PCT())),
+        Target::Health => (lvl(needs::HEALTH_DANGER_PCT), regime::health_ceiling(s)),
+    }
+}
+
+fn level_mut(s: &mut GameState, t: Target) -> &mut u16 {
+    match t {
+        Target::Full => &mut s.fullness,
+        Target::Water => &mut s.hydration,
+        Target::Energy => &mut s.energy,
+        Target::Fun => &mut s.fun,
+        Target::Dirt => &mut s.dirt,
+        Target::Booze => &mut s.booze,
+        Target::Strain => &mut s.strain,
+        Target::Fit => &mut s.fitness,
+        Target::Weight => &mut s.weight,
+        Target::Health => &mut s.health,
+    }
+}
+
+/// Apply now: conditions first, then levels in message order, then the mood bump. No
+/// catch-up, no wake, no causes.
+pub fn apply(s: &mut GameState, fix: &Fix) {
+    if fix.clear & cond::HANGOVER != 0 {
+        s.hangover_min = 0;
+    }
+    if fix.clear & cond::INJURY != 0 {
+        s.injured_min = 0;
+    }
+    if fix.clear & cond::GROGGY != 0 {
+        s.groggy_min = 0;
+    }
+    if fix.clear & cond::DEPRIVED != 0 {
+        s.deprived = false;
+    }
+    if fix.clear & cond::DEPENDENCE != 0 {
+        s.dependent = false;
+        s.dependence_min = 0;
+        s.rehab_min = 0;
+        s.recovering_min = th::RECOVERING_MIN();
+    }
+    if fix.clear & cond::DIABETES != 0 {
+        s.diabetic = false;
+        s.diabetes_min = 0;
+        s.reversal_min = 0;
+    }
+    for l in &fix.levels {
+        let (lo, hi) = safe_range(s, l.target);
+        let v = lvl(l.pct);
+        let cell = level_mut(s, l.target);
+        let cur = *cell as i32;
+        let want = match l.op {
+            Op::Set => v,
+            Op::AtLeast => cur.max(v),
+            Op::AtMost => cur.min(v),
+            Op::Add => cur + v,
+            Op::Sub => cur - v,
+        };
+        // The clamp limits how far the item moves the need, never the other way.
+        let new = if want > cur { want.min(hi.max(cur)) } else { want.max(lo.min(cur)) };
+        *cell = new as u16;
+        if l.target == Target::Energy && matches!(l.op, Op::Set | Op::AtLeast | Op::Add) {
+            s.no_groggy = true;
+        }
+    }
+    s.mood = (s.mood as i32 + lvl(th::STATION_MOOD_PCT())).min(MAX) as u16;
 }

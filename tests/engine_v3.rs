@@ -3702,6 +3702,10 @@ mod station_aliases {
         s
     }
 
+    fn fix_of(t: &[u8]) -> bornhack_aegg::game::engine::fix::Fix {
+        bornhack_aegg::game::engine::fix::parse_text(t).unwrap().unwrap()
+    }
+
     fn pct(p: i32) -> u16 {
         (p * P) as u16
     }
@@ -3712,7 +3716,7 @@ mod station_aliases {
             let mut s = pet();
             s.fullness = pct(start);
             s.hydration = pct(start);
-            s.station_food();
+            s.station_fix(&fix_of(b"more food"));
             let want = pct(start.max(60));
             assert_eq!((s.fullness, s.hydration), (want, want), "start {start}");
         }
@@ -3728,7 +3732,7 @@ mod station_aliases {
                     s.hydration = pct(water);
                     s.dirt = pct(dirt);
                     let before = (status(&s).0, health_damage(&s));
-                    s.station_food();
+                    s.station_fix(&fix_of(b"more food"));
                     let after = (status(&s).0, health_damage(&s));
                     // A word the alias could make comes only from a level the
                     // pet already had above the 60 % the alias lifts to.
@@ -3757,7 +3761,7 @@ mod station_aliases {
             s.groggy_min = 100;
             s.diabetic = true;
             s.dependent = true;
-            s.station_drugs();
+            s.station_fix(&fix_of(b"more drugs"));
             let ceiling = health_ceiling(&s) as u16;
             assert_eq!(s.health, pct(health).max(ceiling), "fit {fit}");
             assert_eq!(s.booze, pct(booze).min(pct(20)));
@@ -3773,7 +3777,7 @@ mod station_aliases {
         s.energy = pct(5);
         s.groggy_min = 50;
         s.deprived = true;
-        s.station_rest();
+        s.station_fix(&fix_of(b"sleep like a bear"));
         assert_eq!(s.energy as i32, MAX);
         assert_eq!(s.groggy_min, 0);
         assert!(!s.deprived);
@@ -3794,10 +3798,10 @@ mod station_aliases {
             s.health = pct(60);
             let before = health_damage(&s);
             match which {
-                0 => s.station_food(),
-                1 => s.station_drugs(),
-                _ => s.station_rest(),
-            }
+                0 => s.station_fix(&fix_of(b"more food")),
+                1 => s.station_fix(&fix_of(b"more drugs")),
+                _ => s.station_fix(&fix_of(b"sleep like a bear")),
+            };
             assert!(health_damage(&s) <= before, "alias {which}");
         }
     }
@@ -4338,6 +4342,10 @@ mod causes {
         first_warning(&c.take_causes())
     }
 
+    fn fix_of(t: &[u8]) -> bornhack_aegg::game::engine::fix::Fix {
+        bornhack_aegg::game::engine::fix::parse_text(t).unwrap().unwrap()
+    }
+
     #[test]
     fn preview_sleep_is_the_night_slept_until_rested() {
         let night = Some(Cause::BadNight(Unsettled::Drinks));
@@ -4357,7 +4365,7 @@ mod causes {
             s.energy = pct(energy);
             s.booze = pct(booze);
             if rest {
-                s.station_rest();
+                s.station_fix(&fix_of(b"sleep like a bear"));
             }
             let tag = format!("energy {energy} booze {booze} rest {rest}");
             let mut real = real_night(&s);
@@ -4411,7 +4419,7 @@ mod causes {
     #[test]
     fn a_station_rest_night_is_not_a_bad_night() {
         let mut s = pet();
-        s.station_rest();
+        s.station_fix(&fix_of(b"sleep like a bear"));
         sleep_through(&mut s, 400);
         assert!(!s.is_sleeping, "oversleep self-wake");
         let got = causes_of(&mut s);

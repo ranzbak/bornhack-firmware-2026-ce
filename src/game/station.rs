@@ -75,11 +75,16 @@ pub fn apply(text: &[u8]) -> Option<Toast> {
     let key = normalize(text)?;
 
     match key.as_slice() {
-        b"more food" => station_step(&LAST_FOOD, Toast::StationFood, |s| s.station_food()),
-        b"more drugs" => station_step(&LAST_DRUGS, Toast::StationDrugs, |s| s.station_drugs()),
-        b"sleep like a bear" => station_step(&LAST_REST, Toast::StationRest, |s| s.station_rest()),
+        b"more food" => station_step(&LAST_FOOD, Toast::StationFood, |s| { s.station_fix(&fix_of(b"more food")); }),
+        b"more drugs" => station_step(&LAST_DRUGS, Toast::StationDrugs, |s| { s.station_fix(&fix_of(b"more drugs")); }),
+        b"sleep like a bear" => station_step(&LAST_REST, Toast::StationRest, |s| { s.station_fix(&fix_of(b"sleep like a bear")); }),
         _ => None,
     }
+}
+
+/// An old phrase as a fix; every alias parses (`every_alias_is_a_valid_fix`).
+fn fix_of(phrase: &[u8]) -> super::engine::fix::Fix {
+    super::engine::fix::parse_text(phrase).unwrap().unwrap()
 }
 
 /// Apply a station effect, or surface the cooldown via a

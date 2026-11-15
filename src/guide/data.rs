@@ -161,16 +161,6 @@ pub fn fixed() -> Vec<(&'static str, u32, Unit)> {
             crate::game::friends::FRIENDS_MAX as u32,
             Unit::Count
         ),
-        (
-            "STATION_FOOD_FLOOR_PCT",
-            crate::game::engine::STATION_FOOD_FLOOR_PCT as u32,
-            Unit::Pct
-        ),
-        (
-            "STATION_BOOZE_CAP_PCT",
-            crate::game::engine::STATION_BOOZE_CAP_PCT as u32,
-            Unit::Pct
-        ),
         ("IDLE_FRAME_SECS", IDLE_FRAME_SECS as u32, Unit::Secs),
         ("MINIGAME_HAX_REWARD", MINIGAME_HAX_REWARD, Unit::Hax),
         ("MINIGAME_HAX_DRAW", MINIGAME_HAX_DRAW, Unit::Hax),
