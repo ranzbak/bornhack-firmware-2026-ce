@@ -409,27 +409,9 @@ fn handle_signed(session: &mut Session, body: &[u8], out: &mut HVec<u8, 256>) {
     // data not found) rather than hard-failing to compile.
     #[cfg(feature = "game")]
     {
-        match crate::game::station::apply(plaintext) {
-            Some(toast) => {
-                // Pull the user back to the game screen so the bonus toast
-                // is actually visible — they may have been on Watch /
-                // Channels / etc. when they tapped.  `show_toast` itself
-                // wakes the display loop via TOAST_SIGNAL.
-                crate::DISPLAY_STATE.lock(|cell| {
-                    cell.borrow_mut().set_active_screen(crate::SCREEN_GAME);
-                });
-                crate::game::show_toast(toast);
-                let _ = out.extend_from_slice(&[0x90, 0x00]);
-            }
-            None => {
-                let can_use = crate::game::lifecycle::can_use_station();
-                info!(
-                    "signed: station command rejected (can_use_station={=bool}), plaintext={:02x}",
-                    can_use, plaintext
-                );
-                let _ = out.extend_from_slice(&[0x6A, 0x82]);
-            }
-        }
+        let outcome = crate::game::station::apply(plaintext, true);
+        info!("signed: station {}", outcome);
+        let _ = out.extend_from_slice(&outcome.sw());
     }
     #[cfg(not(feature = "game"))]
     {
@@ -478,8 +460,7 @@ fn handle_ndef_write(ndef_buf: &mut [u8; NDEF_BUF_LEN]) -> WriteOutcome {
     // persist — the broadcast reverts to the profile.
     #[cfg(all(feature = "game", feature = "nfc-plaintext-station"))]
     if let Some(text) = crate::nfc_ndef::find_text_record(&ndef_buf[2..2 + nlen]) {
-        if let Some(toast) = crate::game::station::apply(text) {
-            crate::game::show_toast(toast);
+        if crate::game::station::apply(text, false).is_station() {
             return WriteOutcome::Transient;
         }
     }

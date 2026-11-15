@@ -147,11 +147,6 @@ pub fn fixed() -> Vec<(&'static str, u32, Unit)> {
         ),
         ("CATCH_UP_MAX_MIN", CATCH_UP_MAX_MIN, Unit::Min),
         (
-            "STATION_COOLDOWN",
-            crate::game::station::COOLDOWN_TICKS,
-            Unit::Ticks
-        ),
-        (
             "FRIEND_BOOST_COOLDOWN",
             crate::game::friends::FRIEND_BOOST_COOLDOWN_TICKS,
             Unit::Ticks

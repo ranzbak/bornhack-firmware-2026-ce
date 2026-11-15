@@ -73,14 +73,6 @@ pub enum Toast {
     Inspired = 6,
     Hibernate = 7,
     Wake = 8,
-    StationFood = 9,
-    StationDrugs = 10,
-    StationInspire = 11,
-    StationRest = 12,
-    /// Station tap was rejected because the matching effect is still
-    /// on cooldown.  The remaining seconds are read from
-    /// `STATION_COOLDOWN_SECS` and formatted at draw time.
-    StationCooldown = 13,
     /// Took Ozempic — weight + hunger relief, distinct from Exercise.
     /// Reuses discriminant 14 (freed when Triple Born was removed).
     Ozempic = 14,
@@ -119,7 +111,7 @@ pub enum Toast {
     /// Finished and lost a mini-game — still pays (see `GameState::award_inspiration`).
     MinigameTry = 31,
     /// A station tap's answer: two lines from `STATION_TOAST` (see `show_station`).
-    /// Discriminant 9 is `StationFood` until the old station toasts go.
+    /// Discriminants 9 to 13 belonged to the old station toasts and stay unused.
     Station = 32,
 }
 
@@ -134,11 +126,6 @@ impl Toast {
             6 => Self::Inspired,
             7 => Self::Hibernate,
             8 => Self::Wake,
-            9 => Self::StationFood,
-            10 => Self::StationDrugs,
-            11 => Self::StationInspire,
-            12 => Self::StationRest,
-            13 => Self::StationCooldown,
             14 => Self::Ozempic,
             15 => Self::Exercise,
             16 => Self::Medicate,
@@ -174,12 +161,6 @@ impl Toast {
             Toast::Inspired => "+inspired",
             Toast::Hibernate => "hibernating",
             Toast::Wake => "waking up",
-            Toast::StationFood => "Food bonus!",
-            Toast::StationDrugs => "Heal bonus!",
-            Toast::StationInspire => "Inspire bonus!",
-            Toast::StationRest => "Sleep bonus!",
-            // Dynamic — handled in the renderer.
-            Toast::StationCooldown => "",
             Toast::Ozempic => "-weight",
             Toast::Exercise => "-weight",
             Toast::Medicate => "+medicated",
@@ -217,11 +198,6 @@ static REASON_SECS: AtomicU32 = AtomicU32::new(0);
 
 /// The cause shown by [`Toast::Cause`]: `Cause::pack`.
 static CAUSE_CODE: AtomicU8 = AtomicU8::new(0);
-
-/// Remaining cooldown in seconds, read by the renderer when the
-/// active toast is [`Toast::StationCooldown`].  Set by
-/// [`show_station_cooldown`].
-static STATION_COOLDOWN_SECS: AtomicU16 = AtomicU16::new(0);
 
 /// Minimum wall-clock visibility for a toast.  After this elapses the
 /// toast disappears on the next display refresh.  E-paper refreshes
@@ -710,13 +686,6 @@ pub fn next_ui_deadline_tick() -> u32 {
     next
 }
 
-/// Show the station-cooldown toast with the remaining time formatted
-/// from `secs` (e.g. `"wait 4:50"`).
-pub fn show_station_cooldown(secs: u16) {
-    STATION_COOLDOWN_SECS.store(secs, Ordering::Relaxed);
-    show_toast(Toast::StationCooldown);
-}
-
 // ── Layout constants
 // ──────────────────────────────────────────────────────────
 
@@ -894,9 +863,8 @@ where
     TOAST.clear_if_elapsed(TOAST_MIN_VISIBLE_MS);
     if TOAST.is_active() {
         let toast = Toast::from_u8(TOAST_MSG.load(Ordering::Relaxed));
-        // Dynamic toasts (station cooldown) format their text at draw
-        // time from a small atomic; everything else uses the static
-        // message table.
+        // Dynamic toasts format their text at draw time; everything else
+        // uses the static message table.
         let mut dyn_buf: heapless::String<48> = heapless::String::new();
         let msg: &str = if let Toast::Reason = toast {
             let why = engine::doses::Reason::unpack(
@@ -911,12 +879,6 @@ where
                 let line = info.line();
                 dyn_buf.push_str(line.as_str()).ok();
             }
-            dyn_buf.as_str()
-        } else if let Toast::StationCooldown = toast {
-            let secs = STATION_COOLDOWN_SECS.load(Ordering::Relaxed);
-            let m = secs / 60;
-            let s = secs % 60;
-            let _ = core::fmt::Write::write_fmt(&mut dyn_buf, format_args!("wait {}:{:02}", m, s));
             dyn_buf.as_str()
         } else {
             toast.message()

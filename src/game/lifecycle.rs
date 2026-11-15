@@ -230,12 +230,9 @@ pub fn is_started() -> bool {
     unsafe { (*GAME.get()).is_some() }
 }
 
-/// Returns true if the pet is alive enough to receive a station buff
-/// over NFC — i.e. a game has started and the pet has not left.
-/// `Hatching`, `Active` and `Leaving` all qualify; `Gone` does not.
-pub fn can_use_station() -> bool {
-    let state = unsafe { (*GAME.get()).as_ref() };
-    matches!(state, Some(s) if s.phase != super::engine::Phase::Gone)
+/// The pet's phase, or None while no game has started.
+pub fn game_phase() -> Option<super::engine::Phase> {
+    unsafe { (*GAME.get()).as_ref() }.map(|s| s.phase)
 }
 
 /// Longest boot catch-up, in minutes (12 h).
@@ -2002,7 +1999,7 @@ mod retire_tests {
         assert_eq!(r.age_ticks, 600 * 6);
         assert_eq!(&r.name[..r.name_len as usize], b"Jelly");
         assert_eq!(display_anim(), DisplayAnim::Gone);
-        assert!(!can_use_station());
+        assert_eq!(game_phase(), Some(Phase::Gone));
         assert!(is_started(), "the Gone screen needs the game to draw");
         assert!(!take_naming_pending());
         teardown();
