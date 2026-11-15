@@ -338,6 +338,26 @@ apply afterwards (via USB hub for asset copy).
 * [`../assets/to-badge/`](../assets/to-badge/) — asset bundle
   `copy_assets.py` reads from.
 
+## Station reader (organisers)
+
+`station.py` checks, signs and sends BornPets station messages. It is Python 3
+stdlib; `cryptography` is needed only to sign, `pyscard` only to send. Its parser
+mirrors `src/game/engine/fix.rs`, and `tests/data/station_vectors.txt` keeps the two
+in step. Protocol and status words: [`../NFC_README.md`](../NFC_README.md) section 4.
+
+```
+scripts/station.py check TEXT...      # canonical form and skipped items; exit 1 if rejected
+scripts/station.py presets            # the preset table, with the old phrase for each
+scripts/station.py apdu --key F --challenge HEX TEXT   # the SIGNED CMD bytes in hex
+scripts/station.py send --key F (--preset PLACE | --text TEXT) [--reader N] [--once]
+```
+
+`--key` is the 32-byte Ed25519 seed (raw, or 64 hex digits). `send` waits for a badge,
+sends, and prints `applied`, `refused (cooldown, gone or no pet)` or `not understood`,
+then waits for the badge to leave and repeats (`--once` stops after one). On `6A 82`
+(an old badge) it sends the equivalent old phrase, if there is one. On `69 85` it never
+does. Tests: `python3 -m unittest discover -s scripts -p 'test_station.py'`.
+
 ## BornPets v3 state-frame art (`bornpets_ai_frames.py`, `bornpets_art_check.py`)
 
 The twelve new state frames of each art pet (tipsy, wasted, hung over, sore, injured, groggy, stuffed, thirsty, wired, throwing up, needs rehab, starving; anim ids `0x29`-`0x34`) are drawn from the

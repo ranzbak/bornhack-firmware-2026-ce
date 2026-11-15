@@ -161,7 +161,8 @@ toast, not via response bytes.
 | `90 00` | success | command accepted and applied |
 | `67 00` | wrong length | frame too short or otherwise unparseable |
 | `69 82` | sec status | bad signature |
-| `6A 82` | not found | plaintext didn't match a known command, or precondition failed (no active pet, cooldown) |
+| `69 85` | conditions not satisfied | the station message was understood but refused: on cooldown, the pet is gone, or there is no game |
+| `6A 82` | not found | not a station message, or unreadable, malformed or nothing the badge knows |
 | `6A 88` | ref data not found | no challenge armed — caller must issue GET CHALLENGE first |
 
 `69 82` and `6A 82` are deliberately distinct in this implementation
@@ -219,21 +220,112 @@ Source: `src/signed_channel.rs::Csprng`.
 > **See also:** [CLOCK.md](CLOCK.md) for the alarm/calendar system that these commands interact with.
 
 The signed-channel dispatcher routes the verified plaintext through
-`game::station::apply`. Currently recognised phrases (UTF-8, exact
-byte match after lowercasing and ASCII-whitespace trimming):
+`game::station::apply`. The plaintext is a short text, the *station
+message*. The parser is `src/game/engine/fix.rs`.
 
-| Plaintext | Effect on badge |
+### 4.1 Grammar
+
+```text
+message    = "fix" SP "s=" station *( SP item )
+station    = 1*8( ALPHA / DIGIT )        ; which magic place this is
+item       = level / clear / cooldown
+level      = name op value
+name       = "full" / "water" / "energy" / "fun" / "dirt" / "booze" / "strain" / "fit" / "weight" / "health"
+op         = "=" / ">" / "<" / "+" / "-"
+value      = 1*3DIGIT                    ; percent, 0 to 100
+clear      = "clear=" cond *( "," cond )
+cond       = "hangover" / "injury" / "groggy" / "deprived" / "dependence" / "diabetes"
+cooldown   = "cd=" 1*4DIGIT              ; minutes, for this station
+```
+
+The badge lowercases the text, trims it, and turns every run of ASCII
+whitespace into one space. The text must be ASCII and at most 96 bytes.
+
+Operators: `=` sets to exactly. `>` raises to at least (no effect if
+already higher). `<` lowers to at most. `+` and `-` add or subtract.
+Presets mostly use `>` and `<`, which can only help.
+
+Rejected, with status `6A 82`: a value over 100, a missing or bad station
+id, a malformed item, a repeated `cd=` or `s=`, text that is not ASCII,
+and a text with no item the badge understands. An unknown name or
+condition is skipped, so a newer reader can talk to an older badge.
+
+### 4.2 What the badge does
+
+- **Clamps** every level into the safe range of that need, so a station
+  can never put a pet in a health-damage zone. `health` is capped at the
+  pet's own ceiling, so `health>100` means "as healthy as this pet can be".
+  `fit` is capped at 60 %: real fitness has to be trained.
+- **Mood:** every applied fix gives a small mood bump.
+- **Cooldown per station id:** the badge remembers the last 8 ids in RAM.
+  The default is 5 minutes. `cd=` asks for longer (up to 1440 minutes),
+  never shorter. Two stalls with different ids can be used back to back.
+- **Any pet that is not gone.** A sleeping pet stays asleep. Hard mode
+  stays free: the toast says it is covered by magic, not insurance.
+- **Always an answer.** The badge shows a toast for every tap: `Magic fix!`
+  with `at <station>`, `Too soon!` with `again in <time>`, `pet is gone`,
+  or `Unknown magic` with `badge can't read it`. The one silent case is a
+  badge with no game at all: the tap brings the start screen forward.
+- `clear=dependence` and `clear=diabetes` work on the signed channel only.
+  The plain opt-in path (section 5) leaves them out.
+
+### 4.3 Old phrases (aliases)
+
+The old phrases still work. The badge treats them as these messages:
+
+| Old phrase | Treated as |
 |---|---|
-| `more food` | Set `hunger = 0` |
-| `more drugs` | Set `sick = 0` |
-| `more inspiration` | Set `drained = 0` |
-| `sleep like a bear` | Set `tired = 0` |
+| `more food` | `fix s=food full>60 water>60` |
+| `more drugs` | `fix s=drugs health>100 booze<20 clear=hangover,injury,groggy` |
+| `sleep like a bear` | `fix s=rest energy>100 clear=groggy,deprived` |
+| `more inspiration` | `fix s=inspire fun>60` |
 
-Each command has a separate 5-minute cooldown. A second tap within
-the cooldown returns `6A 82` and the badge displays a "wait Ns" toast.
+None of them clears dependence or diabetes.
 
-Anything else returns `6A 82`. To extend the vocabulary, add a branch
-to `src/game/station.rs::apply` and rebuild.
+### 4.4 Presets
+
+Ready-made messages for the magic places. The same table is in
+`scripts/station_presets.txt`.
+
+| Magic place | Plaintext |
+|---|---|
+| Food stall | `fix s=food1 full>60 water>60` |
+| Pharmacy | `fix s=pharm1 health>100 booze<20 clear=hangover,injury,groggy` |
+| Nap tent | `fix s=nap1 energy>100 clear=groggy,deprived` |
+| Spa | `fix s=spa1 dirt<10 fun<60 strain<10 clear=groggy` |
+| Bar recovery | `fix s=bar1 booze<10 water>60 clear=hangover` |
+| Water point | `fix s=water1 water>70` |
+| Gym | `fix s=gym1 fit+5 strain<20 cd=240` |
+| Clinic (rare) | `fix s=clinic1 clear=dependence,diabetes booze<5 fit>50 cd=1440` |
+
+### 4.5 Status words and the reader rule
+
+| SW | Meaning for a station message |
+|---|---|
+| `90 00` | applied |
+| `69 85` | understood, but refused: cooldown, gone pet, or no game |
+| `6A 82` | not understood: not a station message, unreadable, malformed, or nothing known |
+
+A badge on old firmware does not know the `fix` text. It answers `6A 82`.
+So the reader rule is:
+
+- On `6A 82`, if the message has an old phrase with the same effect
+  (food1, pharm1 and nap1 do; the other presets do not), send that old
+  phrase with a fresh GET CHALLENGE.
+- On `69 85`, **never** fall back. The badge understood the message and
+  said no. A second try would only be refused again.
+
+`scripts/station.py` does this for you.
+
+### 4.6 Test a string before you sign it
+
+```
+python3 scripts/station.py check "fix s=food1 full>60 water>60"
+```
+
+It prints the canonical form and any skipped items, and exits 1 when the
+badge would reject the text. `scripts/station.py presets` lists the
+presets with their fallback phrases. See `scripts/README.md`.
 
 ---
 
@@ -268,13 +360,13 @@ The dispatcher (`src/fw/nfct.rs`) selects between paths purely on
 
 Every completed NDEF write (UPDATE BINARY) is classified in
 `nfct::handle_ndef_write`. The rule is simple: **only `token:` (and, when
-opted in, station phrases) are transient — everything else you write
+opted in, station messages) are transient — everything else you write
 becomes your persisted broadcast profile.**
 
 | Written record | Effect | Persistence |
 |---|---|---|
 | Text `token:<v>` | Reverts without persisting (no on-badge display) | Transient |
-| Station phrase (opt-in `nfc-plaintext-station`) | Applies the buff | Transient |
+| Station message (opt-in `nfc-plaintext-station`) | Applies the fix, or shows a refusal toast; always transient, refused ones too | Transient |
 | Text `set:<url>` | Rebuilt into a clean URI record, then broadcast | **Persisted** to KV (`nfc/profile`) |
 | A URL / URI record | Broadcast verbatim | **Persisted** |
 | A vCard business card | Broadcast verbatim | **Persisted** |
@@ -567,7 +659,11 @@ challenge.
 | `src/signed_channel.rs` | `Session`, `verify_in_place`, `Csprng`, public key constant |
 | `src/fw/nfct.rs` | `handle_get_challenge`, `handle_signed`, dispatcher |
 | `src/fw/iso14443.rs` | ISO-DEP (T=CL) layer |
-| `src/game/station.rs` | Plaintext command dispatch |
+| `src/game/station.rs` | Station dispatcher: status words, cooldowns, toasts |
+| `src/game/engine/fix.rs` | Station message parser and `canonical()` |
+| `scripts/station.py` | Organiser tool: check, presets, sign, send |
+| `scripts/station_presets.txt` | The preset table |
+| `tests/data/station_vectors.txt` | Parser vectors shared by Rust and Python |
 | `src/bin/embassy.rs` | Boot order, `Csprng::seed_from_hardware()` |
 | `android_nfc/BadgeCtl/app/src/main/java/com/example/badgectl/MainActivity.kt` | Reference reader |
 

@@ -101,4 +101,5 @@ jobs:
           echo "$HOME/typst-bin" >> "$GITHUB_PATH"
       - run: python3 scripts/test_build_guide.py
       - run: python3 -m unittest discover -s scripts -p 'test_copy_assets.py'
+      - run: python3 -m unittest discover -s scripts -p 'test_station.py'
       - run: CARGO_BUILD_JOBS=4 make guide

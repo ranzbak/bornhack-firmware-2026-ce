@@ -12,20 +12,36 @@ Any standard NFC reader (Android default, iOS) sees whatever you've set as your 
 
 A phone running the **BadgeCtl** companion app (loaded with the matching event private key) can send signed commands when held to the badge. These are typically used at event "stations" where you can boost your pet's stats.
 
-Available signed commands:
+The magic places:
 
-| Command                   | Effect on your BornPet            |
-| ------------------------- | --------------------------------- |
-| `more food`               | sets **hunger** to 0              |
-| `more drugs`              | sets **sick** to 0                |
-| `more inspiration`        | sets **drained** to 0             |
-| `sleep like a bear`       | sets **tired** to 0               |
+| Place         | What it does for your pet                              |
+| ------------- | ------------------------------------------------------ |
+| Food stall    | more food and water                                    |
+| Pharmacy      | health up, booze down, clears hangover, injury, groggy |
+| Nap tent      | full energy, clears groggy and deprived                |
+| Spa           | cleaner, calmer, less strain                           |
+| Bar recovery  | the morning after: less booze, more water              |
+| Water point   | more water                                             |
+| Gym           | a little fitter (long wait before the next visit)      |
+| Clinic (rare) | clears dependence and diabetes (very long wait)        |
 
-A short toast appears on the badge confirming what happened. Each command has a 5-minute cooldown — tapping twice in quick succession does nothing the second time.
+The badge never pushes a need into a danger zone, so a station cannot
+overfeed your pet. Every fix also cheers it up a little.
+
+The badge answers every tap with a toast:
+
+| Toast                                  | Meaning                                    |
+| -------------------------------------- | ------------------------------------------ |
+| `Magic fix!` / `at <station>`          | it worked                                  |
+| `Magic fix!` / `thanks!`               | it worked, and your demo pet says thanks   |
+| `Covered by` / `magic, not insurance`  | it worked (hard mode, no bill)             |
+| `Too soon!` / `again in <time>`        | this station is on cooldown (5 minutes or more) |
+| `pet is gone`                          | your pet has left; start a new egg         |
+| `Unknown magic` / `badge can't read it`| the badge does not know that message       |
 
 Station commands need an **active game**: pick a pet first (the egg
-countdown already counts). If your pet has left, start a new egg — a tap
-with no active pet is silently ignored.
+countdown already counts). With no game at all there is no toast: the
+tap brings the start screen forward.
 
 ## What you need to do
 

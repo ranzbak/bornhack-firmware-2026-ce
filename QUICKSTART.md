@@ -180,14 +180,17 @@ The factory test runs again on the next boot.
   write is intentionally transient — it lands on the **Tokens** screen
   (kept until reboot) and the broadcast reverts to your profile after
   ~10 s.
-- **A station tap did nothing — no toast, pet unaffected.** Station
-  commands only apply while you have an active game: pick a pet first
-  (the egg countdown already counts), or start a new egg if your pet has
-  left. Also: station commands come through the **signed** BadgeCtl
-  reader — writing the phrase (e.g. `more food`) as a plain text record
-  with a generic NFC app doesn't feed your pet; it just becomes your
-  broadcast profile, and your badge now proudly hands out "more food" to
-  every phone that taps it. Write a new URL/vCard to fix that.
+- **A station tap did nothing.** A tap on a game always shows a toast, and
+  the toast says why. `Too soon!` means that station is on cooldown: wait
+  for the time shown. `pet is gone` means your pet has left: start a new
+  egg. `Unknown magic` means the badge can't read the message. If there is
+  no toast and the start screen comes forward, you have no game yet: pick
+  a pet first (the egg countdown already counts). Also: station commands
+  come through the **signed** BadgeCtl reader — writing a phrase (e.g.
+  `more food`) as a plain text record with a generic NFC app doesn't feed
+  your pet; it just becomes your broadcast profile, and your badge now
+  proudly hands out "more food" to every phone that taps it. Write a new
+  URL/vCard to fix that.
 
 ### Game / BornPets
 

@@ -288,8 +288,8 @@ The badge appears in the app as a standard MeshCore node. All mesh activity (rec
 ## NFC station commands
 
 The badge emulates an ISO 14443-A Type 4 tag and accepts authenticated
-"station" commands over NFC (on `main`: `more food`, `more drugs` and
-`sleep like a bear`; see [`src/game/station.rs`](src/game/station.rs)). Authentication
+"station" commands over NFC (a text such as `fix s=food1 full>60 water>60`;
+see [`src/game/station.rs`](src/game/station.rs)). Authentication
 uses Ed25519 signatures with a challenge-response handshake — the badge
 holds only the public verifying key, while the matching private key
 lives in the reader app.
