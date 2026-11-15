@@ -428,6 +428,8 @@ mod apply {
         s.demo.on = true;
         s.hibernating = true;
         assert!(!s.station_fix(&fix_of(PRESETS[5])));
+        // player_acted pauses any demo pet, hibernating or not.
+        assert_eq!(s.demo.pause_min, DEMO_PAUSE_MIN());
         let mut s = pet();
         s.demo.pause_min = 0;
         assert!(!s.station_fix(&fix_of(PRESETS[5])));

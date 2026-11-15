@@ -3234,3 +3234,23 @@ mod overweight_diabetes_tests {
         assert_eq!(state.money, 90, "hard mode should not touch the flat Play price");
     }
 }
+
+#[cfg(test)]
+mod station_fix_tests {
+    use super::*;
+
+    /// The demo pet's last note goes and its policy waits when a station fix lands.
+    #[test]
+    fn a_station_fix_pauses_the_demo_and_clears_its_note() {
+        let mut s = GameState::new_egg(7, PetKind(0));
+        s.update(thresholds::HATCHING_TICKS() as u32);
+        s.is_sleeping = false;
+        s.demo.on = true;
+        s.demo.pause_min = 0;
+        s.note = Some((demo::Note::Napping, status::status_line(&s)));
+        let f = fix::parse_text(b"more food").unwrap().unwrap();
+        assert!(s.station_fix(&f));
+        assert_eq!(s.demo.pause_min, DEMO_PAUSE_MIN());
+        assert!(s.note.is_none());
+    }
+}
