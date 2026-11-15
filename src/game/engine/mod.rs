@@ -18,6 +18,7 @@ pub mod demo;
 pub mod debug;
 pub mod doses;
 pub mod drink;
+pub mod fix;
 pub mod food;
 pub mod hint;
 pub mod needs;

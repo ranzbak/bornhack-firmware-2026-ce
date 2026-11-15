@@ -1,0 +1,42 @@
+# Shared station message vectors. Tab separated:
+# accept<TAB>input<TAB>canonical | reject<TAB>input<TAB>code | ignore<TAB>input
+accept	fix s=food1 full>60 water>60	fix s=food1 full>60 water>60
+accept	  FIX S=Food1  full>060   water>60 	fix s=food1 full>60 water>60
+accept	more food	fix s=food full>60 water>60
+accept	More Drugs	fix s=drugs health>100 booze<20 clear=hangover,injury,groggy
+accept	sleep like a bear	fix s=rest energy>100 clear=groggy,deprived
+accept	more inspiration	fix s=inspire fun>60
+accept	fix s=clinic1 clear=dependence,diabetes booze<5 fit>50 cd=1440	fix s=clinic1 booze<5 fit>50 clear=dependence,diabetes cd=1440
+accept	fix s=x1 sparkle>5 full>50	fix s=x1 full>50
+accept	fix s=x1 clear=hangover,glitter	fix s=x1 clear=hangover
+accept	fix s=x1 clear=injury clear=hangover	fix s=x1 clear=hangover,injury
+accept	fix s=x1 full>50 full<70	fix s=x1 full>50 full<70
+accept	fix s=x1 fun>1 cd=0	fix s=x1 fun>1 cd=0
+accept	fix s=x1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1	fix s=x1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1
+reject	fix s=x1 full>101	over_100
+reject	fix s=x1 full>1000	bad_item
+reject	fix full>50	bad_id
+reject	fix s=toolongid full>50	bad_id
+reject	fix s= full>50	bad_id
+reject	fix s=a_b full>50	bad_id
+reject	fix	bad_id
+reject	fix s=x1	nothing_known
+reject	fix s=x1 sparkle>5	nothing_known
+reject	fix s=x1 cd=60	nothing_known
+reject	fix s=x1 full>	bad_item
+reject	fix s=x1 full>5a	bad_item
+reject	fix s=x1 full	bad_item
+reject	fix s=x1 >5	bad_item
+reject	fix s=x1 clear>hangover	bad_item
+reject	fix s=x1 clear=	bad_item
+reject	fix s=x1 clear=hangover,,injury	bad_item
+reject	fix s=x1 cd=12345 fun>1	bad_item
+reject	fix s=x1 cd<5 fun>1	bad_item
+reject	fix s=x1 fun>1 cd=5 cd=6	duplicate
+reject	fix s=x1 s=x2 fun>1	duplicate
+reject	fix s=x1 fün>1	unreadable
+reject	fix s=x1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1 fun>1	unreadable
+ignore	hello
+ignore	https://badge.team
+ignore	fixme s=x1 fun>1
+ignore	

@@ -1,0 +1,9 @@
+# NFC station presets (spec 19.5): place|plaintext, one per line.
+Food stall|fix s=food1 full>60 water>60
+Pharmacy|fix s=pharm1 health>100 booze<20 clear=hangover,injury,groggy
+Nap tent|fix s=nap1 energy>100 clear=groggy,deprived
+Spa|fix s=spa1 dirt<10 fun<60 strain<10 clear=groggy
+Bar recovery|fix s=bar1 booze<10 water>60 clear=hangover
+Water point|fix s=water1 water>70
+Gym|fix s=gym1 fit+5 strain<20 cd=240
+Clinic|fix s=clinic1 clear=dependence,diabetes booze<5 fit>50 cd=1440
