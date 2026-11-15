@@ -442,8 +442,26 @@ fn note_hung_over() {
     HUNG_OVER.store(has, Ordering::Relaxed);
 }
 
+static FIRST_TAP_APPLIED: AtomicBool = AtomicBool::new(false);
+
 fn tap_station() {
-    crate::game::station::apply(b"fix s=food1 full>60 water>60", true);
+    let o = crate::game::station::apply(b"fix s=food1 full>60 water>60", true);
+    if o == crate::game::station::Outcome::Applied {
+        FIRST_TAP_APPLIED.store(true, Ordering::Relaxed);
+    }
+}
+
+fn tap_station_again() {
+    let first = FIRST_TAP_APPLIED.load(Ordering::Relaxed);
+    tap_station();
+    FIRST_TAP_APPLIED.store(first, Ordering::Relaxed);
+}
+
+fn station_toast_is_fixed() -> bool {
+    matches!(
+        crate::game::last_station_toast_for_test(),
+        Some((crate::game::StationToast::Fixed | crate::game::StationToast::Thanks, _))
+    )
 }
 
 fn station_toast_is_too_soon() -> bool {
@@ -685,12 +703,16 @@ pub static SHOTS: &[Shot] = &[
     }),
     // A magic place, once and twice in a row.
     shot!("station-fix", [Do(content), Do(tap_station)], || {
-        toast_is(Toast::Station)
+        toast_is(Toast::Station) && station_toast_is_fixed()
     }),
     shot!(
         "station-wait",
-        [Do(content), Do(tap_station), Do(tap_station)],
-        || toast_is(Toast::Station) && station_toast_is_too_soon()
+        [Do(content), Do(tap_station), Do(tap_station_again)],
+        || {
+            toast_is(Toast::Station)
+                && FIRST_TAP_APPLIED.load(Ordering::Relaxed)
+                && station_toast_is_too_soon()
+        }
     ),
     // An old badge: PETS.CFG still lists the Jellyfish, its sprites are gone.
     shot!(
@@ -704,6 +726,7 @@ pub static SHOTS: &[Shot] = &[
 fn set_up() {
     set_fake_uptime_ms(0);
     set_fake_unix(Some(SHOT_NOON_UNIX));
+    crate::game::station::reset_for_test();
     // The badge's numbers, never the bare simulator preset.
     sim::install_preset(badge_preset(Mode::Classic), Mode::Classic, false);
 }

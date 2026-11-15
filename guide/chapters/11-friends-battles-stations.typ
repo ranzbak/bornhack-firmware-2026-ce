@@ -250,7 +250,7 @@ because real fitness is trained. Health goes up to the pet's own ceiling and
 never under #v("HEALTH_DANGER_PCT"). A need that is already past a line is
 only ever helped. Every fix adds #v("STATION_MOOD_PCT") mood.
 
-*Conditions.* A station can clear a condition. The clinic is rare and can
+*Conditions.* A station can clear a condition: #w("hung over"), #w("injured"), #w("groggy") or #w("worn out"). The clinic is rare and can
 clear dependence and diabetes. It is a reset, not a cure for a lifestyle.
 
 *The nap tent.* A station that fills energy means the next sleep cannot end

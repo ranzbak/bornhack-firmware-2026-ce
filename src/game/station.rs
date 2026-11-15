@@ -177,8 +177,8 @@ pub fn apply(text: &[u8], signed: bool) -> Outcome {
     Outcome::Applied
 }
 
-/// Forget every cooldown.
-#[cfg(test)]
+/// Forget every cooldown (the guide shots use it too).
+#[cfg(any(test, feature = "simulator"))]
 pub(crate) fn reset_for_test() {
     COOLDOWNS.with_mut(|c| *c = Cooldowns::new());
 }
