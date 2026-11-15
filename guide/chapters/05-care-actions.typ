@@ -30,12 +30,14 @@ and a menu pops up. Up and Down move the cursor. Fire does the row.
     - *A mark* on the right edge: #w("!"). It says the dose would go wrong.
       The title bar then reads #w("risk: <what>") for the row under the
       cursor.
-    - *A grey row* is shut. The cursor still stops on it.
+    - *A grey row* is shut. The cursor skips it.
   ],
   screen("risk-marker", width: shot-m, caption: [Every row warns.]))
 
-*Press a shut row and the badge tells you why.* The title bar shows the
-reason for a moment. All the reasons are listed at the end of this chapter.
+*The cursor jumps over grey rows.* Up and Down stop only on rows you can
+use. If every other row is grey, the cursor stays where it is. When the
+badge refuses an action, the title bar shows the reason for a moment. All
+the reasons are listed at the end of this chapter.
 
 #pic-row((("feeding", [Fed.]), ("drinking", [Watered.]), ("playing", [Played.])))
 
@@ -285,12 +287,15 @@ difficulty first. It changes the opponent, not the prize.
   [#w("BornJeweled")], [Matching gems until the moves run out. Leave with a point on the board and it counts as a win.],
 )
 
-A *win* gives fun #mini-fun(2) and a *draw* #mini-fun(1). Both cost
-#v("DOSE_MINI_ENERGY_PCT") energy. A tired pet gets the fun doubled. In money
-mode a win or draw also pays #v("MINIGAME_HAX_REWARD"). The toast is
-#w("nice game!"). *A loss gives nothing*: no fun, no HAX, no cooldown.
+A *win* gives fun #mini-fun(2), a *draw* #mini-fun(1) and a *loss*
+#mini-fun(0). Each costs #v("DOSE_MINI_ENERGY_PCT") energy. A tired pet gets
+the fun doubled. In money mode a win pays #v("MINIGAME_HAX_REWARD"), a draw
+#v("MINIGAME_HAX_DRAW") and a loss #v("MINIGAME_HAX_LOSS"), because the pet
+put in the work. The toast is #w("nice game!") for a win or draw and
+#w("good try!") for a loss. A game you leave before it ends gives nothing:
+no fun, no HAX, no cooldown.
 
-After a win or draw that game rests for #v("MINIGAME_COOLDOWN"). The row shows
+After any finished game, win, draw or loss, that game rests for #v("MINIGAME_COOLDOWN"). The row shows
 #w("wait <time>"). The other four games stay open, so there is always
 something to play. A sleeping pet refuses all of them: #w("asleep").
 
@@ -334,8 +339,9 @@ A hibernating pet keeps every row but #w("Friends"). Any button closes a view.
 == Hibernate
 
 #grid(columns: (1fr, auto), column-gutter: 5mm, align: top,
-  [The Hibernate menu has two rows: #w("Hibernate") and #w("Defrost"). The
-  first freezes the pet and the second thaws it. While the pet is frozen, only the
+  [The Hibernate menu has #w("Hibernate") and #w("Defrost"). The
+  first freezes the pet and the second thaws it. Below them sits the demo
+  switch, the same one as in the Bornagotchi menu (see Demo mode below). While the pet is frozen, only the
   Stats and Hibernate icons open. The other icons do nothing. Both rows are free and instant.
   Defrost on a pet that is not frozen is shut and says #w("no need"), and
   Hibernate on a frozen pet says #w("hibernating").
@@ -394,8 +400,9 @@ and takes its medicine. You can still step in whenever you like.
   [
     The switches live in the Main screen, #w("Bornagotchi") menu. Two rows
     sit between #w("Mode:") and the separator above #w("Reset Pet"). The
-    first switches demo mode. The second picks how the pet cares. A refused
-    press changes nothing, and the label already says why.
+    first switches demo mode. The second picks how the pet cares. The demo
+    switch is also in the Hibernate menu: both are ways to set the pet's care
+    aside. A refused press changes nothing, and the label already says why.
   ],
   hero-pic("idle"))
 
@@ -558,9 +565,11 @@ The row shows the wait in place of its price.
   [#w("rehab started")], [Rehab.],
   [#w("hibernating")], [Hibernate.],
   [#w("nice game!")], [A mini-game win or draw.],
+  [#w("good try!")], [A mini-game loss.],
   [#w("+happy")], [A known friend met again. See @ch-friends.],
   [#w("new friend!")], [A new friend met. See @ch-friends.],
   [#w("Food bonus!")], [A food station was tapped. See @ch-friends.],
+  [#w("won a battle!") #w("lost a battle")], [A fight you only heard of.],
   [#w("Heal bonus!")], [A medic station was tapped.],
   [#w("Sleep bonus!")], [A rest station was tapped.],
 )
@@ -572,7 +581,4 @@ Two more things are called a toast:
 A station tapped too soon shows a countdown, such as #raw("wait 1:30"), in
 minutes and seconds. See @ch-friends.
 
-Four toasts exist in the game's list that nothing raises today:
-#w("+inspired"), #w("Inspire bonus!"), #w("won a battle!") and
-#w("lost a battle"). You will not meet them. A Battle shows its result card
-instead (@ch-friends).
+Nothing raises #w("+inspired") or #w("Inspire bonus!") yet.

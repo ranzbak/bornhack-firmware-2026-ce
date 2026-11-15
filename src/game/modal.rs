@@ -98,7 +98,8 @@ impl ModalKind {
                 Item::Friends,
                 Item::Cancel,
             ],
-            Self::Hibernate => &[Item::Hibernate, Item::WakeUp, Item::Cancel],
+            // Demo sits with Hibernate: both put the pet's clock aside.
+            Self::Hibernate => &[Item::Hibernate, Item::WakeUp, Item::Demo, Item::Cancel],
             Self::Feed => &[
                 Item::FeedFood(super::engine::FoodKind::Salad),
                 Item::FeedFood(super::engine::FoodKind::Apple),
@@ -217,6 +218,8 @@ enum Item {
     Song(u8),
     Hibernate,
     WakeUp,
+    /// The demo mode switch (the same switch as the game settings row).
+    Demo,
 }
 
 /// What a debug row does.
@@ -334,6 +337,7 @@ impl Item {
             Self::Song(_) => "?",
             Self::Hibernate => "Hibernate",
             Self::WakeUp => "Defrost",
+            Self::Demo => super::lifecycle::demo_menu_label(),
         }
     }
 
@@ -361,6 +365,11 @@ impl Item {
     /// RolledStats).  The pet must be defrosted before mini-games or
     /// stat actions can run again.
     fn available(self, stats: &super::engine::PetStats) -> bool {
+        // The demo switch asks the engine itself: off always works, on is
+        // refused while hibernating, for a pet in poor shape, or with no pet.
+        if self == Self::Demo {
+            return super::lifecycle::demo_switch_refusal().is_none();
+        }
         // Debug rows are always selectable: a poke the pet cannot take says
         // why when it runs, and the skips work on a hibernating pet too.
         if stats.hibernating && !matches!(self, Self::Debug(_)) {
@@ -415,6 +424,7 @@ impl Item {
                 Self::BornJeweled => stats.can_play_bornjeweled,
                 Self::Hibernate => true,
                 Self::WakeUp => false,
+                Self::Demo => true, // answered at the top, before the hibernation gate
             }
     }
 
@@ -495,14 +505,15 @@ impl Item {
             return Reason::Hibernating;
         }
         let engine_says = match self {
-            Self::Battle => lifecycle::game_refusal(None),
-            Self::TicTacToe => lifecycle::game_refusal(Some(MiniGame::TicTacToe)),
-            Self::LightsOut => lifecycle::game_refusal(Some(MiniGame::LightsOut)),
-            Self::BlackHole => lifecycle::game_refusal(Some(MiniGame::BlackHole)),
-            Self::Nim => lifecycle::game_refusal(Some(MiniGame::Nim)),
-            Self::BornJeweled => lifecycle::game_refusal(Some(MiniGame::BornJeweled)),
+            Self::Battle => lifecycle::battle_refusal(),
+            Self::TicTacToe => lifecycle::game_refusal(MiniGame::TicTacToe),
+            Self::LightsOut => lifecycle::game_refusal(MiniGame::LightsOut),
+            Self::BlackHole => lifecycle::game_refusal(MiniGame::BlackHole),
+            Self::Nim => lifecycle::game_refusal(MiniGame::Nim),
+            Self::BornJeweled => lifecycle::game_refusal(MiniGame::BornJeweled),
             Self::Sleep => lifecycle::sleep_refusal(),
             Self::WakeFromSleep => (!stats.is_sleeping).then_some(Reason::Refused(Refusal::NoNeed)),
+            Self::Demo => lifecycle::demo_switch_refusal(),
             _ => match self.action() {
                 Some((a, d)) => lifecycle::refusal_for(a, d),
                 None => None,
@@ -626,6 +637,11 @@ impl Item {
             Self::WakeUp => {
                 lifecycle::wake_from_hibernation();
                 super::show_toast(super::Toast::Wake);
+                close();
+            }
+            // The main screen's demo mark and help line show the new state.
+            Self::Demo => {
+                let _ = lifecycle::toggle_demo();
                 close();
             }
         }
@@ -788,20 +804,24 @@ fn first_selectable(len: usize, selectable: impl Fn(usize) -> bool) -> usize {
     (0..len).find(|&i| selectable(i)).unwrap_or(0)
 }
 
-/// The row after `from` (or before it when `forward` is false), wrapping
-/// around the ends of a list of `len` rows.
-fn step_cursor(len: usize, from: usize, forward: bool) -> usize {
-    if len == 0 {
-        from
-    } else if forward {
-        (from + 1) % len
-    } else {
-        (from + len - 1) % len
+/// The next row after `from` (before it when `forward` is false) that
+/// `enabled` accepts, wrapping around the ends of a list of `len` rows.
+/// Disabled rows are never returned; when no other row is enabled the
+/// cursor stays at `from`.
+fn next_enabled(len: usize, from: usize, forward: bool, enabled: impl Fn(usize) -> bool) -> usize {
+    let mut i = from;
+    for _ in 0..len {
+        i = if forward { (i + 1) % len } else { (i + len - 1) % len };
+        if enabled(i) {
+            return i;
+        }
     }
+    from
 }
 
-/// Move the cursor one row up or down. Disabled rows are NOT skipped: the
-/// player can rest on one and press it to be told why it is disabled.
+/// Move the cursor to the next enabled row up or down, wrapping at the
+/// ends. Disabled rows are skipped, never highlighted; with no other row
+/// enabled the cursor stays put.
 fn move_cursor(forward: bool) {
     if dismiss_hint() {
         return;
@@ -818,8 +838,9 @@ fn move_cursor(forward: bool) {
     if items.is_empty() {
         return;
     }
+    let stats = super::lifecycle::cycle();
     let pos = (MODAL_POS.load(Ordering::Relaxed) as usize).min(items.len() - 1);
-    let next = step_cursor(items.len(), pos, forward);
+    let next = next_enabled(items.len(), pos, forward, |i| items[i].selectable(stats.as_ref()));
     MODAL_POS.store(next as u8, Ordering::Relaxed);
 }
 
@@ -913,6 +934,13 @@ fn row_text(item: Item, stats: Option<&super::engine::PetStats>) -> heapless::St
             // Rows with no wait to show get no suffix: selecting one tells
             // the player why (R24).
             let _ = text.push_str(wait.as_str());
+        } else if matches!(item, Item::Battle)
+            && item.available(s)
+            && let Some(form) = super::lifecycle::battle_form()
+        {
+            // The pet's form tells the player what a fight is worth now.
+            let _ = text.push_str(": ");
+            let _ = text.push_str(form.text());
         } else if let Some(price) = item.hax_price(s)
             && s.money_enabled
         {
@@ -959,6 +987,10 @@ pub fn menu_words() -> std::vec::Vec<(&'static str, std::string::String)> {
             f => f.full_name(),
         };
         out.push(("menu", name.to_string()));
+    }
+    out.push(("menu", "Battle: <form>".to_string()));
+    for form in super::engine::combat::Form::ALL {
+        out.push(("menu", form.text().to_string()));
     }
     for t in ["<price>H", "risk: <what>", "!"] {
         out.push(("menu", t.to_string()));
@@ -1468,7 +1500,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{Item, ModalKind, cooldown_string, first_selectable, step_cursor};
+    use super::{Item, ModalKind, cooldown_string, first_selectable, next_enabled};
     use crate::game::engine::{GameState, PetKind, Phase};
     use crate::game::lifecycle;
     use crate::game::stats_pages::Page;
@@ -1659,13 +1691,73 @@ mod tests {
     }
 
     #[test]
-    fn the_cursor_steps_one_row_and_wraps() {
-        assert_eq!(step_cursor(5, 1, true), 2);
-        assert_eq!(step_cursor(5, 4, true), 0);
-        assert_eq!(step_cursor(5, 2, false), 1);
-        assert_eq!(step_cursor(5, 0, false), 4);
-        assert_eq!(step_cursor(1, 0, true), 0);
-        assert_eq!(step_cursor(0, 0, false), 0);
+    fn the_cursor_skips_disabled_rows_and_wraps() {
+        let flags = [true, false, false, true, true];
+        let en = |i: usize| flags[i];
+        // Skips one or several disabled rows, both directions.
+        assert_eq!(next_enabled(5, 0, true, en), 3);
+        assert_eq!(next_enabled(5, 3, false, en), 0);
+        assert_eq!(next_enabled(5, 3, true, en), 4);
+        // Wraps from either end onto the first enabled row.
+        assert_eq!(next_enabled(5, 4, true, en), 0);
+        assert_eq!(next_enabled(5, 0, false, en), 4);
+        // Disabled ends wrap past themselves.
+        let ends = [false, true, true, false];
+        assert_eq!(next_enabled(4, 2, true, |i| ends[i]), 1);
+        assert_eq!(next_enabled(4, 1, false, |i| ends[i]), 2);
+        // Only the current row enabled: it stays put.
+        assert_eq!(next_enabled(5, 2, true, |i| i == 2), 2);
+        assert_eq!(next_enabled(5, 2, false, |i| i == 2), 2);
+        // Nothing enabled / empty list: stays put.
+        assert_eq!(next_enabled(5, 1, true, |_| false), 1);
+        assert_eq!(next_enabled(0, 0, false, |_| true), 0);
+        // All enabled: plain one-row steps.
+        assert_eq!(next_enabled(5, 4, true, |_| true), 0);
+        assert_eq!(next_enabled(5, 0, false, |_| true), 4);
+        assert_eq!(next_enabled(1, 0, true, |_| true), 0);
+    }
+
+    fn cursor_item() -> Item {
+        ModalKind::Rest.items()[super::MODAL_POS.load(core::sync::atomic::Ordering::Relaxed) as usize]
+    }
+
+    #[test]
+    fn the_menu_cursor_never_lands_on_a_disabled_row() {
+        let _guard = crate::game::lock_test_state();
+        let stats = menu_pet(false, false, |s| s.dirt = 0);
+        let items = ModalKind::Rest.items();
+        assert!(!Item::Wash.available(&stats));
+        assert!(!Item::WakeFromSleep.available(&stats));
+        super::open(ModalKind::Rest);
+        for _ in 0..2 * items.len() {
+            assert!(cursor_item().selectable(Some(&stats)), "down landed on {:?}", cursor_item().label());
+            super::cursor_down();
+        }
+        for _ in 0..2 * items.len() {
+            assert!(cursor_item().selectable(Some(&stats)), "up landed on {:?}", cursor_item().label());
+            super::cursor_up();
+        }
+        // Relax -> (Wash, Wake shut) -> Cancel, and back.
+        super::MODAL_POS.store(1, core::sync::atomic::Ordering::Relaxed);
+        super::cursor_down();
+        assert!(cursor_item() == Item::Cancel);
+        super::cursor_up();
+        assert!(cursor_item() == Item::Relax);
+        super::close();
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn a_menu_opens_on_an_enabled_row_when_the_first_is_shut() {
+        let _guard = crate::game::lock_test_state();
+        // Asleep: Sleep is shut, Relax/Wash may be too; the cursor starts on a usable row.
+        let stats = menu_pet(false, false, |s| s.is_sleeping = true);
+        assert!(!Item::Sleep.available(&stats));
+        super::open(ModalKind::Rest);
+        assert!(cursor_item().selectable(Some(&stats)));
+        assert!(cursor_item() != Item::Sleep);
+        super::close();
+        lifecycle::set_state_for_test(None);
     }
 
     #[test]
@@ -1709,6 +1801,60 @@ mod tests {
         // The reason comes before a risk and the menu title.
         let t = super::title_text(ModalKind::Drink, Some(water), Some(&stats), Some(Cause::FoodComa));
         assert_eq!(t.as_str(), "not thirsty");
+        lifecycle::set_state_for_test(None);
+    }
+
+    /// Put the cursor on `item` in the open Hibernate menu and press it.
+    fn press_in_hibernate_menu(item: Item) {
+        super::open(ModalKind::Hibernate);
+        let row = ModalKind::Hibernate
+            .items()
+            .iter()
+            .position(|i| *i == item)
+            .unwrap();
+        super::MODAL_POS.store(row as u8, core::sync::atomic::Ordering::Relaxed);
+        super::activate();
+    }
+
+    #[test]
+    fn the_hibernate_menu_has_the_demo_switch_before_cancel() {
+        let items = ModalKind::Hibernate.items();
+        let demo = items
+            .iter()
+            .position(|i| *i == Item::Demo)
+            .expect("no demo row");
+        assert!(items[demo + 1] == Item::Cancel);
+    }
+
+    #[test]
+    fn the_demo_row_switches_demo_on_and_off() {
+        let _guard = crate::game::lock_test_state();
+        let stats = menu_pet(false, false, |_| {});
+        assert!(Item::Demo.selectable(Some(&stats)));
+        assert_eq!(Item::Demo.label(), lifecycle::demo_menu_label());
+        press_in_hibernate_menu(Item::Demo);
+        assert!(lifecycle::is_demo());
+        let stats = lifecycle::cycle().unwrap();
+        assert!(Item::Demo.selectable(Some(&stats)));
+        assert_eq!(Item::Demo.label(), "Demo mode: on");
+        press_in_hibernate_menu(Item::Demo);
+        assert!(!lifecycle::is_demo());
+        lifecycle::set_state_for_test(None);
+    }
+
+    #[test]
+    fn a_refused_demo_row_says_why_and_cannot_be_pressed() {
+        let _guard = crate::game::lock_test_state();
+        let stats = menu_pet(false, false, |s| s.health = pct(5));
+        assert!(!Item::Demo.selectable(Some(&stats)));
+        assert_eq!(Item::Demo.label(), "Demo: fix me first");
+        lifecycle::set_state_for_test(None);
+
+        let _stats = menu_pet(false, false, |_| {});
+        lifecycle::hibernate();
+        let stats = lifecycle::cycle().unwrap();
+        assert!(!Item::Demo.selectable(Some(&stats)));
+        assert_eq!(Item::Demo.label(), "Demo: frozen");
         lifecycle::set_state_for_test(None);
     }
 
@@ -1880,6 +2026,25 @@ mod tests {
             true
         });
         lifecycle::cycle().unwrap()
+    }
+
+    #[test]
+    fn battle_row_shows_the_form() {
+        let _guard = crate::game::lock_test_state();
+        let mut stats = menu_pet(false, false, |_| {});
+        let form = lifecycle::battle_form().expect("a pet is active");
+        stats.can_battle = true;
+        stats.cooldown_battle = 0;
+        let want = format!("Battle: {}", form.text());
+        assert_eq!(super::row_text(Item::Battle, Some(&stats)).as_str(), want);
+        // Not available: the plain label (the reason shows when selected).
+        stats.can_battle = false;
+        assert_eq!(super::row_text(Item::Battle, Some(&stats)).as_str(), "Battle");
+        // Every form fits the 17 columns with its label.
+        use crate::game::engine::combat::Form;
+        for f in [Form::Top, Form::In, Form::Off, Form::Poor] {
+            assert!(format!("Battle: {}", f.text()).len() <= 17);
+        }
     }
 
     #[test]
