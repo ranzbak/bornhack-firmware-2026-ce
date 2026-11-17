@@ -445,7 +445,9 @@ pub fn screen_words() -> std::vec::Vec<(&'static str, &'static str)> {
         out.push(("screen", line));
     }
     out.push(("screen", NAME_PROMPT));
-    // Demo mode: the help line and the pet's notes take the status line's place.
+    // Demo mode: the word in the balance's place, the help line and the pet's
+    // notes in the status line's place.
+    out.push(("screen", DEMO_WORD));
     out.push(("status", HELP_TEXT));
     for note in engine::demo::Note::ALL {
         out.push(("status", note.text()));
@@ -658,6 +660,8 @@ const STATUS_BACKING_PAD: i32 = 4;
 
 /// The HAX balance: right-aligned, top baseline, ending at x = 150.
 const HAX_POS: Point = Point::new(150, 33);
+/// Shown in the HAX spot while demo mode freezes the balance.
+const DEMO_WORD: &str = "demo";
 /// The toast's first line, top-left. It shares the HAX row, so the cause
 /// toast keeps its `what` line short enough to end left of the balance.
 const TOAST_POS: Point = Point::new(2, SEP_TOP + 2);
@@ -1001,14 +1005,19 @@ where
 
     // HAX balance — top-right, below the battery icon + menu icon row
     // (y=33 clears the icons; y=16 overlapped them). Larger bold font.
-    // Hidden entirely when money mode is disabled for this pet.
-    if lifecycle::money_enabled() {
-        let right_style = crate::ui::TOP_RIGHT;
-        let mut money_buf: heapless::String<12> = heapless::String::new();
+    // Hidden entirely when money mode is disabled for this pet. In demo mode
+    // the balance is frozen and `DEMO_WORD` takes its place.
+    let mut money_buf: heapless::String<12> = heapless::String::new();
+    if lifecycle::is_demo() {
+        let _ = money_buf.push_str(DEMO_WORD);
+    } else if lifecycle::money_enabled() {
         let _ = core::fmt::Write::write_fmt(
             &mut money_buf,
             format_args!("{} H", lifecycle::money()),
         );
+    }
+    if !money_buf.is_empty() {
+        let right_style = crate::ui::TOP_RIGHT;
         // Reuse the already-linked bold font (FONT_7X13_BOLD via `font`) —
         // pulling in a second glyph table (9x15) overflowed FLASH by ~12 KB.
         // White backing, so the balance reads over the night sky.
@@ -1972,7 +1981,7 @@ mod tests {
     }
 
     #[test]
-    fn demo_hides_hax() {
+    fn demo_shows_its_word_in_the_hax_spot() {
         let _guard = super::lock_test_state();
         let _clear = ClearPet;
         let nav = crate::game::nav::get_nav();
@@ -1990,11 +1999,39 @@ mod tests {
             crate::game::lifecycle::set_state_for_test(Some(s));
             let mut c = Canvas::new();
             super::draw_screen_game(&mut c, nav).unwrap();
-            hax_rows(&c)
+            c
         };
-        let none = draw(false, false);
-        assert_ne!(draw(false, true), none, "HAX shows when live");
-        assert_eq!(draw(true, true), none, "demo hides it");
+        let none = hax_rows(&draw(false, false));
+        assert_ne!(hax_rows(&draw(false, true)), none, "HAX shows when live");
+
+        // Demo: every glyph pixel of the word, set where the balance goes,
+        // is black on the game screen, with money mode on or off.
+        let mut word = Canvas::new();
+        embedded_graphics::text::Text::with_text_style(
+            super::DEMO_WORD,
+            super::HAX_POS,
+            crate::ui::TEXT_BOLD_BLACK,
+            crate::ui::TOP_RIGHT,
+        )
+        .draw(&mut word)
+        .unwrap();
+        let ink: Vec<(i32, i32)> = (33..=46)
+            .flat_map(|yy| (110..152).map(move |xx| (xx, yy)))
+            .filter(|&(xx, yy)| word.get(xx, yy) == crate::BLACK)
+            .collect();
+        assert!(ink.len() > 20, "the word has ink");
+        for money in [true, false] {
+            let c = draw(true, money);
+            let missing: Vec<_> =
+                ink.iter().filter(|&&(xx, yy)| c.get(xx, yy) != crate::BLACK).collect();
+            assert!(missing.is_empty(), "money {money}: word pixels not black {missing:?}");
+            assert_ne!(hax_rows(&c), none, "money {money}");
+        }
+        assert_eq!(
+            hax_rows(&draw(true, true)),
+            hax_rows(&draw(true, false)),
+            "demo hides the balance"
+        );
     }
 
     #[test]
