@@ -493,9 +493,9 @@ In both cases a sleeper whose fullness has fallen under
 - *It never drinks wine or whiskey.* It also never becomes dependent. A pet
   that already is gets its rehab.
 - *It never rings.* No red status line, no buzz, no alarm (@ch-reading).
-- *HAX are paused.* The balance is hidden, nothing costs HAX, nothing pays,
-  not even #w("Only pets"). The balance is not lost. It comes back when demo
-  goes off.
+- *HAX are paused.* #w("demo") stands where the balance goes, nothing costs
+  HAX, nothing pays, not even #w("Only pets"). The balance is not lost. It
+  comes back when demo goes off.
 
 A floor holds a stat where it stands, it does not lift it. The pet's own
 care lifts it.
