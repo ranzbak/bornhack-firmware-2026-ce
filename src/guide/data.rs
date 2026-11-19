@@ -68,6 +68,8 @@ const UNIT_OVERRIDES: &[(&str, Unit)] = &[
     // advance.rs: `dt * HANGOVER_ASLEEP_MULT`, a whole-number factor the
     // prose can say ("twice as fast"); beats the `_MULT` rule.
     ("HANGOVER_ASLEEP_MULT", Unit::Count),
+    // demo.rs: the balance the demo pet works up to, a HAX amount.
+    ("DEMO_HAX_TARGET", Unit::Hax),
 ];
 
 /// The unit of a `Thresholds` field. An override wins over a suffix rule;
