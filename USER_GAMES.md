@@ -37,7 +37,7 @@ The game screen has a background. By day the sky is white with a sun and a small
 
 ### Demo mode
 
-Demo mode turns the pet into a desk companion that looks after itself. It eats, drinks, washes, sleeps, plays and takes its medicine and insulin on its own, and it says what it did in a short note under the pet ("had an apple", "off to bed"). Its condition wanders but it never gets bad enough to leave, and it never exercises: that stays your job, so a demo pet that gets unfit says "I feel stiff." in the hint. It follows the badge clock for bedtime, or its own rhythm while the clock is not set. Demo pets keep a small black **D** under the battery bar on the game screen. HAX is paused while demo is on (hidden, not lost) and comes back when you turn demo off.
+Demo mode turns the pet into a desk companion that looks after itself. It eats, drinks, washes, sleeps, plays and takes its medicine and insulin on its own, and it says what it did in a short note under the pet ("had an apple", "off to bed"). Its condition wanders but it never gets bad enough to leave, and it never exercises: that stays your job, so a demo pet that gets unfit says "I feel stiff." in the hint. It follows the badge clock for bedtime, or its own rhythm while the clock is not set. Demo pets keep a small black **D** under the battery bar on the game screen. HAX keeps running while demo is on: the pet pays for its own meals and medicine, earns the money back (it plays its mini-games and goes to work, "did a shift", whenever the balance is under `DEMO_HAX_TARGET`) and the balance drifts down by 1 HAX every `DEMO_HAX_DRIFT_MIN` minutes while it is above the target, so it stays around 100 HAX. Turning demo off keeps whatever balance there is.
 
 You can step in at any time. After you act, the pet leaves its care to you for 30 minutes and thanks you ("thanks!") when your action helped. When its health drops to 35 % it shows "could use a hand" instead of a note. Demo is silent: no buzzer.
 
@@ -378,6 +378,8 @@ Known keys (everything else is silently ignored, so you don't have to keep your 
 | `DEMO_PICK_WATER_PCT` | 70 | 70 |
 | `DEMO_PICK_COLA_PCT` | 20 | 20 |
 | `DEMO_PICK_GAME_PCT` | 30 | 30 |
+| `DEMO_HAX_TARGET` | 100 | 100 |
+| `DEMO_HAX_DRIFT_MIN` | 10 | 10 |
 | `BATTLE_POWER_BASE_PTS` | 22 | 22 |
 | `BATTLE_POWER_WEIGHT_PCT` | 28 | 28 |
 | `BATTLE_COURAGE_PEAK_PTS` | 8 | 8 |
